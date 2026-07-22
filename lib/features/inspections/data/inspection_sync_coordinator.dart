@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 
 import '../../../core/network/api_exception.dart';
@@ -32,6 +33,7 @@ class InspectionSyncCoordinator {
     if (!_running.add(initial.clientInspectionId))
       return drafts.find(initial.clientInspectionId) ?? initial;
     var draft = drafts.find(initial.clientInspectionId) ?? initial;
+    _debug(draft, 'inicio', submit ? 'submit solicitado' : 'sincronización');
     try {
       draft = await _create(draft);
       draft = await _answers(draft);
@@ -49,6 +51,7 @@ class InspectionSyncCoordinator {
         );
       }
       if (submit) draft = await _submit(draft);
+      _debug(draft, 'fin', draft.localStatus.name);
       return draft;
     } on ApiException catch (error) {
       return _failure(draft, error);
@@ -74,6 +77,7 @@ class InspectionSyncCoordinator {
     // Repeating the same clientInspectionId is the only creation reconciliation
     // exposed by the API and returns the existing row without duplication.
     final created = await remote.create(draft);
+    _debug(draft, 'creación', 'confirmada');
     return _save(
       draft.copyWith(
         serverInspectionId: created.id,
@@ -124,6 +128,7 @@ class InspectionSyncCoordinator {
       payload,
       'answers-${draft.clientInspectionId}-${draft.updatedAt.microsecondsSinceEpoch}',
     );
+    _debug(draft, 'respuestas', '${payload.length} sincronizadas');
     return _save(
       draft.copyWith(
         answersStatus: RvPartStatus.synced,
@@ -147,6 +152,7 @@ class InspectionSyncCoordinator {
       draft.location!,
       'location-${draft.clientInspectionId}-${draft.location!.capturedAt.microsecondsSinceEpoch}',
     );
+    _debug(draft, 'ubicación', 'sincronizada');
     return _save(
       draft.copyWith(
         locationStatus: RvPartStatus.synced,
@@ -170,6 +176,7 @@ class InspectionSyncCoordinator {
       draft.signal!,
       'signal-${draft.clientInspectionId}-${draft.signal!.capturedAt.microsecondsSinceEpoch}',
     );
+    _debug(draft, 'señal', 'sincronizada');
     return _save(
       draft.copyWith(
         signalStatus: RvPartStatus.synced,
@@ -210,6 +217,7 @@ class InspectionSyncCoordinator {
         ),
       );
       try {
+        _debug(draft, 'fotografía', 'subiendo slot=$slot');
         final uploaded = await remote.uploadPhoto(
           draft.serverInspectionId!,
           slot,
@@ -223,6 +231,7 @@ class InspectionSyncCoordinator {
           retryCount: ref.retryCount,
         );
         await _markPhotoVerified(photo, uploaded.sha256);
+        _debug(draft, 'fotografía', 'verificada slot=$slot');
       } on ApiException catch (error) {
         refs[slot] = RvPhotoReference(
           photoId: ref.photoId,
@@ -249,6 +258,7 @@ class InspectionSyncCoordinator {
 
   Future<RvDraft> _reconcilePhotos(RvDraft draft) async {
     final server = await remote.photos(draft.serverInspectionId!);
+    _debug(draft, 'reconciliación', '${server.length} fotos remotas');
     final refs = {...draft.photos};
     for (final remotePhoto in server) {
       final local = refs[remotePhoto.slotCode];
@@ -300,6 +310,7 @@ class InspectionSyncCoordinator {
         'No fue posible confirmar el envío.',
       );
     }
+    _debug(draft, 'submit', 'confirmado por servidor');
     return _save(
       draft.copyWith(
         localStatus: RvLocalStatus.submitted,
@@ -330,6 +341,7 @@ class InspectionSyncCoordinator {
       2 => const Duration(seconds: 15),
       _ => const Duration(seconds: 45),
     };
+    _debug(draft, 'error', '${error.kind.name}; intento=$retry');
     return _save(
       draft.copyWith(
         localStatus: RvLocalStatus.syncError,
@@ -380,6 +392,14 @@ class InspectionSyncCoordinator {
   Future<RvDraft> _save(RvDraft value) async {
     await drafts.save(value);
     return value;
+  }
+
+  void _debug(RvDraft draft, String step, String detail) {
+    if (!kDebugMode) return;
+    final id = draft.clientInspectionId.length > 8
+        ? draft.clientInspectionId.substring(0, 8)
+        : draft.clientInspectionId;
+    debugPrint('[RV-SYNC] inspection=$id step=$step $detail');
   }
 }
 
