@@ -1,0 +1,207 @@
+PLAN APROBADO — ETAPA 3: REPORTE FUNCIONAL
+
+Fecha: 2026-07-14
+Proyecto: DIAGNOSTICO HIDRANTES
+Estado: APROBADO PARA IMPLEMENTACIÓN
+
+1. OBJETIVO
+
+Implementar REPORTE FUNCIONAL (RF) como un agregado técnico offline, versionado, trazable e independiente de REPORTE VISUAL (RV), reutilizando la navegación, Hive CE, ubicación, configuración técnica, fotografías, galería, sincronización simulada y trazabilidad existentes. Se conservarán ddr001diag, com.aquafim.ddr001diag y la versión 0.2.0+3.
+
+2. ALCANCE
+
+- Centralizar las etiquetas visibles REPORTE VISUAL/RV y REPORTE FUNCIONAL/RF.
+- Corregir la visibilidad horizontal del filtro solicitado desde Inicio.
+- Incorporar habilitación explícita de RF.
+- Permitir Nuevo levantamiento con solo RV, solo RF o RV + RF para hidrantes asignados, no asignados, encontrados en campo y temporales.
+- Implementar modelos, repositorios, cajas Hive, borradores, recuperación y cierre de RF.
+- Implementar precondiciones, instrumentos, series, presión, caudal, válvulas, reductora, solenoides, energía, comunicaciones, alarmas, fugas, fotografías y resultado técnico.
+- Integrar ficha, filtros, resumen, sincronización simulada y trazabilidad.
+- Documentar arquitectura, persistencia, unidades, tolerancias demo, seguridad, evidencia, migración y captura libre de marca/modelo.
+- No implementar backend ni conexiones reales Modbus, Bluetooth, telemetría o actuación remota.
+
+3. DECISIONES APROBADAS
+
+3.1 Flujo
+RF tendrá diez pasos: (1) Identificación y preparación, (2) Instrumentos y montaje, (3) Presión y caudal, (4) Válvulas y reductora, (5) Solenoides y actuación, (6) Energía, (7) Comunicaciones y telemetría, (8) Alarmas, estanqueidad y fugas, (9) Evidencias y revisión, (10) Resultado y cierre. Habrá paso, subpaso, progreso, estado Guardando/Guardado/Error, Anterior, Guardar y continuar, Suspender prueba y borrador persistente. Solo una sección extensa aparecerá expandida inicialmente.
+
+3.2 Unidades y precisión
+Unidades base: presión kPa; caudal L/s; volumen L; tiempo s; tensión V; corriente A; resistencia Ω; potencia W; latencia ms. Se conservarán valor y unidad capturados, valor normalizado, unidad base, versión de conversión y precisión. Los valores capturados se persistirán como strings decimales canónicos cuando sea necesario. No habrá redondeo destructivo.
+
+3.3 Tolerancias
+Serán exclusivamente DEMO, centralizadas, versionadas, fuera de widgets y desacopladas del motor. La UI advertirá que no constituyen aprobación técnica oficial. Se podrá sustituir el catálogo sin cambiar el modelo de resultados.
+
+3.4 Calibración
+Estados: vigente, próxima a vencer, vencida, desconocida y no aplica. Manómetros y caudalímetros patrón vencidos o desconocidos bloquean mediciones oficiales demo. Herramientas auxiliares solo advierten según catálogo. Se permite guardar visita sin prueba.
+
+3.5 Autorización offline
+Roles habilitados podrán generar autorización local pendiente de validación con usuario, rol, motivo, fecha, dispositivo, origen, estado y trazabilidad. No se presentará como autorización remota oficial.
+
+3.6 Paralelismo y retención
+Se modelará autorización para pruebas paralelas, pero permanecerá bloqueada. Solo un RF activo por hidrante. Se conservarán borradores, suspendidos, cancelados, fotos, lecturas, resultados, versiones y trazabilidad. No se usarán clear, deleteFromDisk ni migraciones destructivas; las eliminaciones editables serán lógicas.
+
+3.7 Actuación y comunicaciones
+Toda actuación será manual o simulada. Las interfaces TelemetryService, ModbusService y RemoteActuationService solo tendrán implementaciones manuales/mock.
+
+3.8 Datos heredados
+RF podrá reutilizar identificación, ubicación, configuración, componentes, daños y fotos de referencia de RV. Nunca sobrescribirá RV. Toda diferencia conservará valor heredado, valor RF, motivo, usuario, fecha y revisión requerida cuando corresponda.
+
+3.9 Visita sin prueba
+Si no puede instalarse el banco, la evidencia de banco instalado cambia a No realizada; exige motivo, evidencia impeditiva y reprogramación cuando proceda. Nunca se considera aprobada.
+
+3.10 Flujómetros
+Marca, modelo y número de serie serán texto libre. Marca/modelo no usarán catálogos, desplegables, IDs, autocompletado ni valores demo. Se conservarán mayúsculas/minúsculas y se recortarán espacios. Un estado independiente representará no identificable, no legible, sin placa o no identificado. Los documentos anteriores con brand/model seguirán leyéndose y no se convertirán a IDs.
+
+4. ARQUITECTURA
+
+- core/constants: etiquetas visibles centralizadas.
+- core/measurements: unidades, decimales y conversiones.
+- core/persistence: JSON versionado y migraciones read-old/write-new.
+- core/sync: elementos de cola tipados y coordinación.
+- domain/functional: elegibilidad, inspección, precondiciones, instrumentos, series, pruebas, resultado, procedencia y evidencia.
+- domain/surveys: selección de trabajo y origen.
+- data/catalogs: tipos, unidades, reglas de calibración y tolerancias DEMO.
+- data/local: repositorios de elegibilidad, RF, instrumentos, series, pruebas y resultados.
+- data/services: telemetría, Modbus y actuación manual/mock.
+- features/functional: controlador, validadores, cálculos, página y widgets de diez pasos.
+- features/hydrants: filtro autocentrado, selección de trabajo, ficha y galería.
+
+AppState conservará sesión, conectividad y coordinación global; el dominio RF residirá en repositorios, controladores, validadores y calculadores especializados.
+
+5. MODELOS
+
+FunctionalReportEligibility: hydrantId, allowed, source, reason, authorizedBy, authorizedAt, supervisorValidationRequired, visualReportRequired, visualReportId, restrictions, createdAt, updatedAt, schemaVersion.
+
+FunctionalInspection: ID, hydrante, asignación, fuente, estado draft/ready/inProgress/paused/suspended/completed/cancelled/requiresRepeat/pendingReview/synced, paso/subpaso, inspector, brigada, dispositivo, fechas, pausa, relaciones, revisión y schemaVersion.
+
+FunctionalPreconditions: verificaciones de seguridad, autorización, personal, protección, condiciones hidráulicas, descarga, banco, instrumentos, calibración, energía, válvulas, observaciones, bloqueo, visita sin prueba, evidencia y reprogramación.
+
+InstrumentRecord: tipo, activo, brandText, modelText, serialNumber, identificationStatus, rango, unidad, precisión, fechas/certificado/estado de calibración, condición, operador, comentarios, fotos y eliminación lógica.
+
+MeasurementSeries/MeasurementReading: prueba, componente, válvula, instrumento, tiempos, unidad, rango, lecturas originales y normalizadas, fuente, secuencia, estabilidad, aceptación/rechazo, resultado y schemaVersion.
+
+Pruebas: PressureTest, FlowTest, FunctionalValveTest, ReducerTest, SolenoidTest, EnergyTest, CommunicationTest, AlarmTest y LeakageTest.
+
+FunctionalInspectionResult: resultados hidráulico, mecánico, eléctrico, comunicación, seguridad y calibración; estado operacional; restricciones; reparación, reemplazo, ajuste, repetición, revisión, prioridad, acciones, comentarios, cálculo y confirmación.
+
+FunctionalFieldProvenance conserva origen visual, valor heredado, valor observado, motivo, usuario, fecha y revisión. WorkSelection representa visualOnly, functionalOnly y visualAndFunctional. EvidenceRequirement diferencia provided, notApplicable y notPerformed.
+
+6. PERSISTENCIA
+
+Cajas nuevas:
+- functional_eligibility_v1
+- functional_inspections_v1
+- active_functional_inspection_index_v1
+- measurement_series_v1
+- instrument_records_v1
+- functional_valve_tests_v1
+- alarm_tests_v1
+- functional_results_v1
+- functional_test_records_v1
+
+Se reutilizan inspection_photos_v1, media_work_queue_v1, trace_events, sync_queue, hydrant_configurations_v1 y local_hydrants_v1. El índice activo interno será hydrantId:f02B. Todos los documentos usarán JSON versionado, UTC ISO-8601, enums por nombre, UUID, schemaVersion, toJson/fromJson, defaults seguros y lectura antigua/escritura nueva. InspectionSummary.f02b será una proyección temporal, no fuente final de verdad.
+
+7. NUEVO LEVANTAMIENTO Y HABILITACIÓN
+
+Tipo de trabajo: Solo REPORTE VISUAL, Solo REPORTE FUNCIONAL o REPORTE VISUAL y REPORTE FUNCIONAL; compactos RV, RF y RV + RF. No se obliga a RV antes de RF.
+
+No asignado: source=unassigned, motivo, usuario, brigada, dispositivo, fecha, ubicación, autorización local/justificación, pendingSupervisorValidation y traza.
+
+Encontrado en campo: source=fieldCreated, pendingValidation=true, código TMP-DDR001-AAAAMMDD-XXXX, selección, ubicación, creador, brigada, dispositivo, motivo, autorización/justificación y traza. Se mostrará “Hidrante pendiente de validación” sin bloquear RF.
+
+RV + RF crea IDs y estados separados, comparte hidrante/configuración y permite elegir cuál abrir. La operación será recuperable y no aparentará creación total si una escritura falla.
+
+La elegibilidad RF tendrá fuentes assignedBySupervisor, selectedInNewSurvey, requiredByVisualResult, urgentFieldInspection, technicalCampaign, manualAuthorization y demo. Estados visibles: RF disponible, requerido, pendiente, en proceso, finalizado, suspendido, con falla, pendiente de autorización y requiere repetición.
+
+8. VALIDACIÓN Y SEGURIDAD
+
+Antes de probar se exige sitio seguro, acceso, personal y responsable autorizados, protección, condiciones hidráulicas, descarga controlada, banco/instrumentos, calibración aplicable, energía segura, autorización y válvulas identificadas. Un fallo crítico bloquea la prueba y permite Guardar visita sin prueba con motivo, evidencia, reprogramación y traza. Suspender prueba estará visible durante la actividad.
+
+No se avanzará con obligaciones incompletas. No aplica, No realizada y Aprobada serán estados diferentes. No se permitirá serie sin instrumento, lectura sin unidad, resultado aprobado con prueba crítica pendiente, fuga sin foto, foto corrupta/faltante ni finalización sin persistencia confirmada.
+
+9. MEDICIONES Y CÁLCULOS
+
+Cada medición usa series. Acciones: iniciar, agregar, repetir, aceptar, rechazar con motivo, marcar estable, finalizar y recuperar. Fuentes habilitadas ahora: manual, calculated e imported. Bluetooth, modbus y externalDevice quedan modeladas sin conexión.
+
+Cálculos: mínimo, máximo, promedio, rango, desviación estándar muestral, estabilidad, error absoluto/porcentual, diferencia contra patrón, diferencial de presión y volumen derivado. División entre cero devuelve “No calculable” y nunca aprobado.
+
+Presión: estática, aguas arriba/abajo, dinámica, apertura, cierre, regulada, diferencial, estabilidad y oscilación; kPa, bar, psi y m.c.a. Caudal: instantáneo, promedio, mínimo, máximo, esperado, patrón, hidrante, desviación, volumen, duración y estabilidad; L/s, L/min, m³/h, L y m³.
+
+10. PRUEBAS
+
+Válvulas: múltiples unidades, identificación, diámetro, apertura/cierre, tiempos, ciclos, esfuerzo, bloqueo, ruido, vibración, fuga y resultado. Reductora: entrada, objetivo, salida, ajuste, estabilidad, respuesta, fuga, bloqueo, resultado y varias corridas. Solenoide: tipo, tensión, corriente, resistencia, señal, actuación local y remota simulada, tiempo, respuesta y resultado.
+
+Energía: fuente, tensión, corriente, batería, solar, controlador, red, respaldo, estabilidad, consumo, caída y resultado. Sin energía, las pruebas mecánicas continúan y las eléctricas quedan No realizadas con motivo.
+
+Comunicaciones: tecnología, operador, señal, calidad, latencia, registro, conectividad, envío/recepción, parámetros manuales y resultado, sin conexión real. Alarmas: fuga, presiones, caudal, energía, comunicación, apertura, sensor, batería, gabinete y otras, con generación, detección, reporte, tiempos, latencia, reconocimiento y resultado. Fugas: nivel, ubicación, componente, presión, duración, pérdida, acción y fotografías; toda fuga exige evidencia.
+
+11. FOTOGRAFÍAS
+
+Se reutiliza exclusivamente el pipeline actual. InspectionPhoto se extenderá opcionalmente con testId, componentId, instrumentId, measurementSeriesId, measurementReadingId y evidenceRequirementId, manteniendo lectura de fotos anteriores.
+
+Categorías RF: montaje general, banco, instrumentos, manómetros, caudalímetro patrón, conexión, presión, caudal, válvula abierta/cerrada, reductora, solenoide, energía, comunicación, telemetría, alarma, fuga, reparación, estado final y otro. Cuando se prueba serán obligatorios montaje, banco, instrumentos y estado final; el resto será condicional. Solo verified cuenta como sincronizado y las fotos reales no se verificarán automáticamente.
+
+12. RESULTADO
+
+Resultados: aprobado, aprobado con observaciones, funcionamiento parcial, requiere ajuste, reparación o reemplazo, prueba incompleta, no evaluable y suspendido. Un motor versionado combinará seguridad, calibración, pruebas ejecutadas/omitidas, fallas y tolerancias DEMO. La modificación del resultado calculado exige motivo, usuario, fecha y traza.
+
+13. FILTROS Y VISIBILIDAD
+
+Filtros: RV pendiente/en proceso/finalizado; RF pendiente/en proceso/finalizado/requerido/suspendido/con falla; pendiente de validación; sin sincronizar; incidencias. Inicio y Hidrantes usarán la misma consulta.
+
+AutoVisibleFilterBar usará GlobalKey estable por HydrantListFilter, Scrollable.ensureVisible, postFrameCallback, mounted, currentContext, detección previa de visibilidad, alineación centrada/margen, una animación por requestId y protección ante rebuild/rotación. HydrantFilterRequest se publicará desde Inicio, cambiará a la rama Hidrantes existente, aplicará el filtro, esperará los chips, asegurará visibilidad y se marcará consumido. No habrá offsets hardcodeados ni desplazamiento vertical. Limpiar seleccionará y mostrará Todos.
+
+14. SINCRONIZACIÓN Y TRAZABILIDAD
+
+SyncQueueItem tipado ordenará: hidrante, elegibilidad, RF, instrumentos, pruebas, series, lecturas, resultado, fotos y trazabilidad. No se mostrará “Todo sincronizado” con cualquier entidad RF, lectura, resultado, foto, elemento uploadedUnverified, error o traza pendiente.
+
+La trazabilidad registrará elegibilidad, inicio/recuperación, precondiciones, bloqueos, visita sin prueba, instrumentos, calibración, series, lecturas, pausa/reanudación/suspensión/cancelación, válvulas, alarmas, fugas, fotos, resultado calculado/modificado, cierre, revisión, repetición y sincronización. TraceEvent se ampliará con campos opcionales sin romper documentos antiguos.
+
+15. TAREAS ORDENADAS
+
+1) Guardar este plan. 2) Centralizar RV/RF. 3) Corregir filtro visible. 4) Implementar elegibilidad RF. 5) Nuevo levantamiento RV/RF/ambos. 6) Modelos y cajas. 7) Precondiciones. 8) Instrumentos. 9) Series y unidades. 10) Presión y caudal. 11) Válvulas y reductora. 12) Solenoides y energía. 13) Comunicaciones. 14) Alarmas y fugas. 15) Fotografías. 16) Resultado. 17) Validación y cierre. 18) Ficha, Inicio y filtros. 19) Sincronización. 20) Trazabilidad. 21) Documentación.
+
+Cada bloque deberá conservar compatibilidad, evitar archivos vacíos y dejar explicada cualquier limitación deliberada.
+
+16. RIESGOS
+
+- Exactitud de tolerancias demo y riesgo de interpretarlas como oficiales.
+- Precisión/conversión de magnitudes y datos ingresados fuera del rango físico.
+- Complejidad de recuperación de series y creación coordinada RV + RF.
+- Compatibilidad con documentos, fotos y trazas previas.
+- Falsos estados de sincronización completa.
+- Resultado automático incorrecto ante pruebas omitidas.
+- Evidencia faltante o archivo local corrupto.
+- Seguridad operativa: la app no sustituye procedimientos ni define maniobras/presiones oficiales.
+- Alcance de UI: diez pasos deben mantener secciones manejables y colapsables.
+
+17. CRITERIOS DE ACEPTACIÓN
+
+- No cambia la versión ni los identificadores nativos/Dart.
+- No se pierden cajas, sesión, borradores, fotos ni trazabilidad existentes.
+- Toda etiqueta visible usa REPORTE VISUAL/RV o REPORTE FUNCIONAL/RF según contexto.
+- Nuevo levantamiento admite RV, RF y RV + RF para todos los orígenes y códigos temporales.
+- Solo un RF activo por hidrante; recuperación conserva paso, subpaso, serie, instrumentos, fotos y pausa.
+- Los diez pasos validan condicionalmente y Suspender prueba está disponible.
+- Marca/modelo de flujómetros son texto libre sin catálogos precargados.
+- Las lecturas preservan valor original y normalizado; cálculos y unidades son coherentes.
+- Tolerancias DEMO son visibles como no oficiales.
+- Fugas y fallas que requieren evidencia no pueden cerrarse sin foto.
+- El resultado combina reglas y permite modificación justificada/trazada.
+- Cada métrica de Inicio aplica el mismo filtro/conteo en Hidrantes y deja visible el chip sin mover la lista vertical ni crear otra instancia.
+- Sincronización incluye todas las entidades RF y no verifica automáticamente fotos reales.
+- Migraciones son read-old/write-new y no destructivas.
+- Documentación y CHANGELOG reflejan Etapa 3.
+
+18. COMANDOS MANUALES POSTERIORES
+
+Ejecutar por el responsable, al terminar la implementación:
+
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk
+
+Después instalar/probar el APK en un dispositivo real y validar: arranque con datos anteriores, login/sesión, apertura de borradores RV, creación RV/RF/ambos, reinicio durante RF, cámara interrumpida, operación offline, series/cálculos, evidencia, suspensión, filtros desde Inicio, rotación, sincronización simulada y retorno Atrás.
+
+No cambiar a 0.4.0+5 hasta superar análisis, persistencia, recuperación, cálculos, fotos, validaciones, navegación, filtros, APK y prueba física. La secuencia de builds debe confirmar primero el cierre/distribución de Etapa 2.

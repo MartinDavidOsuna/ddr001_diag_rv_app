@@ -1,0 +1,57 @@
+PLAN — ETAPA 4B: CIERRE TÉCNICO Y ESTABILIZACIÓN LOCAL
+
+Fecha: 2026-07-15
+Proyecto: DIAGNOSTICO HIDRANTES
+Versión conservada: 0.2.0+3
+Estado: APROBADO PARA IMPLEMENTACIÓN
+
+1. ESTADO INICIAL
+
+La aplicación conserva RV, RF, Nuevo levantamiento, Hive, fotografías, trazabilidad, sincronización simulada, ubicación automática, diagnóstico GPRS y evaluación Wi-Fi manual. La auditoría documental identifica como brechas estructurales: estados escritos por más de una capa, ausencia de journal recuperable, auditor/cuarentena incompletos, colecciones RF parcialmente editables, cálculos sin contrato tipado uniforme, medios con colas paralelas y contratos locales todavía no congelados.
+
+2. BLOQUES PENDIENTES DETECTADOS
+
+- Autoridad central de estados, inmutabilidad y revisiones RV/RF.
+- OperationJournal, auditoría, cuarentena y recuperación no destructiva.
+- CRUD persistente para múltiples válvulas, corridas, alarmas e instrumentos con snapshots.
+- Cálculos puros tipados y resultado RF agregado.
+- Contadores fotográficos uniformes, reconciliación y galería incremental.
+- Creación RV+RF journalizada, cola sincronizable única y política de actualización.
+- Auditoría de navegación, recursos, accesibilidad y contrato local para DDR001 API futura.
+- Matriz manual ampliada; certificación en dispositivo seguirá pendiente.
+
+3. ARCHIVOS AFECTADOS
+
+Se crearán módulos bajo lib/domain/workflow, lib/domain/integrity, lib/domain/measurements, lib/data/local, lib/features/functional/widgets y documentación stage4. Se modificarán bootstrap, repositorios RV/RF, modelos funcionales, flujos RV/RF/Nuevo levantamiento, galería, sincronización, actualización y CHANGELOG. No se modificarán identificadores, versión, MainActivity ni dependencias.
+
+4. ORDEN DE IMPLEMENTACIÓN
+
+1 máquina de estados; 2 inmutabilidad/revisiones; 3 journal; 4 auditor; 5 recuperación; 6 cuarentena; 7 válvulas; 8 corridas; 9 alarmas; 10 instrumentos; 11 snapshots; 12 cálculos; 13 resultado RF; 14 fotografías; 15 reconciliación; 16 galería; 17 WorkCreationCoordinator; 18 sincronización; 19 actualización; 20 navegación; 21 rendimiento; 22 accesibilidad; 23 contrato API; 24 matriz; 25 documentación.
+
+5. RIESGOS
+
+- Compatibilidad de JSON histórico y estados RV/RF heterogéneos.
+- Escrituras Hive/filesystem no atómicas: el journal documenta fases, no promete atomicidad.
+- Reparación ambigua: se cuarentena y no se inventan datos.
+- Colecciones RF heredadas con IDs deterministas: se leen, pero nuevas entidades usan UUID.
+- Galerías y cajas grandes no pueden certificarse sin dataset y dispositivo real.
+- No existe backend: synced sigue siendo local/simulado y SyncTransport queda sin implementación remota.
+
+6. CRITERIOS DE ACEPTACIÓN
+
+- Toda transición nueva pasa por ReportStateMachine y genera resultado tipado.
+- Reporte finalizado no se edita; corrección crea revisión relacionada y trazada.
+- Journal registra operaciones multifase y RecoveryCoordinator converge solo casos inequívocos.
+- JSON corrupto se conserva en cuarentena; nunca se borra silenciosamente.
+- UI RF permite colecciones persistentes de válvulas, corridas, alarmas e instrumentos.
+- Cálculos conocidos coinciden con la matriz y patrón cero es No calculable.
+- Medios faltantes/colas inconsistentes se detectan y reconcilian sin eliminar originales.
+- RV+RF no comunica éxito parcial; cola única conserva idempotencia/dependencias.
+- Actualización obligatoria permite continuar borradores y bloquea trabajo nuevo.
+- Documentos técnicos y matriz identifican claramente funcional, parcial, simulado y no certificado.
+
+7. VALIDACIÓN MANUAL
+
+Ejecutar M01–M32 y casos 4B de transición inválida, revisión, índices huérfanos, corrupción, journal incompleto, RV+RF interrumpido, CRUD múltiple, snapshots, fórmulas, medios, galería de 1000 miniaturas, actualización obligatoria, cierre forzado, texto 2× y TalkBack. Registrar ID, módulo, precondición, pasos, resultado, severidad, estado, evidencia, dispositivo, fecha, ejecutor y observaciones.
+
+No se ejecutarán comandos Flutter pesados durante esta intervención. La certificación exige posteriormente analyze, test, APK debug y dispositivo real.

@@ -1,0 +1,92 @@
+PLAN — ETAPA 4D: PRUEBAS AUTOMATIZADAS PREVIAS A DDR001 API
+
+Fecha: 2026-07-15
+Proyecto: DIAGNOSTICO HIDRANTES
+Versión conservada: 0.2.0+3
+Estado: APROBADO PARA IMPLEMENTACIÓN
+
+1. ESTADO ACTUAL DEL DIRECTORIO TEST/
+
+No existen los directorios test/ ni integration_test/. La aplicación dispone de flutter_test, pero no tiene suites, fixtures, fakes, helpers, configuración temporal de Hive ni documentación de ejecución automatizada. La matriz manual de Etapa 4 contiene casos S1/S2, pero las fuentes revisadas no asignan formalmente etiquetas P0/P1/P2. Para esta etapa se adopta la siguiente proyección documentada sin cambiar las reglas funcionales: P0 = integridad, pérdida de datos, estados, inmutabilidad, recuperación y aislamiento celular; P1 = reglas funcionales offline, serialización, repositorios, widgets y navegación; P2 = rendimiento, cámara/GPS/GPRS nativo, accesibilidad y condiciones que requieren dispositivo.
+
+2. COBERTURA EXISTENTE
+
+Cobertura automatizada inicial: 0 %. No hay pruebas ejecutables ni reporte base. La documentación y la matriz manual son especificaciones, no evidencia automatizada. Existen módulos probables directamente: ReportStateMachine, resolver de revisiones, cálculos tipados, reglas Wi-Fi, modelos JSON, repositorios Hive, journal, auditoría, recuperación, cuarentena, reconciliación, creación RV+RF, cola local y adaptador MethodChannel. Las rutas, formularios y editores requieren harness de widgets con Hive temporal.
+
+3. INFRAESTRUCTURA FALTANTE
+
+- Inicialización aislada de Flutter Test y Hive en un directorio temporal único por prueba.
+- Apertura/cierre determinista de cajas, limpieza exclusiva del entorno temporal y restauración de handlers de plataforma.
+- Fixtures versionados para hidrantes, RV, RF, medios, instrumentos, series, journals, revisiones y documentos heredados/corruptos.
+- Fakes manuales para reloj, servicios de plataforma, transporte celular, persistencia auxiliar y navegación; no se añadirá mocktail.
+- Matchers y helpers para round-trip JSON, UTC, cajas y archivos temporales.
+- Suites unitarias, dominio, serialización, repositorios, recuperación, medios, widgets, navegación e integración offline.
+- Matriz de cobertura P0/P1/P2 y guía reproducible de ejecución/evidencia.
+
+4. MÓDULOS A PROBAR
+
+P0:
+- ReportStateMachine: transiciones permitidas/prohibidas, motivos e inmutabilidad.
+- CurrentReportRevisionResolver: cadena lineal, bifurcación, ciclo y referencia ausente.
+- OperationJournalRepository y RecoveryCoordinator: todas las fases recuperables y casos ambiguos no destructivos.
+- IntegrityAuditService y QuarantineRepository: índices, JSON corrupto, relaciones faltantes y conservación del original.
+- WorkCreationCoordinator: RV, RF y RV+RF sin éxito parcial silencioso ni duplicados.
+- Repositorios Hive RV/RF: un RF activo, finalización, revisión y compatibilidad histórica.
+- Medios: archivo/documento/miniatura/cola, uploadedUnverified y ausencia de borrado.
+- CellularInternetProbeChannel: contrato MethodChannel, datos mínimos, resultados tipados, errores y cancelación; la ruta Android real queda P2 en dispositivo.
+
+P1:
+- Conversiones, series, estadística, patrón cero y resultado RF agregado.
+- Serialización read-old/write-new de modelos de inspección, instrumentos, mediciones, red, journal, integridad, fotos y sync.
+- WifiAssessmentRules y validadores RV/RF.
+- CRUD lógico de válvulas, corridas, alarmas e instrumentos, aceptación única y snapshots.
+- SyncQueueRepository: idempotencia, dependencias y allSynchronized.
+- Widgets reutilizables, editores, contador fotográfico, filtros visibles, estados traducidos y protección de acceso.
+- Navegación del shell, regreso desde RF sin RV, filtro Inicio→Hidrantes y rutas secundarias.
+
+P2 preparado:
+- integration_test para arranque y recorrido offline representativo.
+- Casos Android 10+, Network.openConnection celular, callback/timeout, cámara, GPS, cierre forzado, 1000 fotos, TalkBack, texto 2×, memoria y batería. Se documentan y enlazan con la matriz manual; no se declaran certificados sin ejecución física.
+
+5. ORDEN DE IMPLEMENTACIÓN
+
+1) helpers/fixtures/fakes; 2) dominio y cálculos; 3) serialización; 4) Hive y repositorios; 5) journal/integridad/recuperación/cuarentena; 6) medios; 7) sincronización y creación coordinada; 8) MethodChannel; 9) widgets; 10) navegación; 11) integración offline; 12) matriz de cobertura y guía; 13) CHANGELOG y revisión focalizada.
+
+6. RIESGOS
+
+- El código vigente usa singletons, DateTime.now, UUID y plugins; donde impidan pruebas deterministas se introducirán puntos de inyección mínimos sin cambiar comportamiento.
+- Hive y filesystem no son atómicos: las pruebas verifican recuperación y conservación, no atomicidad inexistente.
+- Plugins de cámara, compresión, ubicación y red requieren handlers o dispositivo; una prueba Dart no certifica la implementación nativa.
+- La ausencia de una taxonomía P0/P1/P2 previa exige mantener la proyección anterior explícita en la matriz.
+- El árbol ya contiene cambios de etapas anteriores; se preservarán y no se reescribirán datos ni planes.
+- No se pueden ejecutar flutter test/analyze en esta intervención; la sintaxis se inspeccionará de forma focalizada, pero el resultado final quedará pendiente de ejecución manual.
+
+7. DEPENDENCIAS
+
+Se reutilizan flutter_test, Hive CE, dart:io, MethodChannel mock handlers y utilidades del SDK. Se añadirá solamente integration_test como dev_dependency del SDK Flutter para alojar pruebas de integración oficiales. No se requieren mocktail, fake_async, clock, golden_toolkit, patrol, file ni dependencias nativas nuevas. No se ejecutará flutter pub get.
+
+8. CRITERIOS DE ACEPTACIÓN
+
+- Cada regla P0 tiene al menos una prueba positiva y una de fallo/recuperación que ejecuta producción real.
+- Las reglas P1 críticas tienen cobertura de dominio/repositorio y, cuando corresponde, widget o navegación.
+- Los round-trip prueban enums como strings, UTC, defaults heredados y ausencia de pérdida de campos.
+- Las pruebas Hive usan cajas reales en directorios temporales y verifican reapertura, no mocks de mapas.
+- Recuperación nunca borra ni inventa datos ambiguos; cuarentena conserva el contenido.
+- Medios prueban archivos reales temporales y estados de cola sin marcar fotos reales verified automáticamente.
+- El canal prueba el contrato binario y el payload mínimo; el aislamiento celular real queda explícitamente P2.
+- No hay pruebas vacías, triviales, duplicadas ni skips sin justificación y vínculo a caso manual.
+- La documentación indica comandos, orden, evidencia, limitaciones y discrepancias código/documentación.
+- Se conserva versión, identificadores y compatibilidad offline/read-old-write-new.
+
+9. COMANDOS MANUALES POSTERIORES
+
+flutter pub get
+flutter analyze
+flutter test --reporter expanded
+flutter test --coverage
+flutter test integration_test --reporter expanded
+flutter run
+flutter build apk --debug
+
+Para Android físico, ejecutar después los casos P2 de docs/stage4_manual_test_matrix.md y adjuntar dispositivo, versión Android, fecha, ejecutor, logs y evidencia.
+

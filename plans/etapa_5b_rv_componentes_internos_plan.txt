@@ -1,0 +1,118 @@
+PLAN — ETAPA 5B: REPORTE VISUAL / COMPONENTES INTERNOS
+
+Fecha: 2026-07-16
+Estado: APROBADO PARA IMPLEMENTACIÓN
+Repositorio: MartinDavidOsuna/ddr001_diag_app
+Rama: main
+Commit base: c599cf1d4d1f0f27d44708a7cc145d384ed1515b
+Mensaje: feat: flutter test first implementation
+Fecha del commit: 2026-07-15T14:25:28-07:00
+Versión conservada: 0.2.0+3
+
+1. LÍNEA BASE
+
+- `flutter pub get`: correcto.
+- `flutter analyze`: sin incidencias.
+- `flutter test`: 48 pruebas aprobadas.
+- `flutter test --coverage`: 48 pruebas aprobadas; 1298/3667 líneas, 35.40 %.
+- Árbol previo: solo `docs/references/rv_components/` sin seguimiento, aportado por el usuario.
+
+2. ESTADO REAL Y BRECHAS
+
+- `InspectionPlaceholderPage` contiene carga, guardado, navegación, ubicación, red, fotos, trazas y ocho pasos; el nombre y la responsabilidad no son productivos.
+- Paso 5 usa un `PressureValveAssessment` agregado y no representa componentes, salidas, juntas ni fichas tipadas.
+- `VisualInspection` no preserva campos JSON desconocidos y no contiene configuración/componentes nuevos.
+- La UI modifica mapas JSON y abre Hive directamente para retirar/consultar fotos.
+- `VisualInspectionStepValidator` valida el paso 5 agregado; no conoce pendientes por componente.
+- `FlowMeterAssessment` es canónico del paso 4 y debe proyectarse en paso 5 sin duplicarse.
+- Los finalizados ya son inmutables en repositorio; abrirlos no debe provocar escritura/migración.
+- Las referencias Base44 son UX, no assets ni fuente hidráulica. Sus totales visuales inconsistentes no se copiarán.
+
+3. DECISIONES DE ARQUITECTURA
+
+- Mantener ocho pasos y la ruta `/hydrants/:id/inspection/a`.
+- Introducir `VisualReportPage` como widget productivo y mantener `InspectionPlaceholderPage` solo como alias transitorio si resulta necesario para compatibilidad de imports.
+- Añadir dominio tipado: configuración A1–A5, componente, salida, juntas, enums y datos especializados.
+- Guardar configuración y colecciones dentro del documento versionado de `VisualInspection`; preservar `PressureValveAssessment`, `FlowMeterAssessment`, campos desconocidos y UUID.
+- `VisualReportCompatibilityAdapter` proyectará documentos legacy sin marcar componentes como revisados. Los finalizados solo se proyectan en memoria y no se reescriben.
+- `VisualComponentsRepository` manejará el documento RV mediante `VisualInspectionRepository`; la UI no conocerá cajas.
+- `VisualReportSaveCoordinator` coordinará persistencia, cola y trazabilidad mediante callbacks/servicios existentes.
+- `VisualReportController` será autoridad de estado editable, guardado y navegación del paso; `VisualComponentsController` aplicará reglas, quick review y validación.
+- Paso 4 seguirá siendo la única fuente de verdad del medidor. Su marcador abre resumen y acción para ir al paso 4.
+- Fotos reutilizan `ReliablePhotoService`, asociando `componentId` y categoría; consulta/eliminación se encapsulan.
+
+4. CONFIGURACIONES
+
+- Catálogo base: 10 componentes públicos, 7 privados y 4 por salida.
+- A1: 1 salida de 3 pulgadas, 21 componentes.
+- A2: 2 salidas de 3 pulgadas, 25 componentes.
+- A3: 3 salidas de 3 pulgadas, 29 componentes.
+- A4: 3 salidas de 4 pulgadas, 29 componentes.
+- A5: definición editable completa y total derivado.
+- Cambiar tipo con datos requiere confirmación y conserva componentes retirados/datos históricos.
+
+5. MODELOS Y COMPATIBILIDAD
+
+- Crear `VisualHydrantConfiguration`, `VisualComponentInspection`, `VisualOutletInspection`, `VisualVictaulicGroupInspection`, `VisualJointInspection` y datos especializados tipados.
+- Enums estables: presencia, condición, revisión, condición observada, compartimiento, tipo de componente y tipo de hidrante.
+- `VisualInspection` subirá schema solo al escribir un borrador nuevo/modificado; lectura legacy conserva schema y valores.
+- `unknownFields` preservará claves raíz desconocidas. Los modelos nuevos preservarán extensiones desconocidas por entidad.
+- UUID existentes, reportId, fotos y timestamps originales se mantienen.
+- `PressureValveAssessment.manualOperation/automaticOperation` se conserva y no se deriva ni sobrescribe.
+
+6. UI DEL PASO 5
+
+- Encabezado/resumen compacto con tipo esperado/observado, avance, pendientes, hallazgos y fotos.
+- Pestañas Esquema/Lista con estado compartido.
+- Esquema conceptual adaptable, marcadores semánticos de 48×48 y selector de zona cuando haya proximidad.
+- Lista agrupada por red pública, red privada y salidas.
+- Ficha bajo demanda con cabecera común, preguntas generales y sección especializada según tipo.
+- Navegación exacta desde pendientes/hallazgos; resumen tipo orden de servicio.
+- Quick review con previsualización y exclusiones de seguridad; nunca sobrescribe datos/hallazgos.
+- A5 permite agregar/retirar lógicamente componentes custom; “Otro” exige nombre, comentario y foto.
+- Reportes finalizados se muestran read-only.
+
+7. VALIDACIÓN
+
+- Reglas comunes de comentarios, evidencia, exclusión “sin daño” y estado.
+- Reglas por tipo: manómetro no certificado, filtro interno no verificable por omisión, juntas individuales, medidor canónico, custom no catalogado.
+- Pendiente y hallazgo son conceptos separados.
+- Paso 5 no avanza con pendientes obligatorios; sí permite guardar, salir y reanudar.
+- La validación global reutiliza las reglas del paso y no duplica lógica en widgets.
+
+8. ARCHIVOS PREVISTOS
+
+Crear bajo `lib/features/visual_report/`: domain, data, application y presentation para modelos, catálogo/configuración, reglas, compatibilidad, repositorio, coordinador, controladores, página y componentes visuales/editor especializado.
+
+Modificar: `visual_inspection.dart`, `visual_inspection_step_validator.dart`, `visual_inspection_repository.dart`, ruta RV, pipeline de foto solo para metadatos compatibles, CHANGELOG y documentos Stage 5. El resto de pasos RV se migrará sin rediseño funcional.
+
+9. PRUEBAS
+
+- Configuraciones A1–A5 y diámetros.
+- JSON nuevo/legacy, campos desconocidos, UUID, finalizado sin escritura.
+- Validación común/especializada, comentarios, fotos y condiciones incompatibles.
+- Juntas, salidas, custom, quick review y cambio de tipo.
+- Repositorio/coordinador Hive y protección de finalizados.
+- Widget: esquema/lista, apertura exacta, conteos, resumen y read-only.
+- Regresión de ocho pasos y pruebas existentes.
+
+10. RIESGOS Y MITIGACIONES
+
+- Documento grande: colecciones bajo demanda y widgets aislados.
+- Migración destructiva: read-old/write-new, campos desconocidos y ninguna escritura al abrir finalizado.
+- Duplicación del medidor: adaptador explícito al paso 4.
+- Fotos antiguas sin componentId: se conservan y aparecen como evidencia heredada/general.
+- A5 ambiguo: retiro lógico y validación reforzada para no catalogados.
+- Certificación hidráulica: textos limitados a observación visual, sin afirmar funcionamiento/calibración.
+
+11. CRITERIOS DE ACEPTACIÓN
+
+- Totales A1=21, A2=25, A3=29, A4=29 y A5 dinámico probados.
+- Paso 5 representa componentes individuales, salidas y juntas con UUID.
+- Medidor tiene una sola fuente canónica.
+- Legacy abre sin inventar revisiones; finalizado permanece inmutable.
+- Esquema y lista reflejan el mismo estado.
+- Validaciones y quick review cumplen exclusiones.
+- UI no abre Hive ni serializa documentos.
+- `flutter analyze`, `flutter test`, cobertura, integración disponible y APK debug se reportan con resultados reales.
+

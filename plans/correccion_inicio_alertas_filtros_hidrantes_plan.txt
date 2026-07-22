@@ -1,0 +1,68 @@
+PLAN — CORRECCIÓN INICIO, ALERTAS Y FILTROS DE HIDRANTES
+
+Fecha: 2026-07-14
+Proyecto: DIAGNOSTICO HIDRANTES
+Estado: APROBADO PARA IMPLEMENTACIÓN
+
+1. PROBLEMA ACTUAL
+
+- La alerta visible de Inicio parece una tarjeta táctil, pero tocar su cuerpo no produce respuesta.
+- El Resumen de jornada muestra métricas técnicas RV/RF adicionales y perdió su diseño compacto de cuatro métricas.
+- Inicio calcula métricas directamente en el widget, mientras Hidrantes vuelve a implementar reglas distintas.
+- La barra principal expone trece filtros técnicos en lugar de seis filtros operativos.
+- El filtro solicitado desde Inicio puede quedar parcialmente visible o fuera del viewport horizontal.
+
+2. CAUSA ENCONTRADA
+
+- La tarjeta de alerta está construida con SectionCard y un Row sin InkWell/GestureDetector/onTap. Solo el IconButton de 48 px del extremo tiene callback; el área visual principal es contenido no interactivo. La tarjeta no llevaba el identificador, aunque los datos demo sí contienen un único hidrante devuelto (`DDR001-HID-0712`, ID `712`) que permite establecer la relación sin inventar otro registro.
+- HomePage duplica predicates sobre f02a, repositorios y syncStatus; HydrantsPage contiene otro switch independiente, por lo que total y lista pueden divergir.
+- HydrantListFilter.values alimenta directamente la barra, exponiendo todos los estados internos.
+- AutoVisibleFilterBar no posee ScrollController ni GlobalKey de viewport horizontal. Obtiene Scrollable/viewport desde el contexto del chip, calcula offsets mediante RenderAbstractViewport y consume requestId aunque el desplazamiento no haya dejado visible el chip. La solicitud también puede ejecutarse mientras la rama indexedStack todavía no es la visible.
+
+3. ARCHIVOS AFECTADOS
+
+- lib/features/home/home_page.dart
+- lib/features/hydrants/hydrant_pages.dart
+- lib/features/hydrants/widgets/auto_visible_filter_bar.dart
+- lib/core/services/app_state.dart
+- lib/domain/enums/hydrant_list_filter.dart
+- lib/domain/filters/hydrant_filter_request.dart
+- lib/domain/filters/hydrant_query_projection.dart (nuevo)
+- docs/stage3_functional_report_architecture.md
+- CHANGELOG.md
+
+4. SOLUCIÓN PROPUESTA
+
+- Convertir toda la alerta en una superficie Material/InkWell con semántica y área táctil completa. Asociar la alerta demo al hidrante devuelto ID `712` y abrir su ficha dentro de la rama Hidrantes. Para alertas sin hydrantId, abrir un bottom sheet con título, descripción, fecha, severidad, origen, acción recomendada y Cerrar; si un ID relacionado no existe localmente, mostrar mensaje controlado.
+- Centralizar HydrantQueryProjection para decidir Todos, RV, RF, En proceso, Sin sincronizar y Finalizado, y reutilizarla en métricas y lista.
+- Definir Finalizado como cualquier hidrante con al menos un RV o RF completado. Considerar En proceso los borradores/activos RV o RF, incluidos RF pausados y suspendidos recuperables; excluir completados y cancelados sin otro trabajo activo.
+- Mostrar en Inicio únicamente Asignados, Terminados, En proceso y Sin sincronizar, mapeados a Todos, Finalizado, En proceso y Sin sincronizar.
+- Mantener estados técnicos compatibles en el enum, pero añadir filtros agregados visualReport, functionalReport, inProgress y completed, y exponer solo seis valores operativos en la barra.
+- Rehacer AutoVisibleFilterBar con ScrollController exclusivamente horizontal, GlobalKey persistente por chip y viewport, medición RenderBox contra viewport, offset real limitado a min/max, centrado aproximado y consumo del requestId solo después de un intento exitoso.
+- Informar a la barra si la rama Hidrantes es la ruta visible; reintentar por frames mientras todavía no esté montada/visible, con límite defensivo y sin Timer arbitrario.
+- Para selección manual, desplazar una sola vez el filtro seleccionado sin crear HydrantFilterRequest de Inicio.
+
+5. CRITERIOS DE ACEPTACIÓN
+
+- Toda el área de la alerta responde con ripple y abre detalle o ficha según hydrantId.
+- Inicio muestra exactamente cuatro métricas compactas.
+- Cada total coincide con los resultados del filtro correspondiente.
+- Hidrantes muestra, en orden: Todos, RV, RF, En proceso, Sin sincronizar, Finalizado.
+- Los estados técnicos internos y datos Hive permanecen compatibles.
+- Inicio cambia a la rama Hidrantes existente sin crear otro shell.
+- El chip solicitado queda completamente visible, preferentemente centrado, y requestId se consume después del intento exitoso.
+- El scroll automático usa exclusivamente el controlador horizontal y no mueve la lista vertical.
+- Selección manual, limpieza, rebuild y rotación conservan filtro y visibilidad sin animaciones en bucle.
+- Versión, dependencias, identificadores, cajas y persistencia permanecen sin cambios.
+
+6. VALIDACIÓN MANUAL
+
+- Tocar centro, texto, icono y bordes de la alerta; verificar bottom sheet y botón Cerrar.
+- Probar alerta con hydrantId válido e inexistente mediante datos demo/controlados.
+- Comparar las cuatro cantidades de Inicio con el número de resultados en Hidrantes.
+- Pulsar cada métrica y comprobar filtro, lista, Atrás e instancia única del shell.
+- Pulsar manualmente los seis filtros, especialmente Sin sincronizar y Finalizado.
+- Rotar con cada filtro activo y comprobar visibilidad sin pérdida del scroll vertical.
+- Limpiar seleccionando Todos y regresar varias veces entre Inicio e Hidrantes.
+- Confirmar ausencia de excepciones por ScrollController sin clientes.
+- Ejecutar manualmente flutter analyze, flutter test y flutter build apk al finalizar la revisión de código.

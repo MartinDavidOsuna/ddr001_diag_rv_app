@@ -1,0 +1,609 @@
+PLAN — ETAPA 4: CIERRE FUNCIONAL LOCAL Y ESTABILIZACIÓN
+
+Fecha: 2026-07-14
+Proyecto: DIAGNOSTICO HIDRANTES
+Versión inspeccionada: 0.2.0+3
+Estado: PENDIENTE DE APROBACIÓN
+
+1. ESTADO ACTUAL
+
+Implementado y funcional a nivel de código local, pendiente de validación física: StatefulShellRoute con ramas conservadas; Inicio y filtros con proyección compartida; ocho pasos de REPORTE VISUAL (RV); diez pasos de REPORTE FUNCIONAL (RF); borradores e índices activos; Nuevo levantamiento RV/RF/ambos; ubicación y UTM; captura, normalización, hash y miniatura de fotografías; galería por hidrante; trazabilidad; actualización demo; tolerancias DEMO.
+
+Implementado parcialmente: estados de RV; edición posterior al cierre; múltiples válvulas, corridas de reductora y alarmas; asociación/edición completa de instrumentos; recuperación transaccional de fotos y operaciones RV+RF; cálculos almacenados como texto; diagnóstico/reparación de índices; filtros restaurados de galería; contrato de sincronización uniforme.
+
+Simulado: asignaciones, sincronización, actualización remota cuando no existe URL configurada, telemetría, Modbus y actuación remota.
+
+Solo modelado: colecciones arbitrarias de registros funcionales, fuentes automáticas de medición, servicios remotos y parte del grafo futuro de dependencias.
+
+Pendiente: validación integral en dispositivo, cierre forzado, cámara interrumpida, archivos faltantes/corruptos, rendimiento, accesibilidad sistemática, matriz ejecutada, contrato backend formal y versión candidata basada en builds distribuidos.
+
+Defectuoso o riesgoso: la UI RF sobrescribe IDs deterministas de una única válvula/corrida/alarma; no existe máquina de estados de dominio; creación RV+RF y fotografía no son operaciones atómicas; una interrupción puede dejar archivos/documentos/índices huérfanos; `media_work_queue_v1` y `media_sync_queue` representan estados relacionados sin reconciliador único; la galería decodifica todos los documentos sin aislamiento de corrupción; RV usa `InspectionStatus`, que no expresa pausa/suspensión/cancelación; `DateTime.now()` como fallback puede ocultar fechas corruptas; cálculos con double y serialización textual requieren casos de referencia.
+
+2. BRECHAS DETECTADAS, ORDENADAS POR SEVERIDAD
+
+Críticas (S1):
+- No hay prueba real de recuperación tras matar proceso durante escritura, cámara, RV+RF o serie activa.
+- No existe validador central de transiciones; estados pueden escribirse directamente.
+- RF no es utilizable para múltiples válvulas/corridas/alarmas aunque el dominio lo requiere.
+- No existe auditor/reparador no destructivo de índices y referencias.
+- El cierre fotográfico puede quedar dividido entre archivo final, documento de foto y dos colas.
+
+Altas (S2):
+- RV finalizado no tiene política explícita de inmutabilidad/corrección versionada.
+- Resultado RF y cálculos DEMO requieren validación matemática conocida y evidencia de fórmula/versiones.
+- Instrumentos no tienen editor completo ni política uniforme de foto/calibración/retiro.
+- Sincronización simulada no valida exhaustivamente dependencias ni conflictos.
+- Galería no restaura filtros ni separa claramente visualización de edición de reporte finalizado.
+
+Medias (S3):
+- Accesibilidad, escalado de texto y uso con guantes no han sido auditados sistemáticamente.
+- Carga de cajas y decodificación en build pueden afectar listas/galería grandes.
+- Riesgo de controladores temporales, overlays y procesamiento de imágenes sin prueba de memoria.
+- Actualización obligatoria necesita matriz de continuidad de borradores y sincronización.
+
+3. ALCANCE
+
+- Cerrar funcionalmente RV y RF en operación local/offline.
+- Implementar colecciones editables de válvulas, corridas y alarmas.
+- Introducir máquinas de estados, coordinadores de escritura y recuperación no destructiva.
+- Validar unidades, series y cálculos con casos conocidos sin cambiar tolerancias DEMO.
+- Consolidar medios, galería, Nuevo levantamiento, navegación, filtros y sincronización simulada.
+- Preparar contratos locales estables para Etapa 5.
+- Ejecutar y documentar una matriz manual en emulador y dispositivo real.
+- No implementar backend, Modbus, Bluetooth, telemetría ni actuación remota real.
+
+4. ARQUITECTURA PROPUESTA
+
+lib/domain/workflow/
+  report_state_machine.dart             Reglas comunes y errores de transición.
+  visual_report_state_machine.dart      Adaptación RV y política de corrección.
+  functional_report_state_machine.dart  Estados RF, repetición y cierre.
+lib/domain/functional/
+  valve_record.dart                     Configuración V1..Vn y eliminación lógica.
+  reducer_run.dart                      Corridas, aceptación e invalidación.
+  alarm_test_record.dart                Alarmas múltiples y repeticiones.
+  functional_validation_service.dart    Validación global sin BuildContext.
+lib/domain/measurements/
+  measurement_calculator.dart           Fórmulas puras y resultados tipados.
+  measurement_validation_matrix.dart    Casos de referencia/versiones.
+lib/data/local/
+  local_integrity_auditor.dart          Detecta huérfanos/corrupción.
+  local_recovery_coordinator.dart        Reanuda o marca operaciones incompletas.
+  report_write_coordinator.dart          Escrituras multi-documento recuperables.
+  media_repository.dart                 Fuente única de estado de medios.
+  sync_queue_repository.dart            Grafo, estados y consultas por hidrante.
+lib/features/functional/
+  valves/                               Lista maestra y editor colapsable.
+  reducer_runs/                          Lista, comparación y corrida aceptada.
+  alarms/                               Lista, editor y evidencia.
+lib/features/diagnostics/
+  local_integrity_page.dart              Diagnóstico técnico controlado, si se aprueba.
+docs/
+  local_data_contract.md
+  report_state_transitions.md
+  stage4_manual_validation_matrix.md
+
+AppState conservará sesión, conectividad y coordinación global. Repositorios, coordinadores, validadores y calculadores serán independientes. Ningún widget será fuente de reglas técnicas.
+
+5. REPORTE VISUAL
+
+Hallazgos:
+- Ocho pasos, modelos explícitos, guardado por paso, índice activo, validación local y global.
+- Identificación exige confirmación/foto; ubicación exige GPS válido o excepción completa; daños exigen campos y photoIds; cierre valida categorías, archivos, tamaño, hash y procesamiento.
+- Finalización confirma persistencia, elimina índice activo, actualiza la proyección de ficha y puede crear elegibilidad RF.
+- El estado usa InspectionStatus y no modela ready/paused/suspended/cancelled/requiresRepeat.
+- No está formalizada la inmutabilidad posterior ni una corrección versionada.
+- Daño con photoId comprueba presencia de ID, pero debe verificarse también integridad/asociación de cada foto de daño.
+
+Plan RV:
+- Inventariar campo UI→modelo→JSON→validación→traza→sync para cada paso.
+- Crear política de estado RV y corrección: finalizado inmutable; corrección crea revisión/versionado relacionado, no reabre silenciosamente.
+- Persistir paso/subpaso y estado de guardado; auditar todos los controladores al recuperar.
+- Verificar conteo por categoría y por daño contra documentos reales no eliminados.
+- Añadir auditoría de finalización 100 %, índice eliminado y proyección actualizada en una operación recuperable.
+
+6. REPORTE FUNCIONAL
+
+Hallazgos:
+- Diez pasos, borrador, visita sin prueba, instrumentos, series manuales, fotos, pausa/suspensión/cancelación, resultado y cierre.
+- Pasos 4–8 persisten un registro por tipo usando IDs deterministas; la UI no administra colecciones.
+- Comunicaciones/Modbus/actuación son manuales o simulados correctamente.
+- El cálculo usa la primera serie completada por tipo; no ofrece selección explícita cuando existen repeticiones.
+- Resultado combina reglas DEMO, pero faltan reglas exhaustivas de omisión, múltiples componentes y selección aceptada.
+
+Plan RF:
+- Extraer controladores/validación/cálculo del widget monolítico.
+- Implementar colecciones y referencias estables.
+- Seleccionar series/corridas aceptadas y conservar inválidas.
+- Aplicar máquina de estados y cierre transaccional recuperable.
+- Mantener tolerancias DEMO visibles y no oficiales.
+
+7. MÚLTIPLES VÁLVULAS
+
+Solución:
+- Entidad ValveRecord separada de FunctionalValveTest: id UUID, inspectionId, hydrantId, label V1..Vn, type, diameter, initialPosition, order, source, created/updated/deletedAt.
+- Una válvula tendrá N pruebas, fotos y series relacionadas; borrar será lógico y se bloqueará si existe prueba activa sin resolución.
+- UI lista maestra con selector horizontal V1/V2/V3 y tarjetas colapsables; solo una tarjeta extensa abierta. Acciones agregar, editar, duplicar configuración, retirar y abrir pruebas.
+- Duplicar genera nuevo UUID y label; no copia resultados, lecturas ni fotos.
+- Resumen comparativo muestra resultado, tiempos, fuga y evidencia por válvula.
+- Renumerar visualmente no cambia IDs ni trazabilidad.
+
+8. CORRIDAS DE REDUCTORA
+
+Solución:
+- ReducerRun con UUID, reducerId/valveId, order, timestamps, presiones, caudal, estabilidad, ajuste, resultado, comments, instrumentIds, seriesIds, photoIds, accepted, invalidReason y deletedAt.
+- Lista de corridas compacta; editor en bottom sheet/página secundaria; repetir clona configuración, no resultados.
+- Invalidar exige motivo y actor; nunca borra.
+- Solo una corrida aceptada por conjunto/configuración; cambiar aceptación es operación trazada.
+- Comparador tabular normalizado; resultado agregado usa solo corridas válidas y versión de regla DEMO.
+
+9. MÚLTIPLES ALARMAS
+
+Solución:
+- AlarmTest UUID por ejecución, tipo lógico, attempt, timestamps de generación/detección/reporte/reconocimiento, latencia calculada, evidencia, resultado, invalidReason y deletedAt.
+- Lista por tipo y tentativa; agregar/repetir/invalidar; editor breve con selectores y capturas de tiempo.
+- Latencia se calcula de timestamps y conserva valor capturado solo como dato de procedencia cuando aplique.
+- Evidencia condicional por falla/inconsistencia; “otra” exige descripción.
+- Resultado agregado distingue no aplica, no realizada, aprobada y fallida.
+
+10. INSTRUMENTOS
+
+- Completar alta/edición/retiro lógico/foto/calibración/recuperación.
+- Marca, modelo y serie de flujómetros permanecen texto libre; identificación separada; sin catálogos ni valores demo.
+- Un instrumento con serie activa o registro finalizado referenciado no se elimina: se retira lógicamente y conserva snapshot.
+- Calibración crítica se evalúa por catálogo versionado; desconocida/vencida bloquea según regla.
+- Asociaciones se consultan por IDs, con auditoría de referencias rotas.
+
+11. SERIES Y CÁLCULOS
+
+- Extraer resultados tipados; no almacenar estadísticas únicamente como string concatenado.
+- Estadísticas usan solo lecturas aceptadas, finitas y con unidad compatible; rechazadas se conservan y excluyen.
+- Definir signo de error absoluto: magnitud absoluta para “error absoluto”; diferencia firmada en campo separado.
+- Seleccionar explícitamente serie aceptada cuando haya repeticiones.
+- Conservar original canónico, normalizado, precisión y versión; no redondear persistencia.
+
+Matriz matemática mínima:
+ID | Caso | Entrada | Esperado
+U-P01 | bar→kPa | 1 bar | 100 kPa
+U-P02 | psi→kPa | 1 psi | 6.894757293168 kPa
+U-P03 | m.c.a.→kPa | 1 | 9.80665 kPa
+U-F01 | L/min→L/s | 60 | 1
+U-F02 | m³/h→L/s | 3.6 | 1
+U-V01 | m³→L | 1 | 1000
+S-01 | promedio | 1,2,3 | 2
+S-02 | mínimo/máximo/rango | 1,2,3 | 1/3/2
+S-03 | desviación muestral | 1,2,3 | 1
+S-04 | una lectura | 5 | desviación no calculable
+E-01 | diferencia firmada | 9 vs 10 | -1
+E-02 | error absoluto | 9 vs 10 | 1
+E-03 | error porcentual | 9 vs 10 | 10 %
+E-04 | patrón cero | 9 vs 0 | No calculable, nunca aprobado
+D-01 | diferencial | 500−300 | 200 kPa
+V-01 | volumen | 2 L/s × 30 s | 60 L
+N-01 | nulo/vacío | vacío | error de validación
+N-02 | NaN/infinito | no finito | rechazado
+R-01 | lectura rechazada | 1 rechazada, 3 aceptada | cálculo=3
+P-01 | coma decimal | 1,25 bar | original conservado; 125 kPa
+
+12. ESTADOS Y TRANSICIONES
+
+Proponer ReportState común: draft, ready, inProgress, paused, suspended, completed, cancelled, requiresRepeat, pendingReview, synced. RV adaptará estados heredados mediante proyección compatible.
+
+Transiciones permitidas:
+- draft→ready/inProgress/cancelled
+- ready→inProgress/cancelled
+- inProgress→paused/suspended/pendingReview/completed/cancelled
+- paused→inProgress/suspended/cancelled
+- suspended→inProgress/cancelled
+- pendingReview→inProgress/completed/requiresRepeat
+- completed→requiresRepeat/synced
+- requiresRepeat→completed solo mediante creación de nuevo reporte relacionado; el original no cambia a activo
+- synced es terminal para contenido; correcciones crean revisión nueva
+
+Cada transición exige actor, deviceId, timestamp UTC, motivo cuando aplique, validación previa y traza. El servicio devuelve error de dominio; widgets no asignan estados directamente.
+
+13. PERSISTENCIA Y RECUPERACIÓN
+
+Riesgos:
+- Índice activo puede apuntar a documento ausente/corrupto.
+- Documento puede existir sin índice.
+- RV+RF se crean secuencialmente.
+- Foto puede existir sin JSON/cola o JSON sin archivo/miniatura.
+- Serie activa puede quedar sin referencia en inspección.
+- El fallback temporal puede ocultar fechas inválidas.
+
+Solución:
+- OperationJournal local versionado para operaciones multi-documento: prepared→documentsWritten→indexesWritten→committed/needsRecovery.
+- Auditor no destructivo al arranque y bajo acción manual: reporta, reconstruye índices inequívocos, marca referencias faltantes y nunca borra.
+- Quarantine metadata para JSON corrupto conservando raw original.
+- Reconciliador de archivos/fotos/colas y series activas.
+- Escritura read-old/write-new con snapshots previos; sin clear/deleteFromDisk.
+- Política de recuperación determinista para RV+RF: completar operación si documentos válidos existen; si no, dejar seleccionable/reintentable y mostrar estado, sin aparentar éxito.
+
+14. FOTOGRAFÍAS
+
+Estado: cámara/biblioteca, validación JPEG/PNG, normalización, archivo privado, miniatura, hash y documento están implementados. Fotos reales nacen pendingUpload; verified es el único estado sincronizado.
+
+Pendientes:
+- Journal antes de procesar y reconciliación de `.tmp`, final y miniatura.
+- No decodificar/mostrar corrupción sin aislamiento.
+- Verificar orientación/EXIF y warning de flutter_image_compress en Android/iOS; aislarlo detrás de ImageProcessingService, sin cambiar dependencia en planeación.
+- Unificar estado autoritativo entre InspectionPhoto, media_work_queue_v1 y media_sync_queue.
+- Mantener archivo local tras upload/verified salvo política futura aprobada.
+- Validar asociaciones hydrantId/inspectionId/type/category y evitar cruces.
+
+15. GALERÍA
+
+- Mantiene filtro RV/RF y categoría y restringe por hydrantId.
+- Falta persistir/restaurar selección por sesión/ruta, agrupar por reporte/tema, mostrar diagnóstico de archivo faltante y controlar acciones según reporte finalizado.
+- El visor debe conservar contexto/posición, metadatos y retorno.
+- Contadores se derivarán del mismo PhotoRepository y excluirán deleted/corrupt según regla explícita.
+- La galería será consulta; editar/eliminar evidencia de reporte finalizado requerirá revisión versionada, no mutación directa.
+
+16. NUEVO LEVANTAMIENTO
+
+- Soporta asignado/no asignado/campo/TMP y RV/RF/ambos; no obliga RV antes de RF.
+- La creación combinada es secuencial y recuperable solo mediante captura de error/traza, no journal atómico.
+- Plan: WorkCreationCoordinator con operationId, hidrante/configuración/elegibilidad/trabajos, commit por fases y recuperación al reiniciar.
+- Validar autorización local, ubicación, motivo, pendingValidation y trazas antes de abrir cualquier reporte.
+- Un RF activo por hidrante se mantiene; ambos trabajos tienen IDs/estados separados.
+
+17. INICIO, ALERTAS Y FILTROS
+
+- Cuatro métricas y seis filtros comparten HydrantQueryProjection.
+- Alerta asociada abre ficha; alertas genéricas tienen detalle; AutoVisibleFilterBar usa controlador horizontal y claves estables.
+- Pendiente validar en dispositivo: indexedStack, TickerMode, extremos, rotación, búsqueda previa, Atrás y posición vertical.
+- Añadir pruebas manuales con documentos corruptos y colas mixtas para confirmar conteos.
+
+18. NAVEGACIÓN
+
+- StatefulShellRoute.indexedStack conserva ramas; rutas secundarias están anidadas; root sync usa navigator raíz.
+- BranchRootPopScope confirma salida solo desde Inicio y redirige raíces secundarias a Inicio.
+- Pendiente validar gesto Android/predictive back, swipe lateral frente a formularios/galería, rutas profundas y continuidad tras actualización obligatoria.
+- Centralizar NavigationIntent para alertas/filtros si aparecen más productores; no duplicar shell ni usar rutas paralelas.
+
+19. SINCRONIZACIÓN LOCAL SIMULADA Y CONTRATO FUTURO
+
+- SyncQueueItem tiene entidad, operación, dependencias, estado, intentos y asociación opcional.
+- Falta repositorio único, grafo validado, idempotencyKey, payloadVersion, revision/baseRevision, tombstone, nextAttemptAt y conflict state.
+- No marcar todo sincronizado con foto uploadedUnverified, traza pendiente o referencia huérfana.
+- Simulador debe respetar dependencias, fallos reintentables/permanentes y conservar historial de intentos.
+- Etapa 5 implementará transporte detrás de SyncTransport; la cola y contratos locales no dependerán de Dio/UI.
+
+20. ACTUALIZACIÓN APK
+
+- PackageInfo, semver, manifiesto asset, escenario remoto futuro y demo opcional/obligatoria/error están presentes.
+- La actualización requerida restringe edición/nuevo trabajo; debe permitir consulta, sincronización y continuidad segura de trabajos ya iniciados según política aprobada.
+- Validar fallback, caché, reloj, URL inválida, hash APK, descarga cancelada y reinicio; no cambiar versión en esta etapa de planeación.
+
+21. RENDIMIENTO Y RECURSOS
+
+- Medir arranque y apertura de cajas; evitar escanear/decodificar cajas completas en cada build.
+- Crear índices de consulta no destructivos para fotos, series y sync por hydrantId/inspectionId.
+- Paginar/virtualizar galería y listas grandes.
+- Medir tiempo/memoria de compresión, hash y miniatura; evitar bytes duplicados prolongados.
+- Auditar dispose de TextEditingController, ScrollController, OverlayEntry y observadores; cancelar callbacks al desmontar.
+- Auditar timers/delays del simulador y overlays; evitar setState/notify tras dispose.
+- Perfil manual de batería/GPS, memoria y almacenamiento con 100/500/1000 fotos y series extensas.
+
+22. EXPERIENCIA DE CAMPO Y ACCESIBILIDAD
+
+- Objetivo táctil mínimo 48×48, contraste AA, estados no dependientes solo de color, texto legible al sol.
+- Teclado decimal/unidad adecuado, botón rápido Suspender, prevención de doble submit y feedback Guardando/Guardado/Error.
+- Semantics para tarjetas, chips, fotos, progreso y errores; tooltips para iconos.
+- Orden de foco, anuncio de errores, navegación con teclado y lector.
+- Probar texto 1.0/1.3/1.5/2.0, pantalla pequeña, landscape, guantes y una mano.
+- No fijar alturas que corten contenido; controles colapsables conservan estado.
+
+23. CONTRATO LOCAL PARA BACKEND
+
+Común: id UUID estable, entityType, schemaVersion, revision, createdAt/updatedAt UTC, createdBy/updatedBy, deviceId, brigadeId, operation, deletedAt, correlationId, idempotencyKey.
+
+Fuentes de verdad locales: Hydrant local pendiente, VisualInspection, FunctionalInspection, InstrumentRecord, MeasurementSeries/Reading, ValveRecord/Test, ReducerRun, AlarmTest, LeakageTest, InspectionPhoto, TraceEvent, Eligibility y WorkSelection/operation journal.
+
+Proyectadas: InspectionSummary, estado de ficha, filtros y contadores. No se sincronizan como verdad.
+
+Derivadas: estadísticas, resultado calculado, disponibilidad de acciones y allSynchronized; guardan versión de regla cuando se persisten.
+
+Sincronizables: entidades fuente, tombstones, fotos/metadatos, elegibilidad, asignaciones, trazas y catálogos/versiones usados.
+
+Inmutables después de finalizar: snapshot del reporte, lecturas aceptadas, resultados y evidencia relacionada. Correcciones crean revisión o reporte relacionado; no mutación silenciosa.
+
+Conflictos: baseRevision/serverRevision/localRevision, tipo de conflicto, resolución manual/automática, actor y traza. Fotos usan hash/tamaño; creación usa idempotencyKey. Cursores pertenecen al transporte, no a entidades. Catálogos se referencian por id+version y tolerancias DEMO siguen identificadas.
+
+24. TAREAS DE IMPLEMENTACIÓN
+
+T01 Auditoría y mapa de brechas
+Objetivo: matriz UI→dominio→Hive→sync→traza de RV/RF.
+Crear: docs/stage4_gap_matrix.md.
+Modificar: ninguno inicialmente; luego documentación.
+Dependencias: código actual y datos demo.
+Riesgo: omitir rutas condicionales.
+Aceptación: todos los campos clasificados como persistido/UI/derivado/simulado.
+Validación manual: recorrer 18 pasos y comparar JSON.
+
+T02 Estado y transiciones
+Objetivo: máquinas de estado RV/RF y política de inmutabilidad.
+Crear: lib/domain/workflow/*, docs/report_state_transitions.md.
+Modificar: modelos, repositorios, controladores de ambos reportes.
+Dependencias: T01.
+Riesgo: compatibilidad de estados heredados.
+Aceptación: transición inválida rechazada y trazada; lectura antigua conservada.
+Validación manual: ejecutar cada arco y cada rechazo.
+
+T03 Persistencia y recuperación
+Objetivo: journal, auditor y reparación no destructiva.
+Crear: operation_journal, integrity_auditor, recovery_coordinator.
+Modificar: bootstrap y repositorios.
+Dependencias: T02.
+Riesgo: reparación ambigua.
+Aceptación: ninguna eliminación; huérfanos reportados/recuperados determinísticamente.
+Validación manual: inyectar índices/documentos/JSON incompletos en copia de datos.
+
+T04 Múltiples válvulas
+Objetivo: CRUD lógico y pruebas independientes V1..Vn.
+Crear: dominio/repositorio/controlador/widgets valves.
+Modificar: paso 4 RF, resultado, fotos, sync.
+Dependencias: T02–T03.
+Riesgo: IDs/reordenamiento.
+Aceptación: agregar/editar/duplicar/retirar y comparar 3 válvulas.
+Validación manual: V1/V2/V3 con resultados/fotos distintos y reinicio.
+
+T05 Corridas de reductora
+Objetivo: N corridas, invalidación, aceptación y agregado.
+Crear: reducer_run, repositorio, editor/comparador.
+Modificar: paso 4, resultado, evidencia.
+Dependencias: T04, cálculos base.
+Riesgo: aceptar dos corridas.
+Aceptación: exactamente una aceptada; inválidas conservadas.
+Validación manual: crear/repetir/invalidar/comparar 4 corridas.
+
+T06 Múltiples alarmas
+Objetivo: N tipos/intentos con timestamps y latencia.
+Crear: controlador/lista/editor alarms.
+Modificar: paso 8, resultado/evidencia.
+Dependencias: T02–T03.
+Riesgo: timestamps incoherentes.
+Aceptación: varias alarmas e intentos sin sobrescritura.
+Validación manual: aprobada, fallida, repetida, inválida y “otra”.
+
+T07 Instrumentos
+Objetivo: edición, retiro lógico, foto y referencias seguras.
+Crear: controlador/editor/repositorio especializado si falta.
+Modificar: pasos 2–8 y validadores.
+Dependencias: T03.
+Riesgo: alterar snapshot usado.
+Aceptación: serie activa bloquea retiro inconsistente; marca/modelo libres.
+Validación manual: calibración vigente/vencida/desconocida y reinicio.
+
+T08 Series y cálculos
+Objetivo: calculador puro, selección de serie y resultados tipados.
+Crear: measurement_calculator y matriz de referencia.
+Modificar: unidades, series, resultado RF.
+Dependencias: T05/T07.
+Riesgo: cambio semántico de error absoluto.
+Aceptación: todos los casos matemáticos coinciden; cero no aprueba.
+Validación manual: ejecutar matriz con calculadora independiente.
+
+T09 REPORTE VISUAL
+Objetivo: cerrar estados, fotos/daños, recuperación y corrección.
+Crear: validador de cierre/revisión si procede.
+Modificar: flujo RV, repositorio, ficha.
+Dependencias: T02–T03.
+Riesgo: romper borradores existentes.
+Aceptación: ocho pasos, 100 %, reinicio y cierre inmutable.
+Validación manual: rutas positivas y condicionales de cada paso.
+
+T10 REPORTE FUNCIONAL
+Objetivo: integrar colecciones, estado, resultado y cierre completo.
+Crear: controlador/validador modular.
+Modificar: página RF y repositorios.
+Dependencias: T04–T08.
+Riesgo: complejidad de UI.
+Aceptación: diez pasos utilizables sin placeholders y con recuperación.
+Validación manual: RF completo, visita sin prueba, pausa/suspensión/repetición.
+
+T11 Fotografías
+Objetivo: transacción recuperable y estado único de medios.
+Crear: MediaRepository/MediaRecoveryCoordinator.
+Modificar: ReliablePhotoService, colas y formularios.
+Dependencias: T03.
+Riesgo: archivos existentes.
+Aceptación: interrupciones no pierden evidencia ni crean falso sincronizado.
+Validación manual: cancelar/matar en cada fase, archivo faltante/corrupto.
+
+T12 Galería
+Objetivo: consulta consistente, filtros restaurados y visor contextual.
+Crear: controlador de galería si aplica.
+Modificar: PhotoGalleryPage.
+Dependencias: T11.
+Riesgo: rendimiento con muchas fotos.
+Aceptación: aislamiento por hidrante/reporte y contadores iguales.
+Validación manual: 1000 fotos, faltantes, finalizados, regreso.
+
+T13 Nuevo levantamiento
+Objetivo: operación RV/RF/ambos recuperable.
+Crear: WorkCreationCoordinator.
+Modificar: NewSurveyPage y repositorios.
+Dependencias: T03/T09/T10.
+Riesgo: creación parcial heredada.
+Aceptación: reinicio en cada fase converge a estado explícito.
+Validación manual: asignado/no asignado/campo/TMP, tres selecciones.
+
+T14 Inicio, alertas y filtros
+Objetivo: validar proyección y navegación estable.
+Crear: casos de validación documental.
+Modificar: solo si auditoría detecta divergencias.
+Dependencias: estados/sync consolidados.
+Riesgo: conteos con datos corruptos.
+Aceptación: total=listado y chip visible en seis filtros.
+Validación manual: orientación, búsqueda, Atrás y alerta.
+
+T15 Navegación
+Objetivo: jerarquía única y cierre solo desde Inicio.
+Crear: documento de intents/rutas si aplica.
+Modificar: router/shell/pop scopes solo con evidencia.
+Dependencias: T13–T14.
+Riesgo: predictive back entre versiones Android.
+Aceptación: matriz de rutas sin shell duplicado.
+Validación manual: botones, gesto, swipe y deep routes.
+
+T16 Sincronización local
+Objetivo: repositorio de cola, grafo e idempotencia simulada.
+Crear: SyncQueueRepository/SyncCoordinator/SyncTransport interface.
+Modificar: AppState/SyncPage.
+Dependencias: contratos estables.
+Riesgo: elementos legacy sin hydrantId.
+Aceptación: orden/dependencias/errores correctos y allSynchronized exacto.
+Validación manual: fallos reintentables, foto unverified y trazas.
+
+T17 Actualización
+Objetivo: cerrar política opcional/obligatoria/error.
+Crear: matriz de escenarios.
+Modificar: solo tras decisión de continuidad.
+Dependencias: navegación/sync.
+Riesgo: bloquear borrador activo.
+Aceptación: trabajo existente nunca se pierde; nuevo trabajo se bloquea según regla.
+Validación manual: cuatro escenarios, offline, URL/hash incorrectos.
+
+T18 Rendimiento
+Objetivo: presupuestos y eliminación de escaneos en build.
+Crear: docs/stage4_performance_budget.md.
+Modificar: repositorios/controladores según perfil.
+Dependencias: flujos cerrados.
+Riesgo: optimización prematura.
+Aceptación: presupuestos aprobados en dispositivo objetivo.
+Validación manual: datasets 100/500/1000 fotos y series largas.
+
+T19 Accesibilidad
+Objetivo: WCAG/Material y experiencia de campo.
+Crear: checklist accesibilidad.
+Modificar: widgets con hallazgos.
+Dependencias: UI final.
+Riesgo: layouts con texto 2×.
+Aceptación: sin cortes, objetivos 48×48, semántica/contraste.
+Validación manual: TalkBack, teclado, texto grande, sol/guantes.
+
+T20 Contrato backend
+Objetivo: congelar contrato local Etapa 5.
+Crear: docs/local_data_contract.md y ejemplos JSON.
+Modificar: modelos solo si faltan revision/idempotency/tombstone.
+Dependencias: T02–T16.
+Riesgo: anticipar API no aprobada.
+Aceptación: fuente/proyección/derivada/sync/inmutable clasificadas.
+Validación manual: serializar grafo RV/RF completo.
+
+T21 Matriz de pruebas
+Objetivo: casos ejecutables y evidencia.
+Crear: docs/stage4_manual_validation_matrix.md.
+Modificar: ninguno.
+Dependencias: tareas funcionales.
+Riesgo: cobertura nominal sin fallos.
+Aceptación: casos positivos, negativos, recuperación y límites.
+Validación manual: ejecución firmada por build/dispositivo.
+
+T22 Documentación
+Objetivo: arquitectura, operación, recuperación y limitaciones reales.
+Crear/modificar: documentos Etapa 4, manual y CHANGELOG.
+Dependencias: todas.
+Riesgo: declarar completo lo simulado.
+Aceptación: estados funcional/parcial/simulado explícitos.
+Validación manual: revisión técnica cruzada.
+
+T23 Cierre y versionamiento
+Objetivo: decidir release candidate con evidencia.
+Crear: acta de cierre y resultados.
+Modificar: versión/CHANGELOG solo después de aprobación separada.
+Dependencias: matriz completa.
+Riesgo: buildNumber no correlacionado con distribución.
+Aceptación: todos los criterios de cierre y build distribuible.
+Validación manual: instalación limpia/actualización sobre datos anteriores.
+
+25. MATRIZ DE VALIDACIÓN MANUAL
+
+Columnas obligatorias: ID, caso, precondición, pasos, resultado esperado, severidad, estado (No ejecutado/Aprobado/Fallido/Bloqueado), evidencia (captura/video/log/export JSON).
+
+Casos mínimos:
+M01 actualización sobre 0.2.0+3 con datos previos; conserva sesión/cajas/fotos/borradores; S1; evidencia export+c apturas.
+M02 login válido/inválido/recordado/offline; estado correcto; S2.
+M03 navegación bottom/swipe/Atrás/predictive back; solo cierra desde Inicio con confirmación; S1.
+M04 cuatro métricas y seis filtros; total exacto, chip visible, scroll vertical intacto; S1.
+M05 alerta asociada/no asociada/ID faltante; ficha/detalle/mensaje; S2.
+M06 RV feliz ocho pasos; completa 100 %, ficha y cierre; S1.
+M07 RV cada obligatorio/condicional; error en paso y borrador conservado; S1.
+M08 RV ubicación denegada/sin GPS/excepción; regla exacta; S1.
+M09 RV daño con/sin evidencia y archivo faltante; bloqueo correcto; S1.
+M10 RF feliz diez pasos; resultado y cierre; S1.
+M11 RF visita sin prueba; motivo/evidencia/reprogramación; S1.
+M12 RF pausa/suspensión/cancelación/reanudación; transición y recuperación; S1.
+M13 repetición RF; original inmutable y relación correcta; S1.
+M14 tres válvulas; CRUD lógico, pruebas/fotos/resultados independientes; S1.
+M15 cuatro corridas; repetir/invalidar/comparar/aceptar; S1.
+M16 varias alarmas/tipos/intentos; latencia/evidencia/agregado; S1.
+M17 instrumentos; texto libre, calibración y bloqueo/retiro; S1.
+M18 matriz de conversiones/fórmulas; resultados conocidos; S1.
+M19 lectura aceptada/rechazada/nula/fuera de rango; cálculo correcto; S1.
+M20 Nuevo levantamiento asignado/no asignado/campo/TMP; S1.
+M21 RV+RF con interrupción entre creaciones; operación recuperable explícita; S1.
+M22 permisos ubicación/cámara/biblioteca denegados y revocados; mensaje/continuidad; S2.
+M23 foto cámara/biblioteca/orientación/miniatura/hash; integridad; S1.
+M24 matar proceso durante selección/compresión/escritura/cola; recuperación; S1.
+M25 archivo/miniatura/JSON faltante o corrupto; no pantalla roja ni falso cierre; S1.
+M26 galería filtros/visor/retorno/finalizado/1000 fotos; aislamiento y rendimiento; S2.
+M27 sync offline/online/fallo/reintento/dependencia/unverified; contadores exactos; S1.
+M28 actualización current/optional/required/error/offline; continuidad segura; S1.
+M29 cierre forzado en cada paso RV/RF y serie abierta; mismo estado al volver; S1.
+M30 rotación, pantalla pequeña y texto 2×; sin pérdida/cortes; S2.
+M31 TalkBack/foco/teclado/objetivos táctiles; operable; S2.
+M32 memoria/batería/almacenamiento con dataset grande; dentro de presupuesto; S2.
+
+26. CRITERIOS DE ACEPTACIÓN Y CIERRE
+
+- flutter analyze limpio y sin warnings aceptados sin justificación.
+- Sin pantallas rojas, excepciones no controladas ni pérdida silenciosa.
+- RV completo, recuperable, validado e inmutable tras cierre.
+- RF completo con múltiples válvulas, corridas y alarmas utilizables.
+- Máquina de estados aplicada y trazada.
+- Persistencia comprobada tras cierre forzado en dispositivo.
+- Auditor/recovery no destructivo probado con huérfanos/corrupción.
+- Fotos íntegras; pendingUpload inicial; solo verified sincronizado.
+- Matriz matemática aprobada con evidencia.
+- Inicio/filtros/listas consistentes.
+- Sincronización simulada respeta grafo, errores y contadores.
+- Navegación y cierre correctos, incluido predictive back.
+- Accesibilidad y experiencia de campo aceptadas.
+- Presupuestos de rendimiento aprobados.
+- APK debug instalable y recorrido offline completo en dispositivo real.
+- Contrato local y documentación actualizados.
+- Matriz S1 100 % aprobada; S2 sin fallos abiertos; S3 documentados/aceptados.
+
+27. RIESGOS Y DECISIONES PENDIENTES DE APROBACIÓN
+
+- Política RV finalizado: revisión nueva recomendada frente a reapertura.
+- Política de continuidad con actualización obligatoria: permitir terminar solo borradores ya iniciados (recomendado) o hacerlos solo lectura.
+- Definición exacta de “corrida aceptada” y si puede haber una por rango de caudal.
+- Política de retiro de instrumento ya usado: snapshot inmutable + retiro lógico (recomendada).
+- Si el auditor de integridad tendrá UI técnica visible o solo diagnóstico interno/exportable.
+- Presupuestos objetivo de rendimiento y dispositivos mínimos soportados.
+- Retención local después de verified; recomendación Etapa 4: conservar todo.
+- Firma/roles requeridos para corrección de reportes finalizados.
+
+28. DEPENDENCIAS
+
+No se anticipan dependencias nuevas para el cierre local. Reutilizar Hive CE, image_picker, flutter_image_compress, crypto, path_provider, uuid, go_router y servicios actuales. Cualquier limitación confirmada de flutter_image_compress se aislará detrás de ImageProcessingService; cambiar paquete requeriría aprobación separada.
+
+29. VERSIONAMIENTO
+
+Mantener 0.2.0+3 durante implementación y validación. Antes de proponer versión, documentar qué APK/build fue realmente distribuido para Etapas 2 y 3. Si +4/+5 nunca se distribuyeron, no reservarlos retrospectivamente. La versión candidata se determinará con SemVer por alcance y siguiente build monotónico real; 0.5.0+6 solo sería válida si 0.3.0+4 y 0.4.0+5 fueron efectivamente cerradas/distribuidas o existe una decisión formal de numeración. Recomendación: auditar historial de distribución y aprobar versión en T23.
+
+30. COMANDOS MANUALES PARA LA FUTURA EJECUCIÓN
+
+Después de implementar y con aprobación explícita:
+flutter pub get
+dart format <archivos Dart concretos modificados>
+flutter analyze
+flutter test
+flutter build apk --debug
+flutter build apk --release (solo cuando firma/configuración y versión candidata estén aprobadas)
+
+Instalar el APK en dispositivo objetivo, ejecutar M01–M32, conservar evidencia y registrar versión/build, SO, modelo, memoria libre y hash del APK.

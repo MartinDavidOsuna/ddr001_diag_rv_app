@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "latestVersion": "0.2.0",
+  "minimumSupportedVersion": "0.1.0",
+  "latestBuild": 3,
+  "required": false,
+  "title": "Aplicación actualizada",
+  "message": "Tienes instalada la versión disponible para esta demostración.",
+  "androidUrl": "",
+  "iosUrl": "",
+  "publishedAt": "2026-07-13T00:00:00Z",
+  "sha256": null,
+  "releaseNotes": ["Etapa 1 estable"]
+}

@@ -1,0 +1,86 @@
+ETAPA 5B — RV ASISTENTE SECUENCIAL POR COMPONENTE
+Fecha: 2026-07-16
+Estado: APROBADO PARA IMPLEMENTACIÓN
+
+BASE Y ESTADO INICIAL
+- Rama main; commit c599cf1d4d1f0f27d44708a7cc145d384ed1515b, “feat: flutter test first implementation”, 2026-07-15T14:25:28-07:00.
+- El árbol contiene cambios locales aprobados de Etapa 5B que deben preservarse.
+- RV ya tiene nueve pasos y adaptación idempotente visualFlowVersion=2.
+- Los pasos 5 y 6 usan actualmente listas por compartimiento, fichas modales genéricas y validación separada.
+- FlowMeterAssessment sigue siendo la fuente canónica del medidor del paso 4.
+- VisualComponentInspection persiste UUID, revisión, hallazgos, datos específicos, fotos y campos desconocidos, pero no distingue defaults sugeridos de confirmación explícita.
+- La instrucción final prohíbe ejecutar Flutter, tests, cobertura, build y format; la última línea base registrada fue analyze limpio y 73 pruebas aprobadas.
+
+OBJETIVO
+Convertir los pasos 5 y 6 en subasistentes internos de pantalla única por componente, sin alterar los nueve pasos globales, REPORTE FUNCIONAL, rutas, cajas Hive, UUID ni datos anteriores.
+
+ARCHIVOS AFECTADOS
+- lib/features/visual_report/domain/visual_component_models.dart
+- lib/features/visual_report/domain/visual_component_rules.dart
+- lib/features/visual_report/domain/visual_component_sequence.dart (nuevo)
+- lib/features/visual_report/data/visual_report_compatibility_adapter.dart
+- lib/features/visual_report/presentation/steps/visual_components_list_step_page.dart
+- lib/domain/inspections/visual_inspection_step_validator.dart
+- lib/features/hydrants/inspection_placeholder_page.dart
+- test/visual_report/visual_component_models_test.dart
+- test/visual_report/visual_component_rules_test.dart
+- test/visual_report/visual_components_list_step_page_test.dart
+- documentación de RV, plan de pruebas y CHANGELOG.
+
+ARQUITECTURA
+- Añadir al componente flags versionados suggestedDefaultsApplied y explicitlyConfirmed, con defaults seguros false para documentos anteriores.
+- isReviewed exigirá explicitlyConfirmed además del estado de revisión; datos legacy nunca se convertirán en confirmaciones afirmativas.
+- Crear una secuencia tipada de presentación que inserta el medidor canónico entre componentes públicos y ordena generales privados y salidas.
+- El subasistente mantendrá solo índice activo y borrador editable del componente activo; no creará controladores para toda la colección.
+- La UI emitirá cambios al confirmar o antes de navegar/abrir índice/salir. El guardado del documento seguirá pasando por el callback y repositorio existentes.
+- Los defaults favorables serán una proyección editable del componente activo; solo el botón Confirmar persistirá reviewedBy, reviewedAt y explicitlyConfirmed.
+- El medidor será un elemento secuencial de referencia, sin VisualComponentInspection duplicada.
+- Al terminar la secuencia se mostrará un resumen previo al cierre del paso global.
+
+ORDEN DE IMPLEMENTACIÓN
+1. Evolucionar modelo JSON read-old/write-new y semántica de revisión explícita.
+2. Centralizar defaults, transiciones incompatibles y validación de confirmación.
+3. Crear secuencias pública/privada y cálculo A1–A5.
+4. Rehacer la página de listas como asistente secuencial con índice y resumen.
+5. Integrar guardado/navegación con callbacks existentes sin tocar Hive desde UI.
+6. Ajustar validador por paso y compatibilidad legacy.
+7. Actualizar pruebas y documentación.
+
+RIESGOS
+- Confirmar accidentalmente datos heredados: se evita con explicitlyConfirmed=false al leer campos ausentes.
+- Persistir defaults al abrir: la proyección sugerida permanece local hasta confirmación.
+- Perder edición al navegar: se conserva un borrador del componente activo y se solicita guardar antes de cambiar índice.
+- Medidor duplicado: se representa mediante un elemento especial enlazado al paso 4.
+- Inmutabilidad: readOnly elimina acciones de edición y confirmación.
+- Guardado asíncrono: el callback actual es sincrónico; la UI informa estado local y el contenedor conserva la persistencia real del reporte.
+
+CRITERIOS DE ACEPTACIÓN
+- Paso 5 recorre exactamente diez elementos, incluido el medidor canónico.
+- Paso 6 recorre 11/15/19/19 elementos para A1/A2/A3/A4 y secuencia dinámica para A5.
+- Defaults favorables son visibles pero no revisados ni persistidos como confirmación al abrir/cerrar.
+- Solo confirmación explícita establece reviewedBy, reviewedAt y explicitlyConfirmed.
+- Presencia No elimina condición favorable incompatible; un hallazgo elimina Sin daño visible.
+- Índice navega al componente seleccionado y muestra pendientes/hallazgos.
+- Último componente abre resumen antes de permitir completar la red.
+- Legacy no queda confirmado; finalizados continúan en lectura.
+- Validación exige confirmación explícita y mantiene hallazgos confirmados como completos.
+
+VALIDACIÓN MANUAL
+- Recorrer completa red pública y A1–A5 privada.
+- Abrir/cerrar sin confirmar y reabrir borrador.
+- Cambiar instalado a No y Bueno a hallazgo.
+- Validar comentario/foto obligatorios.
+- Abrir índice con cambios y seleccionar otro componente.
+- Volver entre componentes y cerrar/reabrir en componente intermedio.
+- Confirmar resumen previo al avance global.
+- Abrir finalizado y legacy en modo lectura.
+- Validar texto 200 %, pantalla pequeña y targets de 48×48.
+
+COMANDOS MANUALES POSTERIORES
+flutter pub get
+dart format <archivos Dart modificados>
+flutter analyze
+flutter test
+flutter test --coverage
+flutter build apk --debug
+git diff --check

@@ -1,0 +1,20 @@
+enum HydrantListFilter {
+  all,
+  visualReport,
+  functionalReport,
+  inProgress,
+  completed,
+  synchronizationPending,
+  // Detailed filters remain for compatibility and internal projections.
+  visualPending,
+  visualInProgress,
+  visualCompleted,
+  functionalPending,
+  functionalInProgress,
+  functionalCompleted,
+  functionalRequired,
+  functionalSuspended,
+  functionalFailed,
+  pendingValidation,
+  incidents,
+}

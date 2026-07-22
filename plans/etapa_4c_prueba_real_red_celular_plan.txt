@@ -1,0 +1,75 @@
+PLAN ETAPA 4C — PRUEBA REAL DE RED CELULAR E INTERNET EN RV PASO 6
+
+Fecha: 2026-07-15
+Estado: APROBADO PARA IMPLEMENTACIÓN
+
+Objetivo
+Ampliar el diagnóstico GPRS del REPORTE VISUAL, paso 6, para adquirir en Android una red de transporte celular y ejecutar una solicitud HTTPS ligada exclusivamente a ese objeto Network. Mantener separada la evaluación manual y condicional de Wi-Fi.
+
+Estado inicial y causa encontrada
+- El controlador actual usa connectivity_plus y considera suficiente ConnectivityResult.mobile.
+- No existe adquisición de Network celular, inspección independiente de NET_CAPABILITY_INTERNET/VALIDATED ni solicitud HTTP ligada al transporte celular.
+- La evaluación Wi-Fi muestra y valida siempre todas las preguntas; los cambios de la respuesta principal no normalizan valores dependientes persistidos.
+- MainActivity no registra canales nativos. Android ya declara INTERNET, pero no ACCESS_NETWORK_STATE ni el permiso normal CHANGE_NETWORK_STATE requerido por requestNetwork explícitamente.
+
+Archivos afectados
+- android/app/src/main/kotlin/com/aquafim/ddr001diag/MainActivity.kt
+- android/app/src/main/kotlin/com/aquafim/ddr001diag/CellularInternetProbeChannel.kt (nuevo)
+- android/app/src/main/AndroidManifest.xml
+- lib/core/network/cellular_probe_configuration.dart (nuevo)
+- lib/core/network/cellular_internet_probe_channel.dart (nuevo)
+- lib/domain/network/cellular_network_diagnostic.dart
+- lib/domain/network/wifi_assessment_rules.dart (nuevo)
+- lib/data/services/cellular_network_diagnostics_controller.dart
+- lib/domain/inspections/visual_inspection_step_validator.dart
+- lib/features/hydrants/inspection_placeholder_page.dart
+- docs/stage4_gprs_wifi_diagnostics.md
+- docs/stage4_manual_test_matrix.md
+- CHANGELOG.md
+
+Arquitectura y orden de implementación
+1. Registrar un MethodChannel acotado desde MainActivity.
+2. En Android solicitar TRANSPORT_CELLULAR con ConnectivityManager.requestNetwork.
+3. Inspeccionar INTERNET y VALIDATED por separado.
+4. Ejecutar HttpURLConnection mediante Network.openConnection, sin bindProcessToNetwork.
+5. Centralizar URL HTTPS, método, código esperado, límites y versión en CellularProbeConfiguration.
+6. Incorporar CellularInternetProbeResult tipado y evidencia de efectividad versionada al diagnóstico persistido con lectura compatible.
+7. Mantener el límite global de 60 segundos, progreso por etapas reales, cancelación y liberación de callback/conexión/timers.
+8. Centralizar las ramas y transiciones Wi-Fi en WifiAssessmentRules; normalizar dependientes persistidos al cambiar respuestas padre.
+9. Actualizar UI, validación, documentación y matriz manual.
+
+Decisiones
+- Endpoint demo sustituible: HTTPS de conectividad sin datos del reporte; se persistirá solo el host y la versión.
+- Un código esperado confirma internet celular. Un endpoint inaccesible, TLS, timeout parcial o código inesperado no se interpreta automáticamente como ausencia de red celular.
+- Solo 60 segundos completos sin adquirir red celular producen noCellularNetworksAvailable.
+- iOS/plataformas sin aislamiento garantizado devuelven platformRestricted/indeterminate.
+- No se solicita ni escanea Wi-Fi y no se agregan permisos de telefonía sensibles; solo se declaran ACCESS_NETWORK_STATE y CHANGE_NETWORK_STATE para adquirir el transporte.
+
+Riesgos
+- Fabricantes y políticas de datos pueden impedir requestNetwork o mantener la red celular sin validación.
+- Un endpoint externo puede estar bloqueado aunque exista internet; por eso su fallo queda separado.
+- La compilación Kotlin y el comportamiento de NetworkCallback requieren validación en Android 10 y dispositivo moderno.
+- Los cambios previos no relacionados del árbol de trabajo deben preservarse.
+
+Criterios de aceptación
+- HTTP se abre con Network.openConnection sobre TRANSPORT_CELLULAR; Wi-Fi no puede satisfacer la prueba.
+- INTERNET, VALIDATED y respuesta HTTP se guardan por separado.
+- Timeout global de 60 segundos, finalización anticipada y cancelación liberan recursos.
+- Endpoint caído no se clasifica como red celular ausente.
+- UI muestra método, latencia, efectividad DEMO y advertencia teléfono/módem.
+- La pregunta Wi-Fi principal controla visibilidad, obligatoriedad y normalización persistida de dependientes.
+- Campos ocultos no bloquean; valores antiguos no influyen al cambiar la rama.
+- No cambian versión, identificadores ni dependencias.
+
+Validación manual
+- Ejecutar casos con Wi-Fi+datos, solo datos, solo Wi-Fi, modo avión, SIM sin datos, INTERNET sin VALIDATED, VALIDATED, HTTP 204, código inesperado, timeout, TLS, cancelación y salida de pantalla.
+- Verificar que la IP/ruta usada sea celular mediante instrumentación de dispositivo y que NetworkCallback se desregistre.
+- Probar Android 10 y Android moderno; verificar resultado restringido en iOS.
+- Recorrer todas las transiciones Wi-Fi Sí/No/No verificado, cerrar/reabrir, comprobar persistencia, trazabilidad y ausencia de errores ocultos.
+
+Comandos manuales posteriores
+- flutter pub get
+- flutter analyze
+- flutter test
+- flutter run
+- flutter build apk --debug

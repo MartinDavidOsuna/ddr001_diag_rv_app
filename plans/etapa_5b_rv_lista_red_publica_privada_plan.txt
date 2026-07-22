@@ -1,0 +1,81 @@
+ETAPA 5B — RV LISTAS DE RED PÚBLICA Y RED PRIVADA
+Fecha: 2026-07-16
+Estado: APROBADO PARA IMPLEMENTACIÓN
+
+BASE REVISADA
+- Rama main; commit c599cf1d4d1f0f27d44708a7cc145d384ed1515b.
+- flutter pub get: correcto.
+- flutter analyze: sin issues.
+- flutter test: 79 pruebas aprobadas.
+- RV actual: ocho pasos; componentes internos unidos en paso 5; Energía en 6; Daños en 7; Cierre en 8.
+- El esquema raster/CustomPainter solo es consumido por VisualComponentsStepPage y sus pruebas.
+- VisualInspection persiste currentStep y schemaVersion, pero no posee versión explícita del flujo.
+- VisualComponentInspection ya clasifica compartimiento y salida sin duplicar documentos.
+
+OBJETIVO
+Eliminar la navegación productiva por esquema y convertir RV a nueve pasos: Identificación, Ubicación, Acceso, Medidor, Red pública, Red privada, Energía/comunicaciones, Daños, Fotografías/cierre.
+
+ARCHIVOS AFECTADOS
+- lib/domain/inspections/visual_inspection.dart
+- lib/domain/inspections/visual_inspection_step_validator.dart
+- lib/features/hydrants/inspection_placeholder_page.dart
+- lib/features/visual_report/presentation/steps/visual_components_step_page.dart (retirar)
+- lib/features/visual_report/presentation/steps/visual_components_list_step_page.dart (crear)
+- lib/features/visual_report/data/visual_report_compatibility_adapter.dart
+- componentes del esquema bajo lib/features/visual_report/presentation/components/ (retirar)
+- assets/images/rv/hydrants/ (retirar)
+- pubspec.yaml (retirar registro exclusivo de esos assets)
+- pruebas de RV y documentación de Etapa 5.
+
+DISEÑO
+- VisualComponentsStepPage se convierte en lista parametrizada por sección pública/privada.
+- Paso 5 muestra diez filas técnicas en orden físico; el medidor abre/resume el dato canónico del paso 4.
+- Paso 6 muestra siete componentes generales y tarjetas separadas por salida, con cuatro componentes cada una.
+- Cada paso incluye resumen, progreso de sección, filtros Todos/Pendientes/Hallazgos/Con fotografías/No verificables y revisión rápida limitada al alcance visible.
+- No se duplican componentes, medidor, fotos ni estados.
+
+COMPATIBILIDAD
+- Introducir visualFlowVersion=2 en VisualInspection, preservando campos desconocidos.
+- Borradores con versión ausente/1 remapean una sola vez: 1→1, 2→2, 3→3, 4→4, 5→5, 6→7, 7→8, 8→9.
+- La adaptación devuelve una copia en memoria; la escritura ocurre únicamente al guardar un borrador.
+- Reportes finalizados legacy no se remapean ni reescriben.
+- Revisiones nuevas se crean en flujo 2 mediante el repositorio existente.
+
+VALIDACIÓN
+- Paso 5 valida solo red pública y la captura canónica del medidor.
+- Paso 6 valida generales privados y cada componente de cada salida activa.
+- Hallazgo revisado es válido; pendiente significa información obligatoria incompleta.
+- Validación global recorre nueve pasos y finaliza en el paso 9.
+
+ORDEN DE IMPLEMENTACIÓN
+1. Añadir versión de flujo y adaptador idempotente.
+2. Actualizar progreso, títulos, navegación, GPS/GPRS, cierre y trazabilidad a nueve pasos.
+3. Separar validación pública/privada.
+4. Rehacer VisualComponentsStepPage como listas y tarjetas de salida.
+5. Retirar esquema, imágenes, imports, registro de assets y pruebas exclusivas.
+6. Agregar pruebas de flujo, compatibilidad, validación, UI, read-only y accesibilidad.
+7. Actualizar documentación.
+8. Ejecutar format focalizado, analyze, test, coverage, APK debug y diff check.
+
+RIESGOS
+- Remap repetido de currentStep: mitigado con visualFlowVersion y prueba de idempotencia.
+- Escritura accidental de finalizados: mitigada manteniendo adaptación solo de lectura.
+- Medidor duplicado: fila de referencia sin inspección independiente nueva.
+- Confundir hallazgo con pendiente: validación basada en completitud, no severidad.
+- Borradores en antiguo paso 6–8: casos explícitos de prueba.
+
+CRITERIOS DE ACEPTACIÓN
+- Nueve pasos visibles y progreso /9.
+- Pasos 5 y 6 separados, ordenados y sin Esquema/InteractiveViewer.
+- A1–A5 agrupan salidas correctamente.
+- Remap legacy idempotente y finalizados intactos.
+- Validación y finalización usan pasos nuevos.
+- No consumidores ni assets productivos del esquema.
+- analyze y test limpios; APK debug generado.
+
+VALIDACIÓN MANUAL
+- Abrir borradores legacy en pasos 5, 6, 7 y 8.
+- Recorrer 4→5→6→7 y regresar 7→6→5.
+- Revisar A1, A2, A3, A4 y A5 en pantalla pequeña y texto 2×.
+- Confirmar que hallazgos revisados avanzan y pendientes bloquean.
+- Confirmar reportes finalizados legacy en solo lectura.

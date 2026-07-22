@@ -1,0 +1,98 @@
+PLAN — ETAPA 4C: EDITORES TÉCNICOS, RECUPERACIÓN Y CERTIFICACIÓN FUNCIONAL
+
+Fecha: 2026-07-15
+Proyecto: DIAGNOSTICO HIDRANTES
+Versión conservada: 0.2.0+3
+Estado: APROBADO PARA IMPLEMENTACIÓN
+
+BRECHAS ENCONTRADAS
+
+1. ValveRecord, ReducerRun y AlarmAttemptRecord ya usan UUID y se persisten, pero la UI RF ofrece operaciones compactas incompletas y carece de editores detallados, historial, comparación y administración exhaustiva de intentos.
+2. InstrumentRecord y snapshots existen; faltan edición/cancelación, certificado/foto/historial, restauración y navegación clara a series relacionadas.
+3. Las revisiones son inmutables, pero no existe una autoridad única que reconstruya y valide cadenas RV/RF sin confiar en activeRevision.
+4. RecoveryCoordinator solo resuelve casos ligeros; no define política por cada fase y operationType.
+5. MediaReconciliationService detecta inconsistencias, pero no regenera miniaturas ni inventaría de forma segura archivos huérfanos.
+6. IntegrityAuditService no tiene vista restringida con ejecución, reparación segura y exportación controlada.
+7. Galería pagina en lotes de 100, pero requiere métricas controladas, liberación explícita del visor y verificación de posición/filtros bajo rotación.
+8. Rendimiento, accesibilidad, cierre forzado y datasets 100/500/1000 continúan sin certificación física.
+
+ARCHIVOS AFECTADOS
+
+Crear:
+- lib/domain/workflow/current_report_revision_resolver.dart
+- lib/data/local/report_revision_resolver_service.dart
+- lib/data/local/thumbnail_regeneration_service.dart
+- lib/data/local/orphan_media_scanner.dart
+- lib/features/diagnostics/local_integrity_page.dart
+- lib/features/functional/widgets/valve_editor.dart
+- lib/features/functional/widgets/reducer_run_editor.dart
+- lib/features/functional/widgets/alarm_attempt_editor.dart
+- lib/features/functional/widgets/instrument_editor.dart
+
+Modificar:
+- modelos y repositorios funcionales existentes;
+- RecoveryCoordinator, IntegrityAuditService y MediaReconciliationService;
+- pantalla RF, galería, Perfil/Ayuda, navegación/bootstrap y AppState;
+- documentación Stage 4, matriz manual y CHANGELOG.
+
+ORDEN DE IMPLEMENTACIÓN
+
+1. Auditar contratos y persistencia existentes.
+2. Completar repositorios CRUD lógico y reglas de protección.
+3. Implementar editor de válvulas y múltiples pruebas.
+4. Implementar editor/comparador de corridas.
+5. Implementar editor de alarmas e intentos.
+6. Implementar editor de instrumentos, certificados, fotos e historial.
+7. Implementar resolver único de revisiones RV/RF e issues ambiguos.
+8. Ampliar recuperación por fase y tipo de operación.
+9. Regenerar miniaturas con escritura temporal y exclusión por recurso.
+10. Detectar huérfanos solo dentro de raíces administradas.
+11. Crear auditoría técnica restringida y exportación.
+12. Reforzar galería incremental, métricas y liberación.
+13. Auditar dispose, accesibilidad y layouts modificados.
+14. Actualizar matriz, documentos y CHANGELOG.
+
+RIESGOS
+
+- Los documentos heredados pueden carecer de relaciones nuevas; se aplicará read-old/write-new sin reescritura masiva.
+- Hive y filesystem no son atómicos; journal y recuperación no prometerán atomicidad.
+- Una cadena de revisiones ambigua no puede repararse automáticamente.
+- Regenerar miniaturas depende del procesador existente; un original no decodificable se preserva y marca corrupto.
+- La UI RF actual es extensa; los editores se aislarán en diálogos/paneles y no se concentrará más lógica en AppState.
+- Rendimiento de 1000 fotos, memoria, batería, cámara, GPS, GPRS y TalkBack requieren dispositivo y no se declararán certificados.
+
+CRITERIOS DE ACEPTACIÓN
+
+- Válvulas UUID editables, reordenables, duplicables, retirables/restaurables y con N intentos no destructivos.
+- Corridas UUID editables en borrador, repetibles, invalidables y con una aceptación por condición/rango; comparador visible.
+- Alarmas UUID por intento, tipo/orden, latencia, evidencia e invalidación sin sobrescritura.
+- Instrumentos editables con texto libre, estado, calibración, certificado/foto y bloqueo por serie activa; snapshots históricos invariantes.
+- Resolver reconstruye cadena válida y genera IntegrityIssue ante bifurcación, ciclo o referencia inválida.
+- RecoveryCoordinator define decisión segura/ambigua/cuarentena por fase y operationType sin inventar ni borrar.
+- Miniatura faltante se regenera desde original válido mediante temporal+rename; corrupción se conserva.
+- Escáner no sale de raíces controladas y no elimina huérfanos.
+- Vista técnica solo para administrador/supervisor permite auditar, reparar lo inequívoco y exportar JSON/texto.
+- Galería mantiene lote máximo 100, filtros, posición y originales fuera del build de miniaturas.
+- Controles modificados tienen semántica, tooltip/etiqueta, toque adecuado y dispose correcto.
+
+CASOS MANUALES
+
+- Tres y cinco válvulas; editar, duplicar, reordenar, retirar/restaurar y crear varios intentos.
+- Corridas del mismo rango; aceptar otra, retirar aceptación, repetir, invalidar y comparar.
+- Alarmas múltiples y repetidas; Otra sin/con descripción; latencia e invalidación.
+- Instrumento activo/retirado/no apto/con serie activa; certificado, foto y snapshot.
+- Revisión lineal, bifurcada, circular y referencia faltante.
+- Cada fase del journal para los once operationType aprobados.
+- Original válido sin miniatura, original corrupto, original/thumbnail/temporal huérfano.
+- Auditoría con roles, reparación segura y exportación.
+- Galería con 100, 500 y 1000 fotos, rotación, filtros y posición.
+- Texto 2×, pantalla pequeña, cierre forzado y regreso desde editor.
+
+COMANDOS MANUALES POSTERIORES
+
+flutter pub get
+flutter analyze
+flutter test
+flutter run
+flutter build apk --debug
+

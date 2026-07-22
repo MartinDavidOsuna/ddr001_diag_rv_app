@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "latestVersion": "0.2.1",
+  "latestBuild": 4,
+  "minimumSupportedVersion": "0.2.0",
+  "required": false,
+  "title": "Nueva versión disponible",
+  "message": "Incluye correcciones funcionales y de estabilidad.",
+  "androidUrl": "https://downloads.example.invalid/diagnostico-hidrantes-0.2.1.apk",
+  "iosUrl": null,
+  "publishedAt": "2026-07-13T00:00:00Z",
+  "sha256": "REEMPLAZAR_CON_SHA256_REAL_DEL_APK",
+  "releaseNotes": [
+    "Correcciones de navegación",
+    "Mejoras de sincronización"
+  ]
+}
