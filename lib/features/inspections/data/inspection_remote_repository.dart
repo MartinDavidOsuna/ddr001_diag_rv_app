@@ -136,7 +136,7 @@ class InspectionRemoteRepository {
         id: '${data['photoId'] ?? photo.id}',
         slotCode: '${data['slotCode'] ?? slotCode}',
         status: '${data['status'] ?? 'verified'}',
-        sha256: data['sha256']?.toString(),
+        sha256: (data['normalizedSha256'] ?? data['sha256'])?.toString(),
       );
     } on DioException catch (error) {
       throw ApiException.fromDio(error);
@@ -156,7 +156,11 @@ class InspectionRemoteRepository {
               id: '${data['photo_id'] ?? data['photoId']}',
               slotCode: '${data['slot_code'] ?? data['slotCode']}',
               status: '${data['upload_status'] ?? data['status']}',
-              sha256: (data['server_sha256'] ?? data['sha256'])?.toString(),
+              sha256:
+                  (data['normalized_sha256'] ??
+                          data['server_sha256'] ??
+                          data['sha256'])
+                      ?.toString(),
             );
           })
           .toList();
