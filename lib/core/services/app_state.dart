@@ -24,6 +24,8 @@ import '../../features/auth/data/field_session_repository.dart';
 import '../../features/hydrants/data/hydrant_repository.dart';
 import '../../features/checklist/data/checklist_models.dart';
 import '../../features/checklist/data/checklist_repository.dart';
+import '../../features/inspections/data/inspection_sync_coordinator.dart';
+import '../../features/inspections/data/rv_draft_repository.dart';
 import '../network/api_exception.dart';
 import 'update_service.dart';
 
@@ -41,6 +43,8 @@ class AppState extends ChangeNotifier {
     required this.sessionRepository,
     required this.hydrantRepository,
     required this.checklistRepository,
+    required this.rvDraftRepository,
+    required this.inspectionSyncCoordinator,
   });
   final SharedPreferences preferences;
   final Box<String> traceBox, syncBox, mediaBox, syncedTraceBox;
@@ -51,6 +55,8 @@ class AppState extends ChangeNotifier {
   final FieldSessionRepository sessionRepository;
   final HydrantRepository hydrantRepository;
   final ChecklistRepository checklistRepository;
+  final RvDraftRepository rvDraftRepository;
+  final InspectionSyncCoordinator inspectionSyncCoordinator;
   late final SyncQueueRepository syncQueueRepository = SyncQueueRepository(
     syncBox,
   );
@@ -524,6 +530,9 @@ class AppState extends ChangeNotifier {
     syncProgress = 0;
     notifyListeners();
     await trace('sync_execute', 'Ejecución de sincronización simulada');
+    for (final draft in rvDraftRepository.pending()) {
+      await inspectionSyncCoordinator.synchronize(draft);
+    }
     final traceKeys = traceBox.keys.map((e) => '$e').toList();
     for (var i = 1; i <= 4; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 220));

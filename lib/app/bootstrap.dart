@@ -19,6 +19,9 @@ import '../features/auth/data/field_session_repository.dart';
 import '../features/auth/data/session_secure_storage.dart';
 import '../features/hydrants/data/hydrant_repository.dart';
 import '../features/checklist/data/checklist_repository.dart';
+import '../features/inspections/data/inspection_remote_repository.dart';
+import '../features/inspections/data/inspection_sync_coordinator.dart';
+import '../features/inspections/data/rv_draft_repository.dart';
 
 Future<AppState> bootstrap() async {
   await initializeDateFormatting('es');
@@ -86,6 +89,17 @@ Future<AppState> bootstrap() async {
     storage: sessionStorage,
     packageInfo: packageInfo,
   );
+  final visualRepository = VisualInspectionRepository(
+    documents: inspectionBox,
+    index: inspectionIndexBox,
+  );
+  final rvDraftRepository = RvDraftRepository(visualRepository);
+  final inspectionSyncCoordinator = InspectionSyncCoordinator(
+    drafts: rvDraftRepository,
+    remote: InspectionRemoteRepository(apiClient),
+    photoBox: Hive.box<String>('inspection_photos_v1'),
+    mediaQueue: mediaBox,
+  );
   final state = AppState(
     preferences: preferences,
     traceBox: traceBox,
@@ -93,10 +107,7 @@ Future<AppState> bootstrap() async {
     mediaBox: mediaBox,
     syncedTraceBox: syncedTraceBox,
     packageInfo: packageInfo,
-    visualInspectionRepository: VisualInspectionRepository(
-      documents: inspectionBox,
-      index: inspectionIndexBox,
-    ),
+    visualInspectionRepository: visualRepository,
     functionalEligibilityRepository: FunctionalEligibilityRepository(
       functionalEligibilityBox,
     ),
@@ -110,6 +121,8 @@ Future<AppState> bootstrap() async {
       client: apiClient,
       box: checklistBox,
     ),
+    rvDraftRepository: rvDraftRepository,
+    inspectionSyncCoordinator: inspectionSyncCoordinator,
   );
   await state.initialize();
   return state;

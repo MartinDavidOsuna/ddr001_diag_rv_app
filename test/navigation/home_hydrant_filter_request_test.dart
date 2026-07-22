@@ -7,6 +7,9 @@ import 'package:ddr001diag/domain/enums/hydrant_list_filter.dart';
 import 'package:ddr001diag/features/auth/data/field_session_repository.dart';
 import 'package:ddr001diag/features/hydrants/data/hydrant_repository.dart';
 import 'package:ddr001diag/features/checklist/data/checklist_repository.dart';
+import 'package:ddr001diag/features/inspections/data/inspection_remote_repository.dart';
+import 'package:ddr001diag/features/inspections/data/inspection_sync_coordinator.dart';
+import 'package:ddr001diag/features/inspections/data/rv_draft_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -32,6 +35,11 @@ void main() {
       ),
       sessionStorage: storage,
     );
+    final visualRepository = VisualInspectionRepository(
+      documents: Hive.box<String>('visual_inspections_v1'),
+      index: Hive.box<String>('active_inspection_index_v1'),
+    );
+    final rvDraftRepository = RvDraftRepository(visualRepository);
     state = AppState(
       preferences: await SharedPreferences.getInstance(),
       traceBox: Hive.box<String>('trace_events'),
@@ -44,10 +52,7 @@ void main() {
         version: '0.2.0',
         buildNumber: '3',
       ),
-      visualInspectionRepository: VisualInspectionRepository(
-        documents: Hive.box<String>('visual_inspections_v1'),
-        index: Hive.box<String>('active_inspection_index_v1'),
-      ),
+      visualInspectionRepository: visualRepository,
       functionalEligibilityRepository: FunctionalEligibilityRepository(
         Hive.box<String>('functional_eligibility_v1'),
       ),
@@ -72,6 +77,13 @@ void main() {
       checklistRepository: ChecklistRepository(
         client: client,
         box: Hive.box<String>('rv_checklist_cache_v1'),
+      ),
+      rvDraftRepository: rvDraftRepository,
+      inspectionSyncCoordinator: InspectionSyncCoordinator(
+        drafts: rvDraftRepository,
+        remote: InspectionRemoteRepository(client),
+        photoBox: Hive.box<String>('inspection_photos_v1'),
+        mediaQueue: Hive.box<String>('media_sync_queue'),
       ),
     );
   });

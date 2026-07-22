@@ -22,6 +22,16 @@ class VisualInspectionRepository {
     return id != null && documents.containsKey(id);
   }
 
+  VisualInspection? findById(String id) {
+    final raw = documents.get(id);
+    if (raw == null) return null;
+    try {
+      return VisualInspection.fromJson(VersionedJsonCodec.decode(raw).payload);
+    } on Object {
+      return null;
+    }
+  }
+
   List<VisualInspection> forHydrant(String hydrantId) {
     final values = <VisualInspection>[];
     for (final raw in documents.values) {

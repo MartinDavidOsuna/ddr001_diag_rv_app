@@ -215,3 +215,7 @@ Este último comando solo debe ejecutarse después de disponer de la firma produ
 - `test/serialization/versioned_models_test.dart`
 
 Los módulos GPS, señal y fotos existentes se conectarán en la etapa posterior de evidencia, sin reescribirlos.
+
+## Actualización de la etapa 3 (2026-07-22)
+
+La base fue extendida en `feature/rv-inspection-flow`: el checklist cacheado se captura como snapshot inmutable por borrador, el repositorio visual existente sigue siendo la fuente local única y la ruta RV usa el renderer dinámico, resumen y coordinador REST reales. Los contratos, estados, pruebas y el riesgo detectado en el hash de fotografías se documentan en `plans/04_flujo_inspeccion_rv.md`.

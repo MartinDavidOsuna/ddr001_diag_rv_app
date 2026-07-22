@@ -549,6 +549,7 @@ class VisualInspection {
     List<VisualComponentInspection>? componentInspections,
     List<VisualOutletInspection>? outletInspections,
     VisualVictaulicGroupInspection? victaulicGroupInspection,
+    Map<String, dynamic>? unknownFields,
   }) => VisualInspection(
     id: id,
     hydrantId: hydrantId,
@@ -602,7 +603,7 @@ class VisualInspection {
     outletInspections: outletInspections ?? this.outletInspections,
     victaulicGroupInspection:
         victaulicGroupInspection ?? this.victaulicGroupInspection,
-    unknownFields: unknownFields,
+    unknownFields: unknownFields ?? this.unknownFields,
   );
   Map<String, dynamic> toJson() => {
     ...unknownFields,
