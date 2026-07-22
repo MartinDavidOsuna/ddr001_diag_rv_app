@@ -21,8 +21,7 @@ class CellularInternetProbeChannel {
 
   static final CellularInternetProbeChannel instance =
       CellularInternetProbeChannel();
-  static const _channelName =
-      'com.aquafim.ddr001diag/cellular_internet_probe';
+  static const _channelName = 'com.aquafim.ddr001diag/cellular_internet_probe';
 
   final MethodChannel _channel;
   final bool Function() _isAndroid;

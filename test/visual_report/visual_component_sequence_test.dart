@@ -12,8 +12,9 @@ void main() {
     final sequence = VisualComponentSequence.publicNetwork(configuration);
     expect(sequence, hasLength(10));
     expect(
-      sequence.where((item) =>
-          item.kind == VisualSequenceItemKind.canonicalFlowMeter),
+      sequence.where(
+        (item) => item.kind == VisualSequenceItemKind.canonicalFlowMeter,
+      ),
       hasLength(1),
     );
   });
@@ -37,13 +38,14 @@ void main() {
   }
 
   test('A5 deriva la secuencia únicamente de su configuración', () {
-    final source = VisualHydrantConfigurationFactory.standard(
-      VisualHydrantType.a2,
-      inspectionId: 'rv-a5',
-    ).toJson()
-      ..['type'] = VisualHydrantType.a5Custom.name
-      ..['expectedType'] = VisualHydrantType.a5Custom.name
-      ..['observedType'] = VisualHydrantType.a5Custom.name;
+    final source =
+        VisualHydrantConfigurationFactory.standard(
+            VisualHydrantType.a2,
+            inspectionId: 'rv-a5',
+          ).toJson()
+          ..['type'] = VisualHydrantType.a5Custom.name
+          ..['expectedType'] = VisualHydrantType.a5Custom.name
+          ..['observedType'] = VisualHydrantType.a5Custom.name;
     final configuration = VisualHydrantConfiguration.fromJson(source);
     expect(
       VisualComponentSequence.privateNetwork(configuration),

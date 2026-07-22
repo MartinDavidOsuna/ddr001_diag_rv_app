@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
+import 'data/field_session_models.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -63,35 +64,44 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final email = TextEditingController(text: 'inspector.demo@ddr001.mx');
-  final password = TextEditingController(text: 'demo123');
-  bool remember = true, obscure = true;
+  final name = TextEditingController();
+  final email = TextEditingController();
+  final phone = TextEditingController();
+  final crew = TextEditingController();
+  bool submitting = false;
   String? error;
   @override
   void dispose() {
+    name.dispose();
     email.dispose();
-    password.dispose();
+    phone.dispose();
+    crew.dispose();
     super.dispose();
   }
 
   Future<void> submit() async {
-    final ok = await context.read<AppState>().login(
-      email.text,
-      password.text,
-      remember: remember,
+    if (submitting) return;
+    setState(() {
+      submitting = true;
+      error = null;
+    });
+    final failure = await context.read<AppState>().startFieldSession(
+      FieldRegistration(
+        name: name.text,
+        email: email.text,
+        phone: phone.text,
+        crew: crew.text,
+      ),
     );
-    if (!mounted) {
-      return;
-    }
-    if (ok) {
+    if (!mounted) return;
+    setState(() => submitting = false);
+    if (failure == null) {
       context.go('/home');
     } else {
-      setState(() => error = 'Credenciales demo incorrectas');
+      setState(() => error = failure);
     }
   }
 
-  void message(String text) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
@@ -139,6 +149,20 @@ class _LoginPageState extends State<LoginPage> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             const Text(
+                              'Nombre completo',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 7),
+                            TextField(
+                              controller: name,
+                              textCapitalization: TextCapitalization.words,
+                              decoration: const InputDecoration(
+                                prefixIcon: Icon(Icons.person_outline),
+                                hintText: 'Nombre y apellidos',
+                              ),
+                            ),
+                            const SizedBox(height: 15),
+                            const Text(
                               'Correo electrónico',
                               style: TextStyle(fontWeight: FontWeight.w600),
                             ),
@@ -153,60 +177,53 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                             const SizedBox(height: 15),
                             const Text(
-                              'Contraseña',
+                              'Teléfono',
                               style: TextStyle(fontWeight: FontWeight.w600),
                             ),
                             const SizedBox(height: 7),
                             TextField(
-                              controller: password,
-                              obscureText: obscure,
-                              onSubmitted: (_) => submit(),
-                              decoration: InputDecoration(
-                                prefixIcon: const Icon(Icons.lock_outline),
-                                suffixIcon: IconButton(
-                                  onPressed: () =>
-                                      setState(() => obscure = !obscure),
-                                  icon: Icon(
-                                    obscure
-                                        ? Icons.visibility_outlined
-                                        : Icons.visibility_off_outlined,
-                                  ),
-                                ),
+                              controller: phone,
+                              keyboardType: TextInputType.phone,
+                              maxLength: 10,
+                              decoration: const InputDecoration(
+                                prefixIcon: Icon(Icons.phone_outlined),
+                                hintText: '10 dígitos',
                               ),
                             ),
-                            Row(
-                              children: [
-                                Checkbox(
-                                  value: remember,
-                                  onChanged: (v) =>
-                                      setState(() => remember = v ?? false),
-                                ),
-                                const Text('Recordar sesión'),
-                                const Spacer(),
-                                TextButton(
-                                  onPressed: () =>
-                                      message('Recuperación simulada'),
-                                  child: const Text('Recuperar'),
-                                ),
-                              ],
+                            const SizedBox(height: 5),
+                            const Text(
+                              'Cuadrilla',
+                              style: TextStyle(fontWeight: FontWeight.w600),
                             ),
+                            const SizedBox(height: 7),
+                            TextField(
+                              controller: crew,
+                              textCapitalization: TextCapitalization.characters,
+                              onSubmitted: (_) => submit(),
+                              decoration: const InputDecoration(
+                                prefixIcon: Icon(Icons.groups_outlined),
+                                hintText: 'Ejemplo: CUADRILLA NORTE 1',
+                              ),
+                            ),
+                            const SizedBox(height: 14),
                             if (error != null)
                               Text(
                                 error!,
                                 style: const TextStyle(color: AppColors.red),
                               ),
                             FilledButton(
-                              onPressed: submit,
-                              child: const Text('Iniciar sesión'),
-                            ),
-                            TextButton(
-                              onPressed: () => message(
-                                'La creación de cuentas estará disponible posteriormente.',
-                              ),
-                              child: const Text('Crear cuenta demo'),
+                              onPressed: submitting ? null : submit,
+                              child: submitting
+                                  ? const SizedBox.square(
+                                      dimension: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Iniciar sesión de campo'),
                             ),
                             const Text(
-                              'Acceso demo local, sin autenticación remota.',
+                              'La sesión se protege en el almacenamiento seguro del dispositivo.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 11,

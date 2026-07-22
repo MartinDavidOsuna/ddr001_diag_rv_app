@@ -6,6 +6,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/services/app_state.dart';
+import '../core/config/app_config.dart';
+import '../core/network/api_client.dart';
 import '../data/local/visual_inspection_repository.dart';
 import '../data/local/functional_repositories.dart';
 import '../data/local/integrity_audit_service.dart';
@@ -13,6 +15,10 @@ import '../data/local/operation_journal_repository.dart';
 import '../data/local/quarantine_repository.dart';
 import '../data/local/recovery_coordinator.dart';
 import '../data/local/media_reconciliation_service.dart';
+import '../features/auth/data/field_session_repository.dart';
+import '../features/auth/data/session_secure_storage.dart';
+import '../features/hydrants/data/hydrant_repository.dart';
+import '../features/checklist/data/checklist_repository.dart';
 
 Future<AppState> bootstrap() async {
   await initializeDateFormatting('es');
@@ -29,6 +35,8 @@ Future<AppState> bootstrap() async {
   await Hive.openBox<String>('inspection_photos_v1');
   await Hive.openBox<String>('hydrant_configurations_v1');
   await Hive.openBox<String>('local_hydrants_v1');
+  final hydrantBox = Hive.box<String>('local_hydrants_v1');
+  final checklistBox = await Hive.openBox<String>('rv_checklist_cache_v1');
   await Hive.openBox<String>('media_work_queue_v1');
   final functionalEligibilityBox = await Hive.openBox<String>(
     'functional_eligibility_v1',
@@ -70,6 +78,14 @@ Future<AppState> bootstrap() async {
   await MediaReconciliationService().reconcile();
   final preferences = await SharedPreferences.getInstance();
   final packageInfo = await PackageInfo.fromPlatform();
+  final config = AppConfig.fromEnvironment();
+  final sessionStorage = SessionSecureStorage();
+  final apiClient = ApiClient(config: config, sessionStorage: sessionStorage);
+  final sessionRepository = FieldSessionRepository(
+    client: apiClient,
+    storage: sessionStorage,
+    packageInfo: packageInfo,
+  );
   final state = AppState(
     preferences: preferences,
     traceBox: traceBox,
@@ -87,6 +103,12 @@ Future<AppState> bootstrap() async {
     functionalInspectionRepository: FunctionalInspectionRepository(
       documents: functionalInspectionBox,
       index: functionalInspectionIndexBox,
+    ),
+    sessionRepository: sessionRepository,
+    hydrantRepository: HydrantRepository(client: apiClient, box: hydrantBox),
+    checklistRepository: ChecklistRepository(
+      client: apiClient,
+      box: checklistBox,
     ),
   );
   await state.initialize();

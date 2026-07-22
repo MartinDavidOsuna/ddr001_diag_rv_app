@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../../core/config/app_config.dart';
 import '../../core/constants/report_type_labels.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
@@ -53,7 +54,7 @@ class _HydrantsPageState extends State<HydrantsPage> {
 
   Future<void> syncAssignments(AppState state) async {
     if (state.assignmentSyncing) return;
-    await state.synchronizeNextAssignmentScenario();
+    await state.synchronizeAssignments();
     if (!mounted) return;
     final result = state.lastAssignmentResult;
     final failed = state.assignmentError != null;
@@ -144,16 +145,21 @@ class _HydrantsPageState extends State<HydrantsPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: state.editingRestricted
-            ? null
-            : () {
-                state.trace('new_survey_open', 'Abrir nuevo levantamiento');
-                context.push('/hydrants/new');
-              },
-        icon: const Icon(Icons.add_location_alt_outlined),
-        label: const Text('NUEVO LEVANTAMIENTO'),
-      ),
+      floatingActionButton: AppConfig.rvOnly
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: state.editingRestricted
+                  ? null
+                  : () {
+                      state.trace(
+                        'new_survey_open',
+                        'Abrir nuevo levantamiento',
+                      );
+                      context.push('/hydrants/new');
+                    },
+              icon: const Icon(Icons.add_location_alt_outlined),
+              label: const Text('NUEVO LEVANTAMIENTO'),
+            ),
       body: Column(
         children: [
           Padding(
@@ -454,16 +460,22 @@ class HydrantDetailPage extends StatelessWidget {
             onPressed: () => _openInspection(context, state, h.f02a, 'a'),
           ),
           const SizedBox(height: 13),
-          DiagnosticCard(
-            type: ReportTypeLabels.functionalFull,
-            summary: functionalSummary,
-            color: AppColors.violet,
-            forceEnabled: true,
-            statusOverride: state.functionalStateLabel(id),
-            onPressed: () =>
-                _openFunctionalInspection(context, state, h, functionalSummary),
-          ),
-          if (functionalSummary.status == InspectionStatus.completed) ...[
+          if (!AppConfig.rvOnly)
+            DiagnosticCard(
+              type: ReportTypeLabels.functionalFull,
+              summary: functionalSummary,
+              color: AppColors.violet,
+              forceEnabled: true,
+              statusOverride: state.functionalStateLabel(id),
+              onPressed: () => _openFunctionalInspection(
+                context,
+                state,
+                h,
+                functionalSummary,
+              ),
+            ),
+          if (!AppConfig.rvOnly &&
+              functionalSummary.status == InspectionStatus.completed) ...[
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: state.editingRestricted
@@ -487,7 +499,8 @@ class HydrantDetailPage extends StatelessWidget {
             icon: const Icon(Icons.photo_library_outlined),
             label: const Text('Abrir galería local'),
           ),
-          if (visualHistory.length > 1 || functionalHistory.length > 1) ...[
+          if (visualHistory.length > 1 ||
+              (!AppConfig.rvOnly && functionalHistory.length > 1)) ...[
             const SizedBox(height: 12),
             SectionCard(
               child: ExpansionTile(
@@ -502,15 +515,16 @@ class HydrantDetailPage extends StatelessWidget {
                         '${report.revisionReason.isEmpty ? 'Sin motivo de revisión' : report.revisionReason}\n${report.updatedAt.toLocal()}${report.activeRevision ? ' · Vigente' : ''}',
                       ),
                     ),
-                  for (final report in functionalHistory)
-                    ListTile(
-                      title: Text(
-                        'RF · ${report.revisionNumber == 0 ? 'Original' : 'Revisión ${report.revisionNumber}'}',
+                  if (!AppConfig.rvOnly)
+                    for (final report in functionalHistory)
+                      ListTile(
+                        title: Text(
+                          'RF · ${report.revisionNumber == 0 ? 'Original' : 'Revisión ${report.revisionNumber}'}',
+                        ),
+                        subtitle: Text(
+                          '${report.revisionReason.isEmpty ? 'Sin motivo de revisión' : report.revisionReason}\n${report.updatedAt.toLocal()}${report.activeRevision ? ' · Vigente' : ''}',
+                        ),
                       ),
-                      subtitle: Text(
-                        '${report.revisionReason.isEmpty ? 'Sin motivo de revisión' : report.revisionReason}\n${report.updatedAt.toLocal()}${report.activeRevision ? ' · Vigente' : ''}',
-                      ),
-                    ),
                 ],
               ),
             ),

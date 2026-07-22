@@ -39,66 +39,73 @@ void main() {
       restoredRepository.find('op-1')?.status,
       JournalStatus.documentsWritten,
     );
-    expect(
-      restoredRepository.pending().map((value) => value.operationId),
-      ['op-1'],
-    );
+    expect(restoredRepository.pending().map((value) => value.operationId), [
+      'op-1',
+    ]);
     expect(reopened.get('corrupt'), '{not-json');
   });
 
-  test('cuarentena conserva íntegramente el documento y hash estable', () async {
-    final repository = QuarantineRepository(Hive.box<String>('quarantine_v1'));
-    const original = '{"token":"no-se-elimina","broken":';
-    final first = await repository.preserve(
-      sourceBox: 'visual_inspections_v1',
-      sourceKey: 'rv-bad',
-      originalDocument: original,
-      errorType: 'corruptJson',
-      technicalMessage: 'JSON truncado',
-    );
-    final second = await repository.preserve(
-      sourceBox: 'visual_inspections_v1',
-      sourceKey: 'rv-bad-2',
-      originalDocument: original,
-      errorType: 'corruptJson',
-      technicalMessage: 'JSON truncado',
-    );
+  test(
+    'cuarentena conserva íntegramente el documento y hash estable',
+    () async {
+      final repository = QuarantineRepository(
+        Hive.box<String>('quarantine_v1'),
+      );
+      const original = '{"token":"no-se-elimina","broken":';
+      final first = await repository.preserve(
+        sourceBox: 'visual_inspections_v1',
+        sourceKey: 'rv-bad',
+        originalDocument: original,
+        errorType: 'corruptJson',
+        technicalMessage: 'JSON truncado',
+      );
+      final second = await repository.preserve(
+        sourceBox: 'visual_inspections_v1',
+        sourceKey: 'rv-bad-2',
+        originalDocument: original,
+        errorType: 'corruptJson',
+        technicalMessage: 'JSON truncado',
+      );
 
-    expect(first.originalDocument, original);
-    expect(first.contentHash, second.contentHash);
-    expect(Hive.box<String>('quarantine_v1').length, 2);
-  });
+      expect(first.originalDocument, original);
+      expect(first.contentHash, second.contentHash);
+      expect(Hive.box<String>('quarantine_v1').length, 2);
+    },
+  );
 
-  test('cola respeta dependencias y no considera ilegibles sincronizados', () async {
-    final box = Hive.box<String>('sync_queue');
-    final repository = SyncQueueRepository(box);
-    final now = DateTime.utc(2026, 7, 15);
-    SyncQueueItem item(
-      String id,
-      SyncQueueStatus status, {
-      List<String> dependencies = const [],
-    }) => SyncQueueItem(
-      id: id,
-      entityType: 'test',
-      entityId: id,
-      dependencyIds: dependencies,
-      status: status,
-      createdAt: now,
-      updatedAt: now,
-    );
+  test(
+    'cola respeta dependencias y no considera ilegibles sincronizados',
+    () async {
+      final box = Hive.box<String>('sync_queue');
+      final repository = SyncQueueRepository(box);
+      final now = DateTime.utc(2026, 7, 15);
+      SyncQueueItem item(
+        String id,
+        SyncQueueStatus status, {
+        List<String> dependencies = const [],
+      }) => SyncQueueItem(
+        id: id,
+        entityType: 'test',
+        entityId: id,
+        dependencyIds: dependencies,
+        status: status,
+        createdAt: now,
+        updatedAt: now,
+      );
 
-    await repository.save(item('hydrant', SyncQueueStatus.synced));
-    await repository.save(
-      item('report', SyncQueueStatus.pending, dependencies: ['hydrant']),
-    );
-    await repository.save(
-      item('photo', SyncQueueStatus.pending, dependencies: ['report']),
-    );
+      await repository.save(item('hydrant', SyncQueueStatus.synced));
+      await repository.save(
+        item('report', SyncQueueStatus.pending, dependencies: ['hydrant']),
+      );
+      await repository.save(
+        item('photo', SyncQueueStatus.pending, dependencies: ['report']),
+      );
 
-    expect(repository.ready().map((value) => value.id), ['report']);
-    expect(repository.allSynchronized, isFalse);
-    await box.put('bad', 'not json');
-    expect(repository.unreadableCount, 1);
-    expect(box.containsKey('bad'), isTrue);
-  });
+      expect(repository.ready().map((value) => value.id), ['report']);
+      expect(repository.allSynchronized, isFalse);
+      await box.put('bad', 'not json');
+      expect(repository.unreadableCount, 1);
+      expect(box.containsKey('bad'), isTrue);
+    },
+  );
 }

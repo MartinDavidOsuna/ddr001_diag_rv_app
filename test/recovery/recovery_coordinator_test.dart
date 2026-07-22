@@ -17,7 +17,9 @@ void main() {
   setUp(() async {
     environment = HiveTestEnvironment();
     await environment.open();
-    journal = OperationJournalRepository(Hive.box<String>('operation_journal_v1'));
+    journal = OperationJournalRepository(
+      Hive.box<String>('operation_journal_v1'),
+    );
     recovery = RecoveryCoordinator(
       auditService: const IntegrityAuditService(),
       journal: journal,
@@ -47,7 +49,9 @@ void main() {
   test('prepared vacío se compensa sin inventar documentos', () async {
     await journal.save(entry(id: 'op-empty', status: JournalStatus.prepared));
 
-    final outcome = await recovery.recoverJournalEntry(journal.find('op-empty')!);
+    final outcome = await recovery.recoverJournalEntry(
+      journal.find('op-empty')!,
+    );
 
     expect(outcome, JournalRecoveryOutcome.safelyCompensated);
     expect(journal.find('op-empty')?.status, JournalStatus.failed);
@@ -73,33 +77,53 @@ void main() {
     final outcome = await recovery.recoverJournalEntry(journal.find('op-rv')!);
 
     expect(outcome, JournalRecoveryOutcome.committed);
-    expect(Hive.box<String>('active_inspection_index_v1').get('h-1:f02A'), 'rv-1');
+    expect(
+      Hive.box<String>('active_inspection_index_v1').get('h-1:f02A'),
+      'rv-1',
+    );
     expect(journal.find('op-rv')?.status, JournalStatus.committed);
   });
 
-  test('queueWritten incompleto queda recuperable y conserva evidencia', () async {
-    final source = entry(
-      id: 'op-partial',
-      status: JournalStatus.queueWritten,
-      documents: const ['missing-report'],
-      queues: const ['missing-queue'],
-    );
-    await journal.save(source);
+  test(
+    'queueWritten incompleto queda recuperable y conserva evidencia',
+    () async {
+      final source = entry(
+        id: 'op-partial',
+        status: JournalStatus.queueWritten,
+        documents: const ['missing-report'],
+        queues: const ['missing-queue'],
+      );
+      await journal.save(source);
 
-    final outcome = await recovery.recoverJournalEntry(source);
+      final outcome = await recovery.recoverJournalEntry(source);
 
-    expect(outcome, JournalRecoveryOutcome.manualReview);
-    expect(journal.find(source.operationId)?.status, JournalStatus.needsRecovery);
-    expect(journal.find(source.operationId)?.lastError, contains('queueWritten'));
-  });
+      expect(outcome, JournalRecoveryOutcome.manualReview);
+      expect(
+        journal.find(source.operationId)?.status,
+        JournalStatus.needsRecovery,
+      );
+      expect(
+        journal.find(source.operationId)?.lastError,
+        contains('queueWritten'),
+      );
+    },
+  );
 
   test('auditor detecta índice huérfano y recuperación lo retira', () async {
-    await Hive.box<String>('active_inspection_index_v1').put('h-1:f02A', 'missing');
+    await Hive.box<String>(
+      'active_inspection_index_v1',
+    ).put('h-1:f02A', 'missing');
 
     final summary = await recovery.runLightweight();
 
-    expect(summary.audit.issues.any((issue) => issue.entityId == 'missing'), isTrue);
-    expect(Hive.box<String>('active_inspection_index_v1').containsKey('h-1:f02A'), isFalse);
+    expect(
+      summary.audit.issues.any((issue) => issue.entityId == 'missing'),
+      isTrue,
+    );
+    expect(
+      Hive.box<String>('active_inspection_index_v1').containsKey('h-1:f02A'),
+      isFalse,
+    );
     expect(summary.repaired, greaterThanOrEqualTo(1));
   });
 }

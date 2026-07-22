@@ -44,8 +44,11 @@ void main() {
     );
   }
 
-  testWidgets('cuenta solo archivos válidos y abre la categoría', (tester) async {
-    final validFile = File('${directory.path}/valid.jpg')..writeAsBytesSync([1, 2, 3]);
+  testWidgets('cuenta solo archivos válidos y abre la categoría', (
+    tester,
+  ) async {
+    final validFile = File('${directory.path}/valid.jpg')
+      ..writeAsBytesSync([1, 2, 3]);
     var opened = false;
     await tester.pumpWidget(
       MaterialApp(
@@ -69,7 +72,9 @@ void main() {
     expect(opened, isTrue);
   });
 
-  testWidgets('cero fotos comunica requisito pendiente y no abre', (tester) async {
+  testWidgets('cero fotos comunica requisito pendiente y no abre', (
+    tester,
+  ) async {
     var opened = false;
     await tester.pumpWidget(
       MaterialApp(

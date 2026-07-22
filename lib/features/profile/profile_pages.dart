@@ -175,9 +175,14 @@ class ProfilePage extends StatelessWidget {
               side: const BorderSide(color: Color(0xFFFFAAAA)),
             ),
             onPressed: () async {
-              await state.logout();
-              if (context.mounted) {
+              final closed = await state.logout();
+              if (context.mounted && closed) {
                 context.go('/login');
+              } else if (context.mounted) {
+                _message(
+                  context,
+                  'Sin conexión. El cierre de sesión quedó pendiente.',
+                );
               }
             },
             icon: const Icon(Icons.logout),
@@ -289,7 +294,7 @@ class ManualPage extends StatelessWidget {
             ),
             (
               '8. Términos de captura',
-              'RV es REPORTE VISUAL y RF es REPORTE FUNCIONAL. Sin sincronizar indica datos pendientes. No aplica es diferente de No realizada. No verificado indica que no fue posible confirmar Sí o No. Visita sin prueba documenta una visita donde no se ejecutaron pruebas.',
+              'RV es REVISIÓN VISUAL. Sin sincronizar indica datos pendientes. No aplica es diferente de No realizada. No verificado indica que no fue posible confirmar Sí o No.',
             ),
           ]) ...[
             SectionCard(

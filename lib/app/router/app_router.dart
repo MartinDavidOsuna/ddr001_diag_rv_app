@@ -1,13 +1,13 @@
 import 'package:go_router/go_router.dart';
 
 import '../../core/services/app_state.dart';
+import '../../core/config/app_config.dart';
 import '../../features/auth/auth_pages.dart';
 import '../../features/home/home_page.dart';
 import '../../features/hydrants/hydrant_pages.dart';
 import '../../features/visual_report/presentation/visual_report_page.dart';
 import '../../features/hydrants/new_survey_page.dart';
 import '../../features/hydrants/photo_gallery_page.dart';
-import '../../features/functional/functional_inspection_page.dart';
 import '../../features/map/map_page.dart';
 import '../../features/profile/profile_pages.dart';
 import '../../features/shell/main_shell.dart';
@@ -62,6 +62,7 @@ GoRouter createRouter(AppState state) => GoRouter(
               routes: [
                 GoRoute(
                   path: 'new',
+                  redirect: (_, _) => AppConfig.rvOnly ? '/hydrants' : null,
                   builder: (_, _) => state.editingRestricted
                       ? const PlaceholderPage(
                           title: 'Actualización requerida',
@@ -77,14 +78,16 @@ GoRouter createRouter(AppState state) => GoRouter(
                   routes: [
                     GoRoute(
                       path: 'inspection/:type',
-                      builder: (_, route) => route.pathParameters['type'] == 'b'
-                          ? FunctionalInspectionPage(
-                              hydrantId: route.pathParameters['id']!,
-                            )
-                          : VisualReportPage(
-                              hydrantId: route.pathParameters['id']!,
-                              type: route.pathParameters['type']!,
-                            ),
+                      redirect: (_, route) =>
+                          !AppConfig.isInspectionTypeEnabled(
+                            route.pathParameters['type'] ?? '',
+                          )
+                          ? '/hydrants/${route.pathParameters['id']}'
+                          : null,
+                      builder: (_, route) => VisualReportPage(
+                        hydrantId: route.pathParameters['id']!,
+                        type: 'a',
+                      ),
                     ),
                     GoRoute(
                       path: 'gallery',

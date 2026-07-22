@@ -204,3 +204,7 @@ La lista inicial se limita a Etapas 0–2; etapas posteriores se concretarán tr
 - `test/checklist/checklist_repository_test.dart`
 
 No se proponen cambios en `DDR001_API_RV`, sus scripts SQL ni `DDR001_DIAG`.
+
+## 13. Avance ejecutado en `feature/rv-foundation` (2026-07-22)
+
+Las Etapas 0–2 quedaron implementadas: plataformas nativas restauradas sin secretos, configuración central, Dio autenticado con refresh rotativo, sesión de campo segura, `installationId`, hidrantes cache-first, checklist dinámico con ETag/304 y flag RV-only. La suite pasó de 85 a 101 pruebas y se generó APK debug. El flujo de respuestas, evidencia y submit permanece deliberadamente para la etapa siguiente. Véase `plans/03_implementacion_base_rv.md` para evidencia, comandos y riesgos.

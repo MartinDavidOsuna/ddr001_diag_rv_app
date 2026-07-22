@@ -1,13 +1,19 @@
 import 'package:ddr001diag/core/services/app_state.dart';
+import 'package:ddr001diag/core/config/app_config.dart';
+import 'package:ddr001diag/core/network/api_client.dart';
 import 'package:ddr001diag/data/local/functional_repositories.dart';
 import 'package:ddr001diag/data/local/visual_inspection_repository.dart';
 import 'package:ddr001diag/domain/enums/hydrant_list_filter.dart';
+import 'package:ddr001diag/features/auth/data/field_session_repository.dart';
+import 'package:ddr001diag/features/hydrants/data/hydrant_repository.dart';
+import 'package:ddr001diag/features/checklist/data/checklist_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../helpers/hive_test_environment.dart';
+import '../helpers/foundation_fakes.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -18,6 +24,14 @@ void main() {
     SharedPreferences.setMockInitialValues({'demo_session': true});
     environment = HiveTestEnvironment();
     await environment.open();
+    final storage = MemorySessionStorage();
+    final client = ApiClient(
+      config: AppConfig.fromEnvironment(
+        environmentOverride: 'development',
+        apiBaseUrlOverride: 'https://example.test/api/v1',
+      ),
+      sessionStorage: storage,
+    );
     state = AppState(
       preferences: await SharedPreferences.getInstance(),
       traceBox: Hive.box<String>('trace_events'),
@@ -41,6 +55,24 @@ void main() {
         documents: Hive.box<String>('functional_inspections_v1'),
         index: Hive.box<String>('active_functional_inspection_index_v1'),
       ),
+      sessionRepository: FieldSessionRepository(
+        client: client,
+        storage: storage,
+        packageInfo: PackageInfo(
+          appName: 'DIAGNOSTICO HIDRANTES',
+          packageName: 'ddr001diag',
+          version: '0.2.0',
+          buildNumber: '3',
+        ),
+      ),
+      hydrantRepository: HydrantRepository(
+        client: client,
+        box: Hive.box<String>('local_hydrants_v1'),
+      ),
+      checklistRepository: ChecklistRepository(
+        client: client,
+        box: Hive.box<String>('rv_checklist_cache_v1'),
+      ),
     );
   });
   tearDown(() async {
@@ -48,32 +80,38 @@ void main() {
     await environment.close();
   });
 
-  test('Inicio publica un request único que conserva filtro hasta consumirse', () {
-    state.requestHydrantListFilterFromHome(
-      HydrantListFilter.synchronizationPending,
-    );
-    final first = state.hydrantFilterRequest!;
-    expect(state.hydrantListFilter, HydrantListFilter.synchronizationPending);
-    expect(first.id, startsWith('home-'));
+  test(
+    'Inicio publica un request único que conserva filtro hasta consumirse',
+    () {
+      state.requestHydrantListFilterFromHome(
+        HydrantListFilter.synchronizationPending,
+      );
+      final first = state.hydrantFilterRequest!;
+      expect(state.hydrantListFilter, HydrantListFilter.synchronizationPending);
+      expect(first.id, startsWith('home-'));
 
-    state.consumeHydrantFilterRequest('otro-id');
-    expect(state.hydrantFilterRequest?.id, first.id);
-    state.consumeHydrantFilterRequest(first.id);
-    expect(state.hydrantFilterRequest, isNull);
-    expect(state.hydrantListFilter, HydrantListFilter.synchronizationPending);
-  });
+      state.consumeHydrantFilterRequest('otro-id');
+      expect(state.hydrantFilterRequest?.id, first.id);
+      state.consumeHydrantFilterRequest(first.id);
+      expect(state.hydrantFilterRequest, isNull);
+      expect(state.hydrantListFilter, HydrantListFilter.synchronizationPending);
+    },
+  );
 
-  test('una nueva métrica reemplaza la solicitud sin crear estado paralelo', () {
-    state.requestHydrantListFilterFromHome(HydrantListFilter.completed);
-    final firstId = state.hydrantFilterRequest!.id;
-    state.requestHydrantListFilterFromHome(HydrantListFilter.inProgress);
+  test(
+    'una nueva métrica reemplaza la solicitud sin crear estado paralelo',
+    () {
+      state.requestHydrantListFilterFromHome(HydrantListFilter.completed);
+      final firstId = state.hydrantFilterRequest!.id;
+      state.requestHydrantListFilterFromHome(HydrantListFilter.inProgress);
 
-    expect(state.hydrantFilterRequest?.id, isNot(firstId));
-    expect(state.hydrantFilterRequest?.filter, HydrantListFilter.inProgress);
-    state.clearHydrantListFilter();
-    expect(state.hydrantListFilter, HydrantListFilter.all);
-    expect(state.hydrantFilterRequest, isNull);
-  });
+      expect(state.hydrantFilterRequest?.id, isNot(firstId));
+      expect(state.hydrantFilterRequest?.filter, HydrantListFilter.inProgress);
+      state.clearHydrantListFilter();
+      expect(state.hydrantListFilter, HydrantListFilter.all);
+      expect(state.hydrantFilterRequest, isNull);
+    },
+  );
 
   test('conteo y lista consultan la misma proyección central', () {
     for (final filter in const [

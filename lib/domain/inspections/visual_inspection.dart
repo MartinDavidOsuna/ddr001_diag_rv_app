@@ -557,10 +557,8 @@ class VisualInspection {
     status: status ?? this.status,
     currentStep: currentStep ?? this.currentStep,
     visualFlowVersion: visualFlowVersion ?? this.visualFlowVersion,
-    publicComponentIndex:
-        publicComponentIndex ?? this.publicComponentIndex,
-    privateComponentIndex:
-        privateComponentIndex ?? this.privateComponentIndex,
+    publicComponentIndex: publicComponentIndex ?? this.publicComponentIndex,
+    privateComponentIndex: privateComponentIndex ?? this.privateComponentIndex,
     inspectorId: inspectorId,
     inspectorName: inspectorName,
     brigadeId: brigadeId,
@@ -635,8 +633,9 @@ class VisualInspection {
     'flowMeter': flowMeter.toJson(),
     'flowMeterComponentConfirmed': flowMeterComponentConfirmed,
     'flowMeterComponentReviewedBy': flowMeterComponentReviewedBy,
-    'flowMeterComponentReviewedAt':
-        flowMeterComponentReviewedAt?.toUtc().toIso8601String(),
+    'flowMeterComponentReviewedAt': flowMeterComponentReviewedAt
+        ?.toUtc()
+        .toIso8601String(),
     'pressureValve': pressureValve.toJson(),
     'energyCommunication': energyCommunication.toJson(),
     'damageIds': damageIds,
@@ -652,121 +651,162 @@ class VisualInspection {
     'activeRevision': activeRevision,
     'supervisorReviewRequired': supervisorReviewRequired,
     'hydrantConfiguration': hydrantConfiguration?.toJson(),
-    'componentInspections': componentInspections.map((e) => e.toJson()).toList(),
+    'componentInspections': componentInspections
+        .map((e) => e.toJson())
+        .toList(),
     'outletInspections': outletInspections.map((e) => e.toJson()).toList(),
     'victaulicGroupInspection': victaulicGroupInspection?.toJson(),
   };
   factory VisualInspection.fromJson(Map<String, dynamic> j) {
     const known = {
-      'id','hydrantId','assignmentId','source','status','currentStep',
-      'visualFlowVersion','publicComponentIndex','privateComponentIndex',
-      'inspectorId','inspectorName','brigadeId','brigadeName','deviceId',
-      'startedAt','completedAt','createdAt','createdBy','updatedAt','updatedBy',
-      'schemaVersion','identification','geoReference','access','flowMeter',
-      'flowMeterComponentConfirmed','flowMeterComponentReviewedBy',
+      'id',
+      'hydrantId',
+      'assignmentId',
+      'source',
+      'status',
+      'currentStep',
+      'visualFlowVersion',
+      'publicComponentIndex',
+      'privateComponentIndex',
+      'inspectorId',
+      'inspectorName',
+      'brigadeId',
+      'brigadeName',
+      'deviceId',
+      'startedAt',
+      'completedAt',
+      'createdAt',
+      'createdBy',
+      'updatedAt',
+      'updatedBy',
+      'schemaVersion',
+      'identification',
+      'geoReference',
+      'access',
+      'flowMeter',
+      'flowMeterComponentConfirmed',
+      'flowMeterComponentReviewedBy',
       'flowMeterComponentReviewedAt',
-      'pressureValve','energyCommunication','damageIds','photoIds','result',
-      'closureComments','noVisibleDamageConfirmed','damageAssessments',
-      'revisionOfReportId','revisionNumber','previousRevisionId',
-      'revisionReason','activeRevision','supervisorReviewRequired',
-      'hydrantConfiguration','componentInspections','outletInspections',
+      'pressureValve',
+      'energyCommunication',
+      'damageIds',
+      'photoIds',
+      'result',
+      'closureComments',
+      'noVisibleDamageConfirmed',
+      'damageAssessments',
+      'revisionOfReportId',
+      'revisionNumber',
+      'previousRevisionId',
+      'revisionReason',
+      'activeRevision',
+      'supervisorReviewRequired',
+      'hydrantConfiguration',
+      'componentInspections',
+      'outletInspections',
       'victaulicGroupInspection',
     };
     return VisualInspection(
-    id: j['id'] as String,
-    hydrantId: j['hydrantId'] as String,
-    assignmentId: j['assignmentId'] as String?,
-    source: _enum(HydrantSource.values, j['source'], HydrantSource.assigned),
-    status: _enum(
-      InspectionStatus.values,
-      j['status'],
-      InspectionStatus.inProgress,
-    ),
-    currentStep: j['currentStep'] as int? ?? 1,
-    visualFlowVersion: j['visualFlowVersion'] as int? ?? 1,
-    publicComponentIndex: j['publicComponentIndex'] as int? ?? 0,
-    privateComponentIndex: j['privateComponentIndex'] as int? ?? 0,
-    inspectorId: j['inspectorId'] as String? ?? '',
-    inspectorName: j['inspectorName'] as String? ?? '',
-    brigadeId: j['brigadeId'] as String? ?? '',
-    brigadeName: j['brigadeName'] as String? ?? '',
-    deviceId: j['deviceId'] as String? ?? '',
-    startedAt: _date(j['startedAt']),
-    completedAt: DateTime.tryParse(j['completedAt'] as String? ?? '')?.toUtc(),
-    createdAt: _date(j['createdAt']),
-    createdBy: j['createdBy'] as String? ?? '',
-    updatedAt: _date(j['updatedAt']),
-    updatedBy: j['updatedBy'] as String? ?? '',
-    schemaVersion: j['schemaVersion'] as int? ?? 1,
-    identification: HydrantIdentification.fromJson(
-      Map<String, dynamic>.from(j['identification'] as Map? ?? {}),
-    ),
-    geoReference: GeoReference.fromJson(
-      Map<String, dynamic>.from(j['geoReference'] as Map? ?? {}),
-    ),
-    access: AccessAssessment.fromJson(
-      Map<String, dynamic>.from(j['access'] as Map? ?? {}),
-    ),
-    flowMeter: FlowMeterAssessment.fromJson(
-      Map<String, dynamic>.from(j['flowMeter'] as Map? ?? {}),
-    ),
-    flowMeterComponentConfirmed:
-        j['flowMeterComponentConfirmed'] as bool? ?? false,
-    flowMeterComponentReviewedBy:
-        j['flowMeterComponentReviewedBy'] as String?,
-    flowMeterComponentReviewedAt: DateTime.tryParse(
-      j['flowMeterComponentReviewedAt'] as String? ?? '',
-    )?.toUtc(),
-    pressureValve: PressureValveAssessment.fromJson(
-      Map<String, dynamic>.from(j['pressureValve'] as Map? ?? {}),
-    ),
-    energyCommunication: EnergyCommunicationAssessment.fromJson(
-      Map<String, dynamic>.from(j['energyCommunication'] as Map? ?? {}),
-    ),
-    damageIds: (j['damageIds'] as List? ?? []).cast<String>(),
-    photoIds: (j['photoIds'] as List? ?? []).cast<String>(),
-    result: VisualInspectionResult.fromJson(
-      Map<String, dynamic>.from(j['result'] as Map? ?? {}),
-    ),
-    closureComments: j['closureComments'] as String? ?? '',
-    noVisibleDamageConfirmed: j['noVisibleDamageConfirmed'] as bool? ?? false,
-    damageAssessments: {
-      for (final entry in Map<String, dynamic>.from(
-        j['damageAssessments'] as Map? ?? const {},
-      ).entries)
-        entry.key: Map<String, dynamic>.from(entry.value as Map? ?? const {}),
-    },
-    revisionOfReportId: j['revisionOfReportId'] as String?,
-    revisionNumber: j['revisionNumber'] as int? ?? 0,
-    previousRevisionId: j['previousRevisionId'] as String?,
-    revisionReason: j['revisionReason'] as String? ?? '',
-    activeRevision: j['activeRevision'] as bool? ?? true,
-    supervisorReviewRequired: j['supervisorReviewRequired'] as bool? ?? false,
-    hydrantConfiguration: j['hydrantConfiguration'] is Map
-        ? VisualHydrantConfiguration.fromJson(
-            Map<String, dynamic>.from(j['hydrantConfiguration'] as Map),
-          )
-        : null,
-    componentInspections: (j['componentInspections'] as List? ?? const [])
-        .map((e) => VisualComponentInspection.fromJson(
+      id: j['id'] as String,
+      hydrantId: j['hydrantId'] as String,
+      assignmentId: j['assignmentId'] as String?,
+      source: _enum(HydrantSource.values, j['source'], HydrantSource.assigned),
+      status: _enum(
+        InspectionStatus.values,
+        j['status'],
+        InspectionStatus.inProgress,
+      ),
+      currentStep: j['currentStep'] as int? ?? 1,
+      visualFlowVersion: j['visualFlowVersion'] as int? ?? 1,
+      publicComponentIndex: j['publicComponentIndex'] as int? ?? 0,
+      privateComponentIndex: j['privateComponentIndex'] as int? ?? 0,
+      inspectorId: j['inspectorId'] as String? ?? '',
+      inspectorName: j['inspectorName'] as String? ?? '',
+      brigadeId: j['brigadeId'] as String? ?? '',
+      brigadeName: j['brigadeName'] as String? ?? '',
+      deviceId: j['deviceId'] as String? ?? '',
+      startedAt: _date(j['startedAt']),
+      completedAt: DateTime.tryParse(
+        j['completedAt'] as String? ?? '',
+      )?.toUtc(),
+      createdAt: _date(j['createdAt']),
+      createdBy: j['createdBy'] as String? ?? '',
+      updatedAt: _date(j['updatedAt']),
+      updatedBy: j['updatedBy'] as String? ?? '',
+      schemaVersion: j['schemaVersion'] as int? ?? 1,
+      identification: HydrantIdentification.fromJson(
+        Map<String, dynamic>.from(j['identification'] as Map? ?? {}),
+      ),
+      geoReference: GeoReference.fromJson(
+        Map<String, dynamic>.from(j['geoReference'] as Map? ?? {}),
+      ),
+      access: AccessAssessment.fromJson(
+        Map<String, dynamic>.from(j['access'] as Map? ?? {}),
+      ),
+      flowMeter: FlowMeterAssessment.fromJson(
+        Map<String, dynamic>.from(j['flowMeter'] as Map? ?? {}),
+      ),
+      flowMeterComponentConfirmed:
+          j['flowMeterComponentConfirmed'] as bool? ?? false,
+      flowMeterComponentReviewedBy:
+          j['flowMeterComponentReviewedBy'] as String?,
+      flowMeterComponentReviewedAt: DateTime.tryParse(
+        j['flowMeterComponentReviewedAt'] as String? ?? '',
+      )?.toUtc(),
+      pressureValve: PressureValveAssessment.fromJson(
+        Map<String, dynamic>.from(j['pressureValve'] as Map? ?? {}),
+      ),
+      energyCommunication: EnergyCommunicationAssessment.fromJson(
+        Map<String, dynamic>.from(j['energyCommunication'] as Map? ?? {}),
+      ),
+      damageIds: (j['damageIds'] as List? ?? []).cast<String>(),
+      photoIds: (j['photoIds'] as List? ?? []).cast<String>(),
+      result: VisualInspectionResult.fromJson(
+        Map<String, dynamic>.from(j['result'] as Map? ?? {}),
+      ),
+      closureComments: j['closureComments'] as String? ?? '',
+      noVisibleDamageConfirmed: j['noVisibleDamageConfirmed'] as bool? ?? false,
+      damageAssessments: {
+        for (final entry in Map<String, dynamic>.from(
+          j['damageAssessments'] as Map? ?? const {},
+        ).entries)
+          entry.key: Map<String, dynamic>.from(entry.value as Map? ?? const {}),
+      },
+      revisionOfReportId: j['revisionOfReportId'] as String?,
+      revisionNumber: j['revisionNumber'] as int? ?? 0,
+      previousRevisionId: j['previousRevisionId'] as String?,
+      revisionReason: j['revisionReason'] as String? ?? '',
+      activeRevision: j['activeRevision'] as bool? ?? true,
+      supervisorReviewRequired: j['supervisorReviewRequired'] as bool? ?? false,
+      hydrantConfiguration: j['hydrantConfiguration'] is Map
+          ? VisualHydrantConfiguration.fromJson(
+              Map<String, dynamic>.from(j['hydrantConfiguration'] as Map),
+            )
+          : null,
+      componentInspections: (j['componentInspections'] as List? ?? const [])
+          .map(
+            (e) => VisualComponentInspection.fromJson(
               Map<String, dynamic>.from(e as Map),
-            ))
-        .toList(),
-    outletInspections: (j['outletInspections'] as List? ?? const [])
-        .map((e) => VisualOutletInspection.fromJson(
-              Map<String, dynamic>.from(e as Map),
-            ))
-        .toList(),
-    victaulicGroupInspection: j['victaulicGroupInspection'] is Map
-        ? VisualVictaulicGroupInspection.fromJson(
-            Map<String, dynamic>.from(j['victaulicGroupInspection'] as Map),
+            ),
           )
-        : null,
-    unknownFields: {
-      for (final entry in j.entries)
-        if (!known.contains(entry.key)) entry.key: entry.value,
-    },
-  );
+          .toList(),
+      outletInspections: (j['outletInspections'] as List? ?? const [])
+          .map(
+            (e) => VisualOutletInspection.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
+          .toList(),
+      victaulicGroupInspection: j['victaulicGroupInspection'] is Map
+          ? VisualVictaulicGroupInspection.fromJson(
+              Map<String, dynamic>.from(j['victaulicGroupInspection'] as Map),
+            )
+          : null,
+      unknownFields: {
+        for (final entry in j.entries)
+          if (!known.contains(entry.key)) entry.key: entry.value,
+      },
+    );
   }
 }
 

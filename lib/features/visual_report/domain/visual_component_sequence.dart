@@ -10,9 +10,9 @@ class VisualComponentSequenceItem {
   }) : kind = VisualSequenceItemKind.component;
 
   const VisualComponentSequenceItem.flowMeter()
-      : kind = VisualSequenceItemKind.canonicalFlowMeter,
-        definition = null,
-        outlet = null;
+    : kind = VisualSequenceItemKind.canonicalFlowMeter,
+      definition = null,
+      outlet = null;
 
   final VisualSequenceItemKind kind;
   final VisualComponentDefinition? definition;
@@ -38,9 +38,9 @@ abstract final class VisualComponentSequence {
       if (definition.type == VisualComponentType.flowMeter) {
         result.add(const VisualComponentSequenceItem.flowMeter());
       } else {
-        result.add(VisualComponentSequenceItem.component(
-          definition: definition,
-        ));
+        result.add(
+          VisualComponentSequenceItem.component(definition: definition),
+        );
       }
     }
     return result;
@@ -55,14 +55,15 @@ abstract final class VisualComponentSequence {
       ))
         VisualComponentSequenceItem.component(definition: definition),
     ];
-    for (final outlet in configuration.outlets
-        .where((item) => item.active)
-        .toList()
-      ..sort((a, b) => a.outletNumber.compareTo(b.outletNumber))) {
+    for (final outlet
+        in configuration.outlets.where((item) => item.active).toList()
+          ..sort((a, b) => a.outletNumber.compareTo(b.outletNumber))) {
       final outletComponents = configuration.components
-          .where((item) =>
-              item.compartment == VisualCompartment.outlet &&
-              item.outletNumber == outlet.outletNumber)
+          .where(
+            (item) =>
+                item.compartment == VisualCompartment.outlet &&
+                item.outletNumber == outlet.outletNumber,
+          )
           .toList();
       result.addAll([
         for (final definition in outletComponents)
