@@ -73,6 +73,7 @@ void main() {
           CachedHydrant(
             hydrantId: 'previous',
             accountNumber: 'CTA-000',
+            scope: 'mine',
             updatedAt: DateTime.utc(2025),
           ).toJson(),
         ),
@@ -85,6 +86,27 @@ void main() {
       expect(repository.lastUpdated, isNotNull);
     },
   );
+
+  test('caché separa catálogo general de lista personal', () async {
+    final adapter = FakeHttpAdapter(
+      (_) async => jsonResponse(
+        '{"items":[{"hydrant_id":"735d3d0e-78a3-4ca8-a34b-6c0513458d29","account_number":"CTA-ALL","rvStatus":"completed","latestInspectionStatus":"submitted"}],"total":1}',
+        200,
+      ),
+    );
+    final repository = HydrantRepository(
+      client: clientWith(adapter),
+      box: Hive.box<String>('local_hydrants_v1'),
+    );
+    await repository.refresh(scope: 'all');
+    expect(adapter.requests.single.queryParameters['scope'], 'all');
+    expect(repository.cached(scope: 'all').single.accountNumber, 'CTA-ALL');
+    expect(repository.cached(scope: 'mine'), isEmpty);
+    expect(
+      repository.cached(scope: 'all').single.toAppModel().f02a.status.name,
+      'completed',
+    );
+  });
 
   test('checklist 200 guarda definición y ETag', () async {
     final adapter = FakeHttpAdapter(

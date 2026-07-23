@@ -8,6 +8,7 @@ Fecha: 2026-07-22. Versión objetivo: `0.2.1+4`.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | ENV-001 | 2026-07-22 | Pixel 7 Pro | Android 17/API 37 | 0.2.1+4 | Entorno | `adb devices -l` | Equipo autorizado | Inicialmente vacío; después quedó autorizado | Bloqueante física | Transitoria | ADB/Flutter devices | Equipo aún no visible al inicio | Conectar y autorizar equipo | Verificada |
 | TOOL-001 | 2026-07-22 | N/A | N/A | 0.2.1+4 | Toolchain | `flutter --version` | Respuesta inmediata | Timeout >120 s dentro del sandbox | Alta | 100% en sandbox | Error de `lockfile` | Sandbox impedía escribir el lock del SDK | Ejecutar Flutter con permiso limitado al SDK | Verificada |
+| RV-001 | 2026-07-22 | Pixel 7 Pro | Android 17/API 37 | 0.2.1+4 | Inicio de sesión | Enviar datos que producen 409 | Explicar el conflicto | La app mostraba `Error desconocido` | Alta | 100% | Log `[API] ERROR 409` | `ApiException` no traducía conflictos | Traducir `phone-conflict` y `open-session-conflict`, con pruebas | Corregida |
 
 ## Plantilla de campo
 

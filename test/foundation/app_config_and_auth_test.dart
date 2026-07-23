@@ -236,6 +236,48 @@ void main() {
     expect(ApiException.fromDio(offline).message, 'Sin conexión.');
   });
 
+  test('conflicto de teléfono explica cómo corregir el inicio de sesión', () {
+    final request = RequestOptions(path: '/field-sessions/start');
+    final error = DioException(
+      requestOptions: request,
+      response: Response(
+        requestOptions: request,
+        statusCode: 409,
+        data: {
+          'type': 'https://rvs.example/problems/phone-conflict',
+          'title': 'Phone conflict',
+          'requestId': 'request-phone',
+        },
+      ),
+    );
+
+    final translated = ApiException.fromDio(error);
+    expect(translated.statusCode, 409);
+    expect(translated.requestId, 'request-phone');
+    expect(translated.message, contains('teléfono ya está registrado'));
+  });
+
+  test('conflicto de sesión abierta identifica el dispositivo', () {
+    final request = RequestOptions(path: '/field-sessions/start');
+    final error = DioException(
+      requestOptions: request,
+      response: Response(
+        requestOptions: request,
+        statusCode: 409,
+        data: {
+          'type': 'https://rvs.example/problems/open-session-conflict',
+          'title': 'Open session conflict',
+          'requestId': 'request-session',
+        },
+      ),
+    );
+
+    final translated = ApiException.fromDio(error);
+    expect(translated.statusCode, 409);
+    expect(translated.requestId, 'request-session');
+    expect(translated.message, contains('sesión abierta de otro usuario'));
+  });
+
   test('configuración RV bloquea F02-B y conserva RV', () {
     expect(AppConfig.isInspectionTypeEnabled('a'), isTrue);
     expect(AppConfig.isInspectionTypeEnabled('b'), isFalse);

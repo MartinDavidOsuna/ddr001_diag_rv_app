@@ -3,9 +3,9 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/theme/app_theme.dart';
-import '../../core/constants/report_type_labels.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
+import '../../domain/enums/app_enums.dart';
 import '../../domain/models/app_models.dart';
 
 class MapPage extends StatefulWidget {
@@ -19,10 +19,20 @@ class _MapPageState extends State<MapPage> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+    final valid = state.catalogHydrants
+        .where(
+          (item) =>
+              item.latitude.abs() <= 90 &&
+              item.longitude.abs() <= 180 &&
+              (item.latitude != 0 || item.longitude != 0),
+        )
+        .toList();
+    final withoutCoordinates = state.catalogHydrants.length - valid.length;
     return Scaffold(
       appBar: AppPageHeader(
-        title: 'Mapa',
-        subtitle: 'Ubicación de hidrantes',
+        title: 'Mapa general',
+        subtitle:
+            '${valid.length} hidrantes · $withoutCoordinates sin coordenadas',
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -30,268 +40,154 @@ class _MapPageState extends State<MapPage> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Container(
-              color: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: const Row(
-                children: [
-                  Icon(Icons.gps_fixed, size: 17, color: AppColors.green),
-                  SizedBox(width: 6),
-                  Text(
-                    'MAPA DEMO · GPS SIMULADO',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                  ),
-                  SizedBox(width: 14),
-                  Expanded(
+      body: Column(
+        children: [
+          const Padding(
+            padding: EdgeInsets.all(10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _Legend(color: AppColors.brightBlue, label: 'RV pendiente'),
+                SizedBox(width: 20),
+                _Legend(color: AppColors.green, label: 'RV terminada'),
+              ],
+            ),
+          ),
+          Expanded(
+            child: valid.isEmpty
+                ? const Center(
                     child: Text(
-                      'RTK SIMULADO · ±0.03 m',
-                      style: TextStyle(fontSize: 12, color: AppColors.teal),
+                      'No hay hidrantes con coordenadas WGS84 válidas.',
                     ),
+                  )
+                : LayoutBuilder(
+                    builder: (context, bounds) {
+                      final minLat = valid
+                          .map((e) => e.latitude)
+                          .reduce((a, b) => a < b ? a : b);
+                      final maxLat = valid
+                          .map((e) => e.latitude)
+                          .reduce((a, b) => a > b ? a : b);
+                      final minLng = valid
+                          .map((e) => e.longitude)
+                          .reduce((a, b) => a < b ? a : b);
+                      final maxLng = valid
+                          .map((e) => e.longitude)
+                          .reduce((a, b) => a > b ? a : b);
+                      double x(Hydrant h) =>
+                          16 +
+                          (h.longitude - minLng) /
+                              ((maxLng - minLng).abs() < .000001
+                                  ? 1
+                                  : maxLng - minLng) *
+                              (bounds.maxWidth - 60);
+                      double y(Hydrant h) =>
+                          16 +
+                          (maxLat - h.latitude) /
+                              ((maxLat - minLat).abs() < .000001
+                                  ? 1
+                                  : maxLat - minLat) *
+                              (bounds.maxHeight - 150);
+                      return Stack(
+                        children: [
+                          const Positioned.fill(
+                            child: ColoredBox(color: Color(0xFFEAF2E4)),
+                          ),
+                          for (final hydrant in valid)
+                            Positioned(
+                              left: x(hydrant),
+                              top: y(hydrant),
+                              child: Semantics(
+                                label:
+                                    'Cuenta ${hydrant.code}, ${_completed(hydrant) ? 'RV terminada' : 'RV pendiente'}',
+                                button: true,
+                                child: GestureDetector(
+                                  onTap: () =>
+                                      setState(() => selected = hydrant),
+                                  child: Icon(
+                                    Icons.location_on,
+                                    size: selected?.id == hydrant.id ? 40 : 30,
+                                    color: _completed(hydrant)
+                                        ? AppColors.green
+                                        : AppColors.brightBlue,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (selected != null)
+                            Positioned(
+                              left: 12,
+                              right: 12,
+                              bottom: 12,
+                              child: _HydrantSheet(
+                                hydrant: selected!,
+                                hasMine: state.hydrants.any(
+                                  (item) => item.id == selected!.id,
+                                ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
                   ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, box) => Stack(
-                  children: [
-                    Positioned.fill(
-                      child: CustomPaint(painter: MockMapPainter()),
-                    ),
-                    const Positioned(
-                      left: 12,
-                      top: 12,
-                      child: SectionCard(
-                        padding: EdgeInsets.all(10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'LEYENDA',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            Legend(
-                              color: AppColors.brightBlue,
-                              label:
-                                  '${ReportTypeLabels.visualShort} pendiente',
-                            ),
-                            Legend(
-                              color: AppColors.teal,
-                              label:
-                                  '${ReportTypeLabels.visualShort} terminado',
-                            ),
-                            Legend(
-                              color: AppColors.violet,
-                              label: ReportTypeLabels.functionalShort,
-                            ),
-                            Legend(color: AppColors.green, label: 'Validado'),
-                          ],
-                        ),
-                      ),
-                    ),
-                    ...state.hydrants.map(
-                      (h) => Positioned(
-                        left: 12 + h.latitude * (box.maxWidth - 55),
-                        top: 70 + h.longitude * (box.maxHeight - 150),
-                        child: GestureDetector(
-                          onTap: () => setState(() => selected = h),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 5,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xEFFFFFFF),
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: AppColors.navy.withValues(
-                                      alpha: .25,
-                                    ),
-                                  ),
-                                ),
-                                child: Text(
-                                  h.displayShortId,
-                                  style: const TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.navy,
-                                  ),
-                                ),
-                              ),
-                              Icon(
-                                Icons.location_on,
-                                size: selected?.id == h.id ? 40 : 32,
-                                color: h.f02b.progress > 0
-                                    ? AppColors.violet
-                                    : h.f02a.progress == 1
-                                    ? AppColors.green
-                                    : AppColors.brightBlue,
-                                shadows: const [
-                                  Shadow(color: Colors.white, blurRadius: 4),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      left: box.maxWidth * .5 - 13,
-                      top: box.maxHeight * .42,
-                      child: const Icon(
-                        Icons.my_location,
-                        color: AppColors.red,
-                        size: 27,
-                      ),
-                    ),
-                    if (selected != null)
-                      Positioned(
-                        left: 12,
-                        right: 12,
-                        bottom: 12,
-                        child: SectionCard(
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.water_drop,
-                                color: AppColors.blue,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      selected!.code,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                    Text(
-                                      '${selected!.locality} · ${selected!.parcel}',
-                                      style: const TextStyle(
-                                        color: AppColors.muted,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              FilledButton(
-                                onPressed: () =>
-                                    context.push('/hydrants/${selected!.id}'),
-                                child: const Text('Ver ficha'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
+
+  static bool _completed(Hydrant hydrant) =>
+      hydrant.f02a.status == InspectionStatus.completed;
 }
 
-class Legend extends StatelessWidget {
-  const Legend({required this.color, required this.label, super.key});
-  final Color color;
-  final String label;
+class _HydrantSheet extends StatelessWidget {
+  const _HydrantSheet({required this.hydrant, required this.hasMine});
+  final Hydrant hydrant;
+  final bool hasMine;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 5),
-    child: Row(
+  Widget build(BuildContext context) => SectionCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          width: 9,
-          height: 9,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        Text(
+          'Cuenta ${hydrant.code}',
+          style: const TextStyle(fontWeight: FontWeight.w900),
         ),
-        const SizedBox(width: 6),
-        Text(label, style: const TextStyle(fontSize: 10)),
+        Text('${hydrant.locality} · ${hydrant.parcel}'),
+        Text(
+          hydrant.f02a.status == InspectionStatus.completed
+              ? 'RV terminada'
+              : 'RV pendiente',
+        ),
+        const SizedBox(height: 8),
+        FilledButton(
+          onPressed: () => context.push('/hydrants/new'),
+          child: const Text('Iniciar nueva revisión'),
+        ),
+        if (hasMine)
+          TextButton(
+            onPressed: () => context.push('/hydrants/${hydrant.id}'),
+            child: const Text('Ver mi revisión'),
+          ),
       ],
     ),
   );
 }
 
-class MockMapPainter extends CustomPainter {
+class _Legend extends StatelessWidget {
+  const _Legend({required this.color, required this.label});
+  final Color color;
+  final String label;
   @override
-  void paint(Canvas canvas, Size size) {
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = const Color(0xFFEAF2E4),
-    );
-    final parcel = Paint()..color = const Color(0x55A3B77B);
-    for (var i = 0; i < 6; i++) {
-      final x = (i % 3) * size.width / 3;
-      final y = (i ~/ 3) * size.height / 2;
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(
-            x + 6,
-            y + 6,
-            size.width / 3 - 12,
-            size.height / 2 - 12,
-          ),
-          const Radius.circular(8),
-        ),
-        parcel,
-      );
-    }
-    final route = Path()
-      ..moveTo(-20, size.height * .75)
-      ..quadraticBezierTo(
-        size.width * .42,
-        size.height * .55,
-        size.width + 20,
-        size.height * .25,
-      );
-    canvas.drawPath(
-      route,
-      Paint()
-        ..color = const Color(0xFFF8F5E9)
-        ..strokeWidth = 18
-        ..style = PaintingStyle.stroke,
-    );
-    canvas.drawPath(
-      route,
-      Paint()
-        ..color = const Color(0xFFCFBE98)
-        ..strokeWidth = 2
-        ..style = PaintingStyle.stroke,
-    );
-    final canal = Path()
-      ..moveTo(size.width * .1, -10)
-      ..cubicTo(
-        size.width * .3,
-        size.height * .25,
-        size.width * .2,
-        size.height * .65,
-        size.width * .45,
-        size.height + 10,
-      );
-    canvas.drawPath(
-      canal,
-      Paint()
-        ..color = const Color(0xFF8FC5D8)
-        ..strokeWidth = 7
-        ..style = PaintingStyle.stroke,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  Widget build(BuildContext context) => Row(
+    children: [
+      Container(
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      ),
+      const SizedBox(width: 6),
+      Text(label),
+    ],
+  );
 }

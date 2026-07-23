@@ -37,11 +37,10 @@ class HydrantFilterFacts {
 abstract final class HydrantQueryProjection {
   static const visibleFilters = <HydrantListFilter>[
     HydrantListFilter.all,
-    HydrantListFilter.visualReport,
-    HydrantListFilter.functionalReport,
     HydrantListFilter.inProgress,
     HydrantListFilter.synchronizationPending,
     HydrantListFilter.completed,
+    HydrantListFilter.incidents,
   ];
 
   /// Finalizado significa que existe al menos un RV o RF completado.

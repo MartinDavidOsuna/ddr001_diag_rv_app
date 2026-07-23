@@ -262,7 +262,8 @@ class HydrantCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final functional = state.functionalSummary(hydrant.id);
-    final isB = functional.status != InspectionStatus.notRequired;
+    final isB =
+        !AppConfig.rvOnly && functional.status != InspectionStatus.notRequired;
     final summary = isB ? functional : hydrant.f02a;
     final compactStatus = isB
         ? state.functionalStateLabel(hydrant.id)
@@ -533,10 +534,12 @@ class HydrantDetailPage extends StatelessWidget {
               (visualHistory.any(
                     (report) => report.status == InspectionStatus.completed,
                   ) ||
-                  functionalHistory.any(
-                    (report) =>
-                        report.status == FunctionalInspectionStatus.completed,
-                  ))) ...[
+                  (!AppConfig.rvOnly &&
+                      functionalHistory.any(
+                        (report) =>
+                            report.status ==
+                            FunctionalInspectionStatus.completed,
+                      )))) ...[
             const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: () => _createRevision(

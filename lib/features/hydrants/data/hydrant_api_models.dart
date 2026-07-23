@@ -6,6 +6,7 @@ class CachedHydrant {
     required this.hydrantId,
     required this.accountNumber,
     required this.updatedAt,
+    this.scope = 'all',
     this.installationYear,
     this.flowLps,
     this.sourceX,
@@ -17,19 +18,45 @@ class CachedHydrant {
     this.municipality,
     this.metadata,
     this.calculatedStatus,
+    this.rvStatus,
+    this.latestInspectionId,
+    this.latestInspectionStatus,
+    this.latestInspectionStartedAt,
+    this.latestInspectionSubmittedAt,
+    this.latestInspectionRevisionNumber,
+    this.sectionCode,
+    this.installationAngleDeg,
+    this.elevationM,
+    this.outletCount,
   });
 
-  final String hydrantId, accountNumber;
-  final int? installationYear;
-  final double? flowLps, sourceX, sourceY, latitude, longitude;
-  final String? sourceCrs, locality, municipality, calculatedStatus;
+  final String hydrantId, accountNumber, scope;
+  final int? installationYear, latestInspectionRevisionNumber, outletCount;
+  final double? flowLps,
+      sourceX,
+      sourceY,
+      latitude,
+      longitude,
+      installationAngleDeg,
+      elevationM;
+  final String? sourceCrs,
+      locality,
+      municipality,
+      calculatedStatus,
+      rvStatus,
+      latestInspectionId,
+      latestInspectionStatus,
+      sectionCode;
+  final DateTime? latestInspectionStartedAt, latestInspectionSubmittedAt;
   final Object? metadata;
   final DateTime updatedAt;
 
   factory CachedHydrant.fromApi(
     Map<String, dynamic> json,
-    DateTime updatedAt,
-  ) => CachedHydrant(
+    DateTime updatedAt, {
+    String scope = 'all',
+  }) => CachedHydrant(
+    scope: scope,
     hydrantId: '${json['hydrant_id'] ?? json['hydrantId']}',
     accountNumber: '${json['account_number'] ?? json['accountNumber']}',
     installationYear: _int(json['installation_year']),
@@ -43,12 +70,25 @@ class CachedHydrant {
     municipality: json['municipality']?.toString(),
     metadata: json['metadata_json'],
     calculatedStatus: json['calculated_status']?.toString(),
+    rvStatus: json['rvStatus']?.toString(),
+    latestInspectionId: json['latestInspectionId']?.toString(),
+    latestInspectionStatus: json['latestInspectionStatus']?.toString(),
+    latestInspectionStartedAt: _date(json['latestInspectionStartedAt']),
+    latestInspectionSubmittedAt: _date(json['latestInspectionSubmittedAt']),
+    latestInspectionRevisionNumber: _int(
+      json['latestInspectionRevisionNumber'],
+    ),
+    sectionCode: json['section_code']?.toString(),
+    installationAngleDeg: _double(json['installation_angle_deg']),
+    elevationM: _double(json['elevation_m']),
+    outletCount: _int(json['outlet_count']),
     updatedAt: updatedAt,
   );
 
   factory CachedHydrant.fromJson(Map<String, dynamic> json) => CachedHydrant(
     hydrantId: json['hydrantId'] as String,
     accountNumber: json['accountNumber'] as String,
+    scope: json['scope'] as String? ?? 'all',
     installationYear: _int(json['installationYear']),
     flowLps: _double(json['flowLps']),
     sourceX: _double(json['sourceX']),
@@ -60,12 +100,25 @@ class CachedHydrant {
     municipality: json['municipality'] as String?,
     metadata: json['metadata'],
     calculatedStatus: json['calculatedStatus'] as String?,
+    rvStatus: json['rvStatus'] as String?,
+    latestInspectionId: json['latestInspectionId'] as String?,
+    latestInspectionStatus: json['latestInspectionStatus'] as String?,
+    latestInspectionStartedAt: _date(json['latestInspectionStartedAt']),
+    latestInspectionSubmittedAt: _date(json['latestInspectionSubmittedAt']),
+    latestInspectionRevisionNumber: _int(
+      json['latestInspectionRevisionNumber'],
+    ),
+    sectionCode: json['sectionCode'] as String?,
+    installationAngleDeg: _double(json['installationAngleDeg']),
+    elevationM: _double(json['elevationM']),
+    outletCount: _int(json['outletCount']),
     updatedAt: DateTime.parse(json['updatedAt'] as String),
   );
 
   Map<String, dynamic> toJson() => {
     'hydrantId': hydrantId,
     'accountNumber': accountNumber,
+    'scope': scope,
     'installationYear': installationYear,
     'flowLps': flowLps,
     'sourceX': sourceX,
@@ -77,13 +130,27 @@ class CachedHydrant {
     'municipality': municipality,
     'metadata': metadata,
     'calculatedStatus': calculatedStatus,
+    'rvStatus': rvStatus,
+    'latestInspectionId': latestInspectionId,
+    'latestInspectionStatus': latestInspectionStatus,
+    'latestInspectionStartedAt': latestInspectionStartedAt
+        ?.toUtc()
+        .toIso8601String(),
+    'latestInspectionSubmittedAt': latestInspectionSubmittedAt
+        ?.toUtc()
+        .toIso8601String(),
+    'latestInspectionRevisionNumber': latestInspectionRevisionNumber,
+    'sectionCode': sectionCode,
+    'installationAngleDeg': installationAngleDeg,
+    'elevationM': elevationM,
+    'outletCount': outletCount,
     'updatedAt': updatedAt.toUtc().toIso8601String(),
   };
 
   Hydrant toAppModel() {
-    final status = switch (calculatedStatus) {
+    final status = switch (latestInspectionStatus ?? calculatedStatus) {
       'submitted' || 'validated' => InspectionStatus.completed,
-      'in_progress' => InspectionStatus.inProgress,
+      'draft' || 'in_progress' || 'pending_sync' => InspectionStatus.inProgress,
       _ => InspectionStatus.pending,
     };
     return Hydrant(
@@ -115,4 +182,6 @@ class CachedHydrant {
       value == null ? null : double.tryParse('$value');
   static int? _int(Object? value) =>
       value == null ? null : int.tryParse('$value');
+  static DateTime? _date(Object? value) =>
+      value == null ? null : DateTime.tryParse('$value')?.toUtc();
 }

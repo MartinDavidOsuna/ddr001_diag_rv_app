@@ -48,6 +48,33 @@ class ApiException implements Exception {
         requestId: requestId,
       );
     }
+    if (status == 409) {
+      final type = problem['type']?.toString() ?? '';
+      final title = problem['title']?.toString().toLowerCase() ?? '';
+      if (type.endsWith('/phone-conflict') || title == 'phone conflict') {
+        return ApiException(
+          ApiErrorKind.invalidData,
+          'El teléfono ya está registrado con otro correo. Usa el correo asociado o un teléfono diferente.',
+          statusCode: status,
+          requestId: requestId,
+        );
+      }
+      if (type.endsWith('/open-session-conflict') ||
+          title == 'open session conflict') {
+        return ApiException(
+          ApiErrorKind.invalidData,
+          'Este dispositivo tiene una sesión abierta de otro usuario. Inicia con el correo anterior o solicita cerrar esa sesión.',
+          statusCode: status,
+          requestId: requestId,
+        );
+      }
+      return ApiException(
+        ApiErrorKind.invalidData,
+        'Existe un conflicto con los datos enviados. Revisa la información e intenta nuevamente.',
+        statusCode: status,
+        requestId: requestId,
+      );
+    }
     if (status == 422 || status == 400) {
       return ApiException(
         status == 422 ? ApiErrorKind.validation : ApiErrorKind.invalidData,

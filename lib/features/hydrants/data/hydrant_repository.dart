@@ -12,15 +12,14 @@ class HydrantRepository {
   final ApiClient client;
   final Box<String> box;
 
-  List<CachedHydrant> cached() {
+  List<CachedHydrant> cached({String? scope}) {
     final values = <CachedHydrant>[];
     for (final raw in box.values) {
       try {
-        values.add(
-          CachedHydrant.fromJson(
-            Map<String, dynamic>.from(jsonDecode(raw) as Map),
-          ),
+        final item = CachedHydrant.fromJson(
+          Map<String, dynamic>.from(jsonDecode(raw) as Map),
         );
+        if (scope == null || item.scope == scope) values.add(item);
       } on Object {
         continue;
       }
@@ -38,6 +37,7 @@ class HydrantRepository {
   Future<List<CachedHydrant>> refresh({
     String? search,
     int pageSize = 200,
+    String scope = 'mine',
   }) async {
     try {
       var page = 1;
@@ -47,6 +47,7 @@ class HydrantRepository {
           '/hydrants',
           queryParameters: {
             if (search?.trim().isNotEmpty == true) 'search': search!.trim(),
+            'scope': scope,
             'page': page,
             'pageSize': pageSize,
           },
@@ -58,8 +59,9 @@ class HydrantRepository {
           final item = CachedHydrant.fromApi(
             Map<String, dynamic>.from(raw),
             now,
+            scope: scope,
           );
-          await box.put(item.hydrantId, jsonEncode(item.toJson()));
+          await box.put('$scope:${item.hydrantId}', jsonEncode(item.toJson()));
         }
         final total = int.tryParse('${data['total'] ?? ''}');
         hasMore =
@@ -67,7 +69,7 @@ class HydrantRepository {
             (total == null || page * pageSize < total);
         page++;
       }
-      return cached();
+      return cached(scope: scope);
     } on DioException catch (error) {
       throw ApiException.fromDio(error);
     }
@@ -81,8 +83,9 @@ class HydrantRepository {
       final item = CachedHydrant.fromApi(
         response.data ?? const {},
         DateTime.now().toUtc(),
+        scope: 'all',
       );
-      await box.put(item.hydrantId, jsonEncode(item.toJson()));
+      await box.put('all:${item.hydrantId}', jsonEncode(item.toJson()));
       return item;
     } on DioException catch (error) {
       throw ApiException.fromDio(error);

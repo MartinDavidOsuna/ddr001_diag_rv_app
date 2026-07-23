@@ -6,17 +6,62 @@ import '../../inspections/domain/rv_draft.dart';
 import '../../inspections/presentation/rv_inspection_controller.dart';
 import '../data/checklist_models.dart';
 
-class DynamicChecklistRenderer extends StatelessWidget {
+class DynamicChecklistRenderer extends StatefulWidget {
   const DynamicChecklistRenderer({required this.controller, super.key});
   final RvInspectionController controller;
 
   @override
+  State<DynamicChecklistRenderer> createState() =>
+      _DynamicChecklistRendererState();
+}
+
+class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
+  int currentStep = 0;
+
+  @override
   Widget build(BuildContext context) {
-    final draft = controller.draft!;
+    final draft = widget.controller.draft!;
+    final sections = draft.checklist.sections;
+    if (sections.isEmpty) return const Text('El checklist no contiene pasos.');
+    if (currentStep >= sections.length) currentStep = sections.length - 1;
     return Column(
       children: [
-        for (final section in draft.checklist.sections)
-          _Section(section: section, controller: controller),
+        LinearProgressIndicator(
+          value: (currentStep + 1) / (sections.length + 1),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Paso ${currentStep + 1} de ${sections.length + 1}',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 8),
+        _Section(section: sections[currentStep], controller: widget.controller),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: currentStep == 0
+                    ? null
+                    : () => setState(() => currentStep--),
+                child: const Text('Anterior'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton(
+                onPressed: currentStep == sections.length - 1
+                    ? null
+                    : () => setState(() => currentStep++),
+                child: const Text('Siguiente'),
+              ),
+            ),
+          ],
+        ),
+        if (currentStep == sections.length - 1)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('El paso final es Resumen y envío.'),
+          ),
       ],
     );
   }

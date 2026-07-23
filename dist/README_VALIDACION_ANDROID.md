@@ -8,7 +8,7 @@
 - API: `http://192.168.1.111:3000/api/v1`.
 - Package: `com.aquafim.ddr001diag`.
 - APK universal: `DDR001_DIAG_RV_0.2.1_debug.apk`.
-- SHA-256: `4BD6326697CEB96EBF60E6801E260281240F178F48ECDEB6EA27DFA5B8326101`.
+- SHA-256: `5283FD6F6AF7FFC9DB6D9ECC3F712C99C52BB84C1B6765C612018D35E7380416`.
 - Los APK separados por ABI se generaron para medir tamaño, no son el artefacto oficial del piloto: Flutter añade un prefijo ABI al `versionCode` (por ejemplo, arm64 muestra `2004`).
 
 ## Instalación

@@ -73,6 +73,7 @@ class AppState extends ChangeNotifier {
   );
   AppUser get user => _user;
   final List<Hydrant> hydrants = [];
+  final List<Hydrant> catalogHydrants = [];
   final Set<String> assignmentsForReview = {};
   bool initialized = false,
       online = true,
@@ -198,10 +199,24 @@ class AppState extends ChangeNotifier {
   }
 
   void _replaceHydrantsFromCache() {
-    final cached = hydrantRepository
-        .cached()
+    final catalog = hydrantRepository
+        .cached(scope: 'all')
         .map((e) => e.toAppModel())
         .toList();
+    catalogHydrants
+      ..clear()
+      ..addAll(catalog);
+    final cached = hydrantRepository
+        .cached(scope: 'mine')
+        .map((e) => e.toAppModel())
+        .toList();
+    final ids = cached.map((item) => item.id).toSet();
+    for (final item in catalog) {
+      if (!ids.contains(item.id) &&
+          visualInspectionRepository.hasLocalInspection(item.id)) {
+        cached.add(item.copyWith(syncStatus: SyncStatus.local));
+      }
+    }
     hydrants
       ..clear()
       ..addAll(cached);
@@ -362,7 +377,15 @@ class AppState extends ChangeNotifier {
     return false;
   }
 
-  Hydrant hydrant(String id) => hydrants.firstWhere((item) => item.id == id);
+  Hydrant hydrant(String id) =>
+      [...hydrants, ...catalogHydrants].firstWhere((item) => item.id == id);
+
+  void includeLocalHydrant(Hydrant value) {
+    if (!hydrants.any((item) => item.id == value.id)) {
+      hydrants.add(value.copyWith(syncStatus: SyncStatus.local));
+      notifyListeners();
+    }
+  }
 
   InspectionSummary functionalSummary(String hydrantId) {
     final active = functionalInspectionRepository.activeFor(hydrantId);
@@ -649,7 +672,8 @@ class AppState extends ChangeNotifier {
     await trace('assignment_sync_started', 'Consulta de hidrantes iniciada');
     try {
       final before = {for (final item in hydrants) item.id: item};
-      final refreshed = await hydrantRepository.refresh();
+      final catalog = await hydrantRepository.refresh(scope: 'all');
+      final refreshed = await hydrantRepository.refresh(scope: 'mine');
       _replaceHydrantsFromCache();
       final newItems = hydrants
           .where((item) => !before.containsKey(item.id))
@@ -662,7 +686,8 @@ class AppState extends ChangeNotifier {
         newAssignments: newItems,
         updatedAssignments: updated,
         removedIds: const [],
-        message: '${refreshed.length} hidrantes disponibles',
+        message:
+            '${refreshed.length} hidrantes personales · ${catalog.length} en catálogo',
       );
       lastAssignmentResult = result;
       lastAssignmentCheck = DateTime.now();

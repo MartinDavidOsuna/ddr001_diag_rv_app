@@ -28,15 +28,18 @@ void main() {
     hasIncidents: false,
   );
 
-  test('la barra pública conserva exactamente seis filtros y su orden', () {
+  test('la barra RV no expone filtros funcionales', () {
     expect(HydrantQueryProjection.visibleFilters, [
       HydrantListFilter.all,
-      HydrantListFilter.visualReport,
-      HydrantListFilter.functionalReport,
       HydrantListFilter.inProgress,
       HydrantListFilter.synchronizationPending,
       HydrantListFilter.completed,
+      HydrantListFilter.incidents,
     ]);
+    expect(
+      HydrantQueryProjection.visibleFilters,
+      isNot(contains(HydrantListFilter.functionalReport)),
+    );
   });
 
   test('En proceso y Finalizado agregan RV o RF con la misma regla', () {
