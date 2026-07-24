@@ -6,9 +6,13 @@ import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
 import '../../domain/models/app_models.dart';
+import 'new_survey_route.dart';
 
 class NewSurveyPage extends StatefulWidget {
-  const NewSurveyPage({super.key});
+  const NewSurveyPage({super.key, this.selectedHydrantId});
+
+  final String? selectedHydrantId;
+
   @override
   State<NewSurveyPage> createState() => _NewSurveyPageState();
 }
@@ -21,7 +25,7 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final normalized = query.trim().toLowerCase();
-    final matches = state.catalogHydrants
+    final filtered = state.catalogHydrants
         .where(
           (hydrant) =>
               normalized.isEmpty ||
@@ -29,8 +33,15 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
               hydrant.locality.toLowerCase().contains(normalized) ||
               hydrant.parcel.toLowerCase().contains(normalized),
         )
-        .take(100)
         .toList();
+    final matches = prioritizeSelectedHydrant(
+      filtered,
+      widget.selectedHydrantId,
+    ).take(100).toList();
+    final selectedFromMap = containsSelectedHydrant(
+      state.catalogHydrants,
+      widget.selectedHydrantId,
+    );
     return Scaffold(
       appBar: const AppPageHeader(
         title: 'Nueva revisión visual',
@@ -55,6 +66,25 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
             label: const Text('Seleccionar desde el mapa'),
           ),
           const SizedBox(height: 14),
+          if (selectedFromMap)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: Text(
+                'Hidrante seleccionado desde el mapa',
+                style: TextStyle(
+                  color: AppColors.green,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            )
+          else if (widget.selectedHydrantId?.isNotEmpty ?? false)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: Text(
+                'El hidrante seleccionado ya no está disponible en el catálogo.',
+                style: TextStyle(color: AppColors.orange),
+              ),
+            ),
           Text(
             '${matches.length} resultados visibles',
             style: const TextStyle(color: AppColors.muted),

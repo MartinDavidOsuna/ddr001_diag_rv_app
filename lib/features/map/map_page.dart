@@ -7,6 +7,7 @@ import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
 import '../../domain/enums/app_enums.dart';
 import '../../domain/models/app_models.dart';
+import '../hydrants/new_survey_route.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -161,7 +162,7 @@ class _HydrantSheet extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         FilledButton(
-          onPressed: () => context.push('/hydrants/new'),
+          onPressed: () => context.push(newSurveyRouteForHydrant(hydrant.id)),
           child: const Text('Iniciar nueva revisión'),
         ),
         if (hasMine)

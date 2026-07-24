@@ -63,14 +63,16 @@ GoRouter createRouter(AppState state) => GoRouter(
               routes: [
                 GoRoute(
                   path: 'new',
-                  redirect: (_, _) => AppConfig.rvOnly ? '/hydrants' : null,
-                  builder: (_, _) => state.editingRestricted
+                  builder: (_, route) => state.editingRestricted
                       ? const PlaceholderPage(
                           title: 'Actualización requerida',
                           message:
                               'No puedes crear levantamientos nuevos. Puedes consultar y sincronizar datos.',
                         )
-                      : const NewSurveyPage(),
+                      : NewSurveyPage(
+                          selectedHydrantId:
+                              route.uri.queryParameters['hydrantId'],
+                        ),
                 ),
                 GoRoute(
                   path: ':id',
