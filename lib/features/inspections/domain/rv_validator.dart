@@ -8,10 +8,12 @@ class RvValidationIssue {
     required this.message,
     this.sectionId,
     this.questionId,
+    this.subItemId,
+    this.fieldId,
     this.slotCode,
   });
   final String code, message;
-  final String? sectionId, questionId, slotCode;
+  final String? sectionId, questionId, subItemId, fieldId, slotCode;
 }
 
 class RvValidationResult {
@@ -54,6 +56,10 @@ class RvValidator {
     final issues = <RvValidationIssue>[];
     final checklist = draft.checklist;
     for (final section in checklist.sections) {
+      if (section.code == 'valvulas_parcelarias') {
+        _validateParcelValves(draft, section, issues);
+        continue;
+      }
       for (final item in section.items) {
         if (!isVisible(item, checklist, draft.answers) ||
             const {
@@ -105,8 +111,8 @@ class RvValidator {
         ),
       );
     for (final slot in requiredRvPhotoSlots) {
-      final photo = draft.photos[slot];
-      if (photo == null) {
+      final photos = draft.photosFor(slot);
+      if (photos.isEmpty) {
         issues.add(
           RvValidationIssue(
             code: 'required_photo_missing',
@@ -115,7 +121,9 @@ class RvValidator {
           ),
         );
       } else if (requireSynced &&
-          photo.status != RvPhotoUploadStatus.verified) {
+          !photos.any(
+            (photo) => photo.status == RvPhotoUploadStatus.verified,
+          )) {
         issues.add(
           RvValidationIssue(
             code: 'photo_pending',
@@ -158,11 +166,124 @@ class RvValidator {
     return RvValidationResult(issues);
   }
 
-  bool _empty(RvAnswer answer) =>
-      answer.value == null && answer.selectedOptions.isEmpty;
+  void _validateParcelValves(
+    RvDraft draft,
+    ChecklistSectionDefinition section,
+    List<RvValidationIssue> issues,
+  ) {
+    final configuration = draft.parcelValveConfiguration;
+    if (configuration == null) {
+      issues.add(
+        RvValidationIssue(
+          code: 'parcel_configuration_missing',
+          message: 'Falta seleccionar la configuración de válvulas.',
+          sectionId: section.id,
+          fieldId: 'configuration',
+        ),
+      );
+      return;
+    }
+    if (configuration.type.name == 'other' &&
+        (configuration.customDescription?.trim().isEmpty ?? true)) {
+      issues.add(
+        RvValidationIssue(
+          code: 'parcel_custom_description_missing',
+          message: 'Falta especificar la configuración de válvulas.',
+          sectionId: section.id,
+          fieldId: 'customDescription',
+        ),
+      );
+    }
+    if (configuration.valveCount < 1 ||
+        configuration.valveCount > 3 ||
+        configuration.valves.length != configuration.valveCount) {
+      issues.add(
+        RvValidationIssue(
+          code: 'parcel_valve_count_invalid',
+          message: 'La cantidad de válvulas no coincide con la configuración.',
+          sectionId: section.id,
+          fieldId: 'valveCount',
+        ),
+      );
+      return;
+    }
+    for (final valve in configuration.valves) {
+      final subItem = 'valve-${valve.index}';
+      void missing(String field, String label) => issues.add(
+        RvValidationIssue(
+          code: 'parcel_valve_field_missing',
+          message: 'Falta $label de la válvula ${valve.index}.',
+          sectionId: section.id,
+          subItemId: subItem,
+          fieldId: field,
+        ),
+      );
+      if (!_catalogSelectionValid(valve.valveBrand)) {
+        missing('valveBrand', 'marca');
+      }
+      if (!_catalogSelectionValid(valve.diameter, diameter: true)) {
+        missing('diameter', 'diámetro');
+      }
+      if (valve.hasSolenoid && !_catalogSelectionValid(valve.solenoidBrand)) {
+        missing('solenoidBrand', 'marca del solenoide');
+      }
+      if (valve.hasPilot && !_catalogSelectionValid(valve.pilotBrand)) {
+        missing('pilotBrand', 'marca del piloto');
+      }
+      if (valve.hasPressureGauge &&
+          !_catalogSelectionValid(valve.pressureGaugeBrand)) {
+        missing('pressureGaugeBrand', 'marca del manómetro');
+      }
+    }
+  }
+
+  bool _catalogSelectionValid(
+    Map<String, dynamic>? value, {
+    bool diameter = false,
+  }) {
+    if (value == null) return false;
+    final display = value['displayValue']?.toString().trim() ?? '';
+    final remote = value['catalogId']?.toString().trim() ?? '';
+    final local = value['localCatalogId']?.toString().trim() ?? '';
+    if (display.isEmpty || (remote.isEmpty && local.isEmpty)) return false;
+    if (!diameter) return true;
+    final numeric = value['nominalValue'];
+    return numeric is num && numeric > 0 && value['unit'] == 'in';
+  }
+
+  bool _empty(RvAnswer answer) {
+    final value = answer.value;
+    if (value is Map) {
+      final display = value['displayValue']?.toString().trim() ?? '';
+      final remote = value['catalogId']?.toString().trim() ?? '';
+      final local = value['localCatalogId']?.toString().trim() ?? '';
+      return display.isEmpty || (remote.isEmpty && local.isEmpty);
+    }
+    return value == null && answer.selectedOptions.isEmpty;
+  }
 
   bool _validType(ChecklistItemDefinition item, RvAnswer answer) {
     final value = answer.value;
+    if (value is Map && item.code.contains('brand')) {
+      final display = value['displayValue']?.toString().trim() ?? '';
+      final remote = value['catalogId']?.toString().trim() ?? '';
+      final local = value['localCatalogId']?.toString().trim() ?? '';
+      final type = value['elementType']?.toString().trim() ?? '';
+      return display.isNotEmpty &&
+          (remote.isNotEmpty || local.isNotEmpty) &&
+          type.isNotEmpty;
+    }
+    if (value is Map && item.code.contains('diameter')) {
+      final display = value['displayValue']?.toString().trim() ?? '';
+      final remote = value['catalogId']?.toString().trim() ?? '';
+      final local = value['localCatalogId']?.toString().trim() ?? '';
+      final numeric = value['nominalValue'];
+      return display.isNotEmpty &&
+          (remote.isNotEmpty || local.isNotEmpty) &&
+          numeric is num &&
+          numeric > 0 &&
+          value['unit'] == 'in';
+    }
     return switch (item.type) {
       'boolean' => value is bool,
       'integer' => value is int,

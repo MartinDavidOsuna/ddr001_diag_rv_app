@@ -22,6 +22,7 @@ import '../features/checklist/data/checklist_repository.dart';
 import '../features/inspections/data/inspection_remote_repository.dart';
 import '../features/inspections/data/inspection_sync_coordinator.dart';
 import '../features/inspections/data/rv_draft_repository.dart';
+import '../features/catalogs/dynamic_catalog_repository.dart';
 
 Future<AppState> bootstrap() async {
   await initializeDateFormatting('es');
@@ -40,6 +41,9 @@ Future<AppState> bootstrap() async {
   await Hive.openBox<String>('local_hydrants_v1');
   final hydrantBox = Hive.box<String>('local_hydrants_v1');
   final checklistBox = await Hive.openBox<String>('rv_checklist_cache_v1');
+  final dynamicCatalogBox = await Hive.openBox<String>(
+    'rv_dynamic_catalogs_v1',
+  );
   await Hive.openBox<String>('media_work_queue_v1');
   final functionalEligibilityBox = await Hive.openBox<String>(
     'functional_eligibility_v1',
@@ -84,6 +88,11 @@ Future<AppState> bootstrap() async {
   final config = AppConfig.fromEnvironment();
   final sessionStorage = SessionSecureStorage();
   final apiClient = ApiClient(config: config, sessionStorage: sessionStorage);
+  final dynamicCatalogRepository = DynamicCatalogRepository(
+    client: apiClient,
+    box: dynamicCatalogBox,
+  );
+  await dynamicCatalogRepository.seed();
   final sessionRepository = FieldSessionRepository(
     client: apiClient,
     storage: sessionStorage,
@@ -99,6 +108,7 @@ Future<AppState> bootstrap() async {
     remote: InspectionRemoteRepository(apiClient),
     photoBox: Hive.box<String>('inspection_photos_v1'),
     mediaQueue: mediaBox,
+    catalogs: dynamicCatalogRepository,
   );
   final state = AppState(
     preferences: preferences,
@@ -123,6 +133,7 @@ Future<AppState> bootstrap() async {
     ),
     rvDraftRepository: rvDraftRepository,
     inspectionSyncCoordinator: inspectionSyncCoordinator,
+    dynamicCatalogRepository: dynamicCatalogRepository,
   );
   await state.initialize();
   return state;

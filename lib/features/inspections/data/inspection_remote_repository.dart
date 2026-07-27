@@ -6,6 +6,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../domain/media/inspection_photo.dart';
 import '../domain/rv_draft.dart';
+import '../domain/parcel_valve_configuration.dart';
 
 class RemoteInspection {
   const RemoteInspection({required this.id, required this.status});
@@ -69,6 +70,73 @@ class InspectionRemoteRepository {
         '/inspections/$id/answers',
         data: {'answers': answers},
         options: Options(headers: {'Idempotency-Key': key}),
+      );
+    } on DioException catch (error) {
+      throw ApiException.fromDio(error);
+    }
+  }
+
+  Future<void> saveParcelValves(
+    String id,
+    ParcelValveConfiguration configuration,
+  ) async {
+    String remoteId(Map<String, dynamic>? value, String field) {
+      final id = value?['catalogId']?.toString();
+      if (id == null || id.isEmpty) {
+        throw ApiException(
+          ApiErrorKind.validation,
+          '$field está pendiente de sincronización.',
+        );
+      }
+      return id;
+    }
+
+    try {
+      await client.dio.put<Map<String, dynamic>>(
+        '/inspections/$id/parcel-valves',
+        data: {
+          'configurationType': configuration.type.wireName,
+          'customConfigurationText': configuration.customDescription,
+          'valveCount': configuration.valveCount,
+          'valves': [
+            for (final valve in configuration.valves)
+              {
+                'index': valve.index,
+                'diameterId': remoteId(valve.diameter, 'El diámetro'),
+                'diameterDisplayValue': valve.diameter!['displayValue'],
+                'valveBrandId': remoteId(
+                  valve.valveBrand,
+                  'La marca de válvula',
+                ),
+                'valveBrandDisplayValue': valve.valveBrand!['displayValue'],
+                'hasSolenoid': valve.hasSolenoid,
+                'solenoidBrandId': valve.hasSolenoid
+                    ? remoteId(valve.solenoidBrand, 'La marca del solenoide')
+                    : null,
+                'solenoidBrandDisplayValue': valve.hasSolenoid
+                    ? valve.solenoidBrand!['displayValue']
+                    : null,
+                'hasPilot': valve.hasPilot,
+                'pilotBrandId': valve.hasPilot
+                    ? remoteId(valve.pilotBrand, 'La marca del piloto')
+                    : null,
+                'pilotBrandDisplayValue': valve.hasPilot
+                    ? valve.pilotBrand!['displayValue']
+                    : null,
+                'hasPressureGauge': valve.hasPressureGauge,
+                'pressureGaugeBrandId': valve.hasPressureGauge
+                    ? remoteId(
+                        valve.pressureGaugeBrand,
+                        'La marca del manómetro',
+                      )
+                    : null,
+                'pressureGaugeBrandDisplayValue': valve.hasPressureGauge
+                    ? valve.pressureGaugeBrand!['displayValue']
+                    : null,
+              },
+          ],
+        },
+        options: Options(headers: {'Idempotency-Key': 'parcel-valves-$id'}),
       );
     } on DioException catch (error) {
       throw ApiException.fromDio(error);
@@ -164,6 +232,16 @@ class InspectionRemoteRepository {
             );
           })
           .toList();
+    } on DioException catch (error) {
+      throw ApiException.fromDio(error);
+    }
+  }
+
+  Future<void> deletePhoto(String inspectionId, String photoId) async {
+    try {
+      await client.dio.delete<void>(
+        '/inspections/$inspectionId/photos/$photoId',
+      );
     } on DioException catch (error) {
       throw ApiException.fromDio(error);
     }

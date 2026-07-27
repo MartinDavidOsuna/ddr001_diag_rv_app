@@ -46,8 +46,29 @@ class ApiClient {
             handler.next(response);
           },
           onError: (error, handler) {
+            final data = error.response?.data;
+            final problem = data is Map ? data : const {};
+            final errors = (problem['errors'] as List? ?? const [])
+                .whereType<Map>()
+                .map(
+                  (issue) => {
+                    'path': issue['path'],
+                    'code': issue['code'],
+                    'expected': issue['expected'],
+                    'received': issue['received'],
+                    'message': issue['message'],
+                  },
+                )
+                .toList();
             debugPrint(
-              '[API] ERROR ${error.response?.statusCode ?? '-'} ${error.requestOptions.path}',
+              '[API] ERROR statusCode=${error.response?.statusCode ?? '-'} '
+              'method=${error.requestOptions.method} '
+              'path=${error.requestOptions.path} '
+              'requestId=${problem['requestId'] ?? error.response?.headers.value('x-request-id') ?? '-'} '
+              'problem.type=${problem['type'] ?? '-'} '
+              'problem.title=${problem['title'] ?? '-'} '
+              'problem.detail=${problem['detail'] ?? '-'} '
+              'problem.errors=$errors',
             );
             handler.next(error);
           },

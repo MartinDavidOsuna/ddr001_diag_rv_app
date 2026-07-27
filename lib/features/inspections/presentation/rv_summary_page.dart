@@ -4,9 +4,12 @@ import 'package:provider/provider.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/services/app_state.dart';
+import '../../../core/formatters/person_name_formatter.dart';
 import '../../../core/widgets/common_widgets.dart';
 import '../domain/rv_sync_state.dart';
 import '../domain/rv_validator.dart';
+import '../domain/rv_draft.dart';
+import 'rv_review_navigation.dart';
 
 class RvSummaryPage extends StatefulWidget {
   const RvSummaryPage({
@@ -22,6 +25,7 @@ class RvSummaryPage extends StatefulWidget {
 class _RvSummaryPageState extends State<RvSummaryPage> {
   bool busy = false;
   String? message;
+  final _submissionGate = RvSubmissionCompletionGate();
 
   @override
   Widget build(BuildContext context) {
@@ -60,7 +64,7 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _row('Hidrante', draft.accountNumber),
-                _row('Inspector', state.user.fullName),
+                _row('Inspector', formatPersonName(state.user.fullName)),
                 _row('Cuadrilla', state.user.brigadeName),
                 _row(
                   'Checklist',
@@ -73,7 +77,7 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
                 ),
                 _row('GPS', draft.location == null ? 'Pendiente' : 'Capturado'),
                 _row('Señal', draft.signal == null ? 'Pendiente' : 'Capturada'),
-                _row('Fotografías', '${draft.photos.length}/7'),
+                _row('Fotografías', '${draft.photoCount} capturadas'),
                 _row('Sincronización', draft.localStatus.name),
               ],
             ),
@@ -99,8 +103,75 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
                         color: AppColors.red,
                       ),
                       title: Text(issue.message),
-                      onTap: () => context.pop(),
+                      onTap: () async {
+                        final section = issue.sectionId;
+                        final index = section == null
+                            ? 1
+                            : draft.checklist.sections.indexWhere(
+                                (item) => item.id == section,
+                              );
+                        await state.rvDraftRepository.save(
+                          draft.copyWith(
+                            activeFormStep: index < 0 ? 0 : index,
+                            navigationQuestionId: issue.questionId,
+                            navigationSubItemId: issue.subItemId,
+                            navigationFieldId: issue.fieldId,
+                            returnToSummary: true,
+                          ),
+                        );
+                        if (context.mounted) context.pop();
+                      },
                     ),
+                ],
+              ),
+            ),
+          ],
+          if (draft.parcelValveConfiguration case final config?) ...[
+            const SizedBox(height: 14),
+            SectionCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Válvulas parcelarias',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  _row('Configuración', config.type.label),
+                  for (final valve in config.valves) ...[
+                    const Divider(),
+                    Text(
+                      'Válvula ${valve.index}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    _row(
+                      'Marca',
+                      valve.valveBrand?['displayValue']?.toString() ??
+                          'Pendiente',
+                    ),
+                    _row(
+                      'Diámetro',
+                      valve.diameter?['displayValue']?.toString() ??
+                          'Pendiente',
+                    ),
+                    _row(
+                      'Solenoide',
+                      valve.hasSolenoid
+                          ? 'Sí · ${valve.solenoidBrand?['displayValue'] ?? 'Pendiente'}'
+                          : 'No',
+                    ),
+                    _row(
+                      'Piloto',
+                      valve.hasPilot
+                          ? 'Sí · ${valve.pilotBrand?['displayValue'] ?? 'Pendiente'}'
+                          : 'No',
+                    ),
+                    _row(
+                      'Manómetro',
+                      valve.hasPressureGauge
+                          ? 'Sí · ${valve.pressureGaugeBrand?['displayValue'] ?? 'Pendiente'}'
+                          : 'No',
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -117,16 +188,7 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
           FilledButton.icon(
             onPressed: busy || draft.isReadOnly || !validation.isValid
                 ? null
-                : () async {
-                    setState(() => busy = true);
-                    final result = await state.inspectionSyncCoordinator
-                        .synchronize(draft, submit: true);
-                    if (!mounted) return;
-                    setState(() {
-                      busy = false;
-                      message = result.lastSyncError;
-                    });
-                  },
+                : () => _confirmAndSubmit(context, state, draft),
             icon: const Icon(Icons.send_outlined),
             label: Text(
               busy
@@ -169,6 +231,49 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
       ],
     ),
   );
+
+  Future<void> _confirmAndSubmit(
+    BuildContext context,
+    AppState state,
+    RvDraft draft,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmar envío'),
+        content: const Text(
+          '¿Confirmas el envío de la revisión visual?\n\n'
+          'Después de enviarla no podrás modificarla, salvo mediante el '
+          'procedimiento autorizado.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Enviar revisión'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || busy) return;
+    setState(() => busy = true);
+    await state.dynamicCatalogRepository?.synchronizePending();
+    final result = await state.inspectionSyncCoordinator.synchronize(
+      draft,
+      submit: true,
+    );
+    if (!mounted || !context.mounted) return;
+    setState(() {
+      busy = false;
+      message = result.lastSyncError;
+    });
+    if (_submissionGate.consumeIfComplete(result)) {
+      await RvReviewNavigation.showSubmissionSuccessAndReturnHome(context);
+    }
+  }
 
   Future<void> _cancel(BuildContext context, AppState state) async {
     final reason = TextEditingController();

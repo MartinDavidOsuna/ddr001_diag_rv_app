@@ -1,5 +1,6 @@
 import '../../checklist/data/checklist_models.dart';
 import 'rv_sync_state.dart';
+import 'parcel_valve_configuration.dart';
 
 const requiredRvPhotoSlots = <String>[
   'front_closed',
@@ -107,6 +108,17 @@ class RvSignalSample {
     this.dbm,
     this.level,
     this.roaming,
+    this.transportType,
+    this.networkTechnology,
+    this.networkTypeRaw,
+    this.overrideNetworkTypeRaw,
+    this.signalPercent,
+    this.asu,
+    this.signalSource,
+    this.subscriptionSlot,
+    this.subscriptionCount,
+    this.availabilityReason,
+    this.isDefaultDataSubscription,
   });
   final String generation;
   final bool connected;
@@ -114,6 +126,17 @@ class RvSignalSample {
   final String? networkType, operatorName;
   final int? dbm, level;
   final bool? roaming;
+  final String? transportType;
+  final String? networkTechnology;
+  final String? networkTypeRaw;
+  final String? overrideNetworkTypeRaw;
+  final int? signalPercent;
+  final int? asu;
+  final String? signalSource;
+  final int? subscriptionSlot;
+  final int? subscriptionCount;
+  final String? availabilityReason;
+  final bool? isDefaultDataSubscription;
   Map<String, dynamic> toJson() => {
     'generation': generation,
     'connected': connected,
@@ -123,6 +146,30 @@ class RvSignalSample {
     'dbm': dbm,
     'level': level,
     'roaming': roaming,
+    'transportType': transportType,
+    'networkTechnology': networkTechnology,
+    'networkTypeRaw': networkTypeRaw,
+    'overrideNetworkTypeRaw': overrideNetworkTypeRaw,
+    'signalPercent': signalPercent,
+    'signalAsu': asu,
+    'signalSource': signalSource,
+    'subscriptionSlot': subscriptionSlot,
+    'subscriptionCount': subscriptionCount,
+    'availabilityReason': availabilityReason,
+    'isDefaultDataSubscription': isDefaultDataSubscription,
+    'technicalData': {
+      'transportType': transportType,
+      'networkTechnology': networkTechnology,
+      'networkTypeRaw': networkTypeRaw,
+      'overrideNetworkTypeRaw': overrideNetworkTypeRaw,
+      'signalPercent': signalPercent,
+      'signalAsu': asu,
+      'signalSource': signalSource,
+      'subscriptionSlot': subscriptionSlot,
+      'subscriptionCount': subscriptionCount,
+      'availabilityReason': availabilityReason,
+      'isDefaultDataSubscription': isDefaultDataSubscription,
+    },
   };
   factory RvSignalSample.fromJson(Map<String, dynamic> json) => RvSignalSample(
     generation: json['generation'] as String? ?? 'UNKNOWN',
@@ -133,7 +180,56 @@ class RvSignalSample {
     dbm: json['dbm'] as int?,
     level: json['level'] as int?,
     roaming: json['roaming'] as bool?,
+    transportType: json['transportType'] as String?,
+    networkTechnology: json['networkTechnology'] as String?,
+    networkTypeRaw: json['networkTypeRaw'] as String?,
+    overrideNetworkTypeRaw: json['overrideNetworkTypeRaw'] as String?,
+    signalPercent: json['signalPercent'] as int?,
+    asu: json['signalAsu'] as int?,
+    signalSource: json['signalSource'] as String?,
+    subscriptionSlot: json['subscriptionSlot'] as int?,
+    subscriptionCount: json['subscriptionCount'] as int?,
+    availabilityReason: json['availabilityReason'] as String?,
+    isDefaultDataSubscription: json['isDefaultDataSubscription'] as bool?,
   );
+
+  factory RvSignalSample.fromNative(
+    Map<String, dynamic> json, {
+    required String fallbackTransport,
+    required bool connected,
+  }) {
+    final technology = json['networkTechnology'] as String?;
+    final generation = switch (technology) {
+      '2G' => '2G',
+      '3G' => '3G',
+      'LTE' || '4G' => '4G',
+      '5G SA' || '5G NSA' || '5G' => '5G',
+      _ => connected ? 'UNKNOWN' : 'NONE',
+    };
+    return RvSignalSample(
+      generation: generation,
+      connected: connected,
+      capturedAt:
+          DateTime.tryParse(json['capturedAt'] as String? ?? '')?.toUtc() ??
+          DateTime.now().toUtc(),
+      networkType: json['networkTypeRaw'] as String?,
+      operatorName: json['carrierName'] as String?,
+      dbm: json['signalDbm'] as int?,
+      level: json['signalLevel'] as int?,
+      roaming: json['isRoaming'] as bool?,
+      transportType: json['transportType'] as String? ?? fallbackTransport,
+      networkTechnology: technology,
+      networkTypeRaw: json['networkTypeRaw'] as String?,
+      overrideNetworkTypeRaw: json['overrideNetworkTypeRaw'] as String?,
+      signalPercent: json['signalPercent'] as int?,
+      asu: json['signalAsu'] as int?,
+      signalSource: json['signalSource'] as String?,
+      subscriptionSlot: json['subscriptionSlot'] as int?,
+      subscriptionCount: json['subscriptionCount'] as int?,
+      availabilityReason: json['availabilityReason'] as String?,
+      isDefaultDataSubscription: json['isDefaultDataSubscription'] as bool?,
+    );
+  }
 }
 
 class RvPhotoReference {
@@ -196,6 +292,12 @@ class RvDraft {
     this.photos = const {},
     this.lastSyncError,
     this.retryCount = 0,
+    this.activeFormStep = 0,
+    this.parcelValveConfiguration,
+    this.navigationQuestionId,
+    this.navigationSubItemId,
+    this.navigationFieldId,
+    this.returnToSummary = false,
     this.currentStep = RvSyncStep.create,
     this.lastAttemptAt,
     this.nextRetryAt,
@@ -206,7 +308,7 @@ class RvDraft {
       fieldSessionId,
       checklistId;
   final String? serverInspectionId, lastSyncError;
-  final int checklistVersion, retryCount;
+  final int checklistVersion, retryCount, activeFormStep;
   final Map<String, dynamic> checklistSnapshot;
   final DateTime createdAt, updatedAt;
   final DateTime? lastAttemptAt, nextRetryAt;
@@ -220,17 +322,27 @@ class RvDraft {
   final Map<String, RvAnswer> answers;
   final RvLocationSample? location;
   final RvSignalSample? signal;
-  final Map<String, RvPhotoReference> photos;
+  final Map<String, List<RvPhotoReference>> photos;
   final RvSyncStep currentStep;
+  final ParcelValveConfiguration? parcelValveConfiguration;
+  final String? navigationQuestionId, navigationSubItemId, navigationFieldId;
+  final bool returnToSummary;
 
   DynamicChecklist get checklist =>
       DynamicChecklist.fromJson(checklistSnapshot);
   bool get isReadOnly =>
       localStatus == RvLocalStatus.submitted ||
       localStatus == RvLocalStatus.cancelled;
-  bool get hasAllPhotoSlots => requiredRvPhotoSlots.every(photos.containsKey);
+  int get photoCount =>
+      photos.values.fold(0, (sum, values) => sum + values.length);
+  List<RvPhotoReference> photosFor(String slot) =>
+      List.unmodifiable(photos[slot] ?? const []);
+  bool get hasAllPhotoSlots =>
+      requiredRvPhotoSlots.every((slot) => photosFor(slot).isNotEmpty);
   bool get photosVerified => requiredRvPhotoSlots.every(
-    (slot) => photos[slot]?.status == RvPhotoUploadStatus.verified,
+    (slot) => photosFor(
+      slot,
+    ).any((photo) => photo.status == RvPhotoUploadStatus.verified),
   );
 
   RvDraft copyWith({
@@ -245,10 +357,18 @@ class RvDraft {
     Map<String, RvAnswer>? answers,
     RvLocationSample? location,
     RvSignalSample? signal,
-    Map<String, RvPhotoReference>? photos,
+    Map<String, List<RvPhotoReference>>? photos,
     String? lastSyncError,
     bool clearError = false,
     int? retryCount,
+    int? activeFormStep,
+    ParcelValveConfiguration? parcelValveConfiguration,
+    bool clearParcelValveConfiguration = false,
+    String? navigationQuestionId,
+    String? navigationSubItemId,
+    String? navigationFieldId,
+    bool clearNavigationTarget = false,
+    bool? returnToSummary,
     RvSyncStep? currentStep,
     DateTime? lastAttemptAt,
     DateTime? nextRetryAt,
@@ -277,6 +397,20 @@ class RvDraft {
     photos: photos ?? this.photos,
     lastSyncError: clearError ? null : (lastSyncError ?? this.lastSyncError),
     retryCount: retryCount ?? this.retryCount,
+    activeFormStep: activeFormStep ?? this.activeFormStep,
+    parcelValveConfiguration: clearParcelValveConfiguration
+        ? null
+        : (parcelValveConfiguration ?? this.parcelValveConfiguration),
+    navigationQuestionId: clearNavigationTarget
+        ? null
+        : (navigationQuestionId ?? this.navigationQuestionId),
+    navigationSubItemId: clearNavigationTarget
+        ? null
+        : (navigationSubItemId ?? this.navigationSubItemId),
+    navigationFieldId: clearNavigationTarget
+        ? null
+        : (navigationFieldId ?? this.navigationFieldId),
+    returnToSummary: returnToSummary ?? this.returnToSummary,
     currentStep: currentStep ?? this.currentStep,
     lastAttemptAt: lastAttemptAt ?? this.lastAttemptAt,
     nextRetryAt: nextRetryAt ?? this.nextRetryAt,
@@ -303,9 +437,18 @@ class RvDraft {
     'answers': {for (final e in answers.entries) e.key: e.value.toJson()},
     'location': location?.toJson(),
     'signal': signal?.toJson(),
-    'photos': {for (final e in photos.entries) e.key: e.value.toJson()},
+    'photos': {
+      for (final e in photos.entries)
+        e.key: e.value.map((photo) => photo.toJson()).toList(),
+    },
     'lastSyncError': lastSyncError,
     'retryCount': retryCount,
+    'activeFormStep': activeFormStep,
+    'parcelValveConfiguration': parcelValveConfiguration?.toJson(),
+    'navigationQuestionId': navigationQuestionId,
+    'navigationSubItemId': navigationSubItemId,
+    'navigationFieldId': navigationFieldId,
+    'returnToSummary': returnToSummary,
     'currentStep': currentStep.name,
     'lastAttemptAt': lastAttemptAt?.toUtc().toIso8601String(),
     'nextRetryAt': nextRetryAt?.toUtc().toIso8601String(),
@@ -377,12 +520,32 @@ class RvDraft {
       for (final entry in Map<String, dynamic>.from(
         json['photos'] as Map? ?? const {},
       ).entries)
-        entry.key: RvPhotoReference.fromJson(
-          Map<String, dynamic>.from(entry.value as Map),
-        ),
+        entry.key: entry.value is List
+            ? [
+                for (final value in entry.value as List)
+                  RvPhotoReference.fromJson(
+                    Map<String, dynamic>.from(value as Map),
+                  ),
+              ]
+            : [
+                // Backward compatibility with drafts written before 12.5.1.
+                RvPhotoReference.fromJson(
+                  Map<String, dynamic>.from(entry.value as Map),
+                ),
+              ],
     },
     lastSyncError: json['lastSyncError'] as String?,
     retryCount: json['retryCount'] as int? ?? 0,
+    activeFormStep: json['activeFormStep'] as int? ?? 0,
+    parcelValveConfiguration: json['parcelValveConfiguration'] is Map
+        ? ParcelValveConfiguration.fromJson(
+            Map<String, dynamic>.from(json['parcelValveConfiguration'] as Map),
+          )
+        : null,
+    navigationQuestionId: json['navigationQuestionId'] as String?,
+    navigationSubItemId: json['navigationSubItemId'] as String?,
+    navigationFieldId: json['navigationFieldId'] as String?,
+    returnToSummary: json['returnToSummary'] as bool? ?? false,
     currentStep: _enum(
       RvSyncStep.values,
       json['currentStep'],

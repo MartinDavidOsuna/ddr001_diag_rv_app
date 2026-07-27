@@ -49,15 +49,21 @@ class AppPageHeader extends StatelessWidget implements PreferredSizeWidget {
     required this.title,
     this.subtitle,
     this.actions,
+    this.leading,
+    this.automaticallyImplyLeading = true,
     super.key,
   });
   final String title;
   final String? subtitle;
   final List<Widget>? actions;
+  final Widget? leading;
+  final bool automaticallyImplyLeading;
   @override
   Size get preferredSize => Size.fromHeight(subtitle == null ? 56 : 62);
   @override
   Widget build(BuildContext context) => AppBar(
+    leading: leading,
+    automaticallyImplyLeading: automaticallyImplyLeading,
     title: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

@@ -57,7 +57,7 @@ void main() {
 
   RvDraft draft({
     Map<String, RvAnswer> answers = const {},
-    Map<String, RvPhotoReference> photos = const {},
+    Map<String, List<RvPhotoReference>> photos = const {},
   }) {
     final definition = checklist();
     return RvDraft(
@@ -203,11 +203,13 @@ void main() {
     test('acepta siete referencias verificadas', () {
       final photos = {
         for (final slot in requiredRvPhotoSlots)
-          slot: RvPhotoReference(
-            photoId: 'photo-$slot',
-            slotCode: slot,
-            status: RvPhotoUploadStatus.verified,
-          ),
+          slot: [
+            RvPhotoReference(
+              photoId: 'photo-$slot',
+              slotCode: slot,
+              status: RvPhotoUploadStatus.verified,
+            ),
+          ],
       };
       expect(draft(photos: photos).photosVerified, isTrue);
     });

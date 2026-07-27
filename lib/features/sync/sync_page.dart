@@ -10,6 +10,10 @@ import '../../core/widgets/common_widgets.dart';
 import '../../domain/media/media_sync_status.dart';
 import '../../domain/sync/sync_queue_item.dart';
 
+String syncConnectionMessage(bool online) => online
+    ? 'Conectado a la API; cada elemento requiere confirmación remota'
+    : 'Los cambios permanecen guardados hasta recuperar la conexión';
+
 class SyncPage extends StatefulWidget {
   const SyncPage({required this.returnLocation, super.key});
   final String returnLocation;
@@ -105,9 +109,9 @@ class _SyncPageState extends State<SyncPage> {
                           state.online ? 'Conexión disponible' : 'Sin conexión',
                           style: const TextStyle(fontWeight: FontWeight.w800),
                         ),
-                        const Text(
-                          'Simulación local: la verificación remota es obligatoria',
-                          style: TextStyle(
+                        Text(
+                          syncConnectionMessage(state.online),
+                          style: const TextStyle(
                             fontSize: 11,
                             color: AppColors.muted,
                           ),

@@ -26,6 +26,7 @@ import '../../features/checklist/data/checklist_models.dart';
 import '../../features/checklist/data/checklist_repository.dart';
 import '../../features/inspections/data/inspection_sync_coordinator.dart';
 import '../../features/inspections/data/rv_draft_repository.dart';
+import '../../features/catalogs/dynamic_catalog_repository.dart';
 import '../network/api_exception.dart';
 import 'update_service.dart';
 
@@ -45,6 +46,7 @@ class AppState extends ChangeNotifier {
     required this.checklistRepository,
     required this.rvDraftRepository,
     required this.inspectionSyncCoordinator,
+    this.dynamicCatalogRepository,
   });
   final SharedPreferences preferences;
   final Box<String> traceBox, syncBox, mediaBox, syncedTraceBox;
@@ -57,6 +59,7 @@ class AppState extends ChangeNotifier {
   final ChecklistRepository checklistRepository;
   final RvDraftRepository rvDraftRepository;
   final InspectionSyncCoordinator inspectionSyncCoordinator;
+  final DynamicCatalogRepository? dynamicCatalogRepository;
   late final SyncQueueRepository syncQueueRepository = SyncQueueRepository(
     syncBox,
   );

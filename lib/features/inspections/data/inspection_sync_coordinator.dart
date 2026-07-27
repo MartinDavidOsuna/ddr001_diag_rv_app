@@ -7,10 +7,12 @@ import 'package:hive_ce/hive.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../domain/media/inspection_photo.dart';
 import '../../../domain/media/media_sync_status.dart';
+import '../../catalogs/dynamic_catalog_repository.dart';
 import '../domain/rv_draft.dart';
 import '../domain/rv_sync_state.dart';
 import '../domain/rv_validator.dart';
 import 'inspection_remote_repository.dart';
+import 'rv_answer_payload_builder.dart';
 import 'rv_draft_repository.dart';
 
 class InspectionSyncCoordinator {
@@ -19,24 +21,42 @@ class InspectionSyncCoordinator {
     required this.remote,
     required this.photoBox,
     required this.mediaQueue,
+    this.catalogs,
     this.validator = const RvValidator(),
   });
   final RvDraftRepository drafts;
   final InspectionRemoteRepository remote;
   final Box<String> photoBox, mediaQueue;
+  final DynamicCatalogRepository? catalogs;
   final RvValidator validator;
+  RvAnswerPayloadBuilder get _payloadBuilder =>
+      RvAnswerPayloadBuilder(validator: validator);
   final Set<String> _running = {};
 
   bool isRunning(String id) => _running.contains(id);
 
   Future<RvDraft> synchronize(RvDraft initial, {bool submit = false}) async {
+    if (initial.localStatus == RvLocalStatus.syncError &&
+        initial.nextRetryAt == null &&
+        initial.lastAttemptAt != null &&
+        !initial.updatedAt.isAfter(initial.lastAttemptAt!)) {
+      _debug(initial, 'omitido', 'error determinista sin cambios');
+      return initial;
+    }
     if (!_running.add(initial.clientInspectionId))
       return drafts.find(initial.clientInspectionId) ?? initial;
     var draft = drafts.find(initial.clientInspectionId) ?? initial;
     _debug(draft, 'inicio', submit ? 'submit solicitado' : 'sincronización');
     try {
+      draft = await _synchronizeCatalogs(draft);
       draft = await _create(draft);
       draft = await _answers(draft);
+      if (draft.parcelValveConfiguration != null) {
+        await remote.saveParcelValves(
+          draft.serverInspectionId!,
+          draft.parcelValveConfiguration!,
+        );
+      }
       if (draft.location != null) draft = await _location(draft);
       if (draft.signal != null) draft = await _signal(draft);
       draft = await _photos(draft);
@@ -63,6 +83,68 @@ class InspectionSyncCoordinator {
     } finally {
       _running.remove(initial.clientInspectionId);
     }
+  }
+
+  Future<RvDraft> _synchronizeCatalogs(RvDraft draft) async {
+    final repository = catalogs;
+    if (repository == null) return draft;
+    await repository.synchronizePending();
+    var changed = false;
+    final answers = <String, RvAnswer>{...draft.answers};
+    for (final entry in answers.entries) {
+      final answer = entry.value;
+      if (answer.value is! Map) continue;
+      final value = Map<String, dynamic>.from(answer.value! as Map);
+      if (value['catalogId'] != null) continue;
+      final remoteId = repository.remoteIdFor(
+        value['localCatalogId']?.toString() ?? '',
+      );
+      if (remoteId == null) continue;
+      changed = true;
+      answers[entry.key] = RvAnswer(
+        questionId: answer.questionId,
+        sectionId: answer.sectionId,
+        answerType: answer.answerType,
+        value: {...value, 'catalogId': remoteId, 'isPendingSync': false},
+        selectedOptions: answer.selectedOptions,
+        notApplicable: answer.notApplicable,
+        comment: answer.comment,
+        updatedAt: DateTime.now().toUtc(),
+      );
+    }
+    var configuration = draft.parcelValveConfiguration;
+    if (configuration != null) {
+      Map<String, dynamic>? reconcile(Map<String, dynamic>? value) {
+        if (value == null || value['catalogId'] != null) return value;
+        final remoteId = repository.remoteIdFor(
+          value['localCatalogId']?.toString() ?? '',
+        );
+        if (remoteId == null) return value;
+        changed = true;
+        return {...value, 'catalogId': remoteId, 'isPendingSync': false};
+      }
+
+      configuration = configuration.copyWith(
+        valves: [
+          for (final valve in configuration.valves)
+            valve.copyWith(
+              valveBrand: reconcile(valve.valveBrand),
+              diameter: reconcile(valve.diameter),
+              solenoidBrand: reconcile(valve.solenoidBrand),
+              pilotBrand: reconcile(valve.pilotBrand),
+              pressureGaugeBrand: reconcile(valve.pressureGaugeBrand),
+            ),
+        ],
+      );
+    }
+    if (!changed) return draft;
+    final reconciled = draft.copyWith(
+      answers: answers,
+      parcelValveConfiguration: configuration,
+      answersStatus: RvPartStatus.pending,
+    );
+    await drafts.save(reconciled);
+    return reconciled;
   }
 
   Future<RvDraft> _create(RvDraft draft) async {
@@ -92,6 +174,16 @@ class InspectionSyncCoordinator {
   Future<RvDraft> _answers(RvDraft draft) async {
     if (draft.answersStatus == RvPartStatus.synced) return draft;
     final id = draft.serverInspectionId!;
+    late final List<Map<String, dynamic>> payload;
+    try {
+      payload = _payloadBuilder.build(draft);
+    } on RvPayloadException catch (error) {
+      throw ApiException(
+        ApiErrorKind.validation,
+        error.message,
+        field: error.questionId,
+      );
+    }
     draft = await _save(
       draft.copyWith(
         answersStatus: RvPartStatus.syncing,
@@ -99,30 +191,6 @@ class InspectionSyncCoordinator {
         currentStep: RvSyncStep.answers,
       ),
     );
-    final checklist = draft.checklist;
-    final payload = <Map<String, dynamic>>[];
-    for (final section in checklist.sections) {
-      for (final item in section.items) {
-        if (const {
-          'photo',
-          'coordinates',
-          'signal',
-          'readonly',
-        }.contains(item.type))
-          continue;
-        final answer = draft.answers[item.id];
-        if (answer == null) continue;
-        final visible = validator.isVisible(item, checklist, draft.answers);
-        payload.add({
-          'itemId': item.id,
-          if (!answer.notApplicable && visible)
-            'value': item.type == 'multiselect'
-                ? answer.selectedOptions
-                : answer.value,
-          'notApplicable': answer.notApplicable || !visible,
-        });
-      }
-    }
     await remote.saveAnswers(
       id,
       payload,
@@ -187,65 +255,73 @@ class InspectionSyncCoordinator {
   }
 
   Future<RvDraft> _photos(RvDraft draft) async {
-    var refs = {...draft.photos};
+    var refs = <String, List<RvPhotoReference>>{...draft.photos};
     for (final slot in requiredRvPhotoSlots) {
-      final ref = refs[slot];
-      if (ref == null || ref.status == RvPhotoUploadStatus.verified) continue;
-      final photo = _photo(ref.photoId);
-      if (photo == null || !File(photo.localPath).existsSync()) {
-        refs[slot] = RvPhotoReference(
+      final slotRefs = [...draft.photosFor(slot)];
+      for (var index = 0; index < slotRefs.length; index++) {
+        final ref = slotRefs[index];
+        if (ref.status == RvPhotoUploadStatus.verified) continue;
+        final photo = _photo(ref.photoId);
+        if (photo == null || !File(photo.localPath).existsSync()) {
+          slotRefs[index] = RvPhotoReference(
+            photoId: ref.photoId,
+            slotCode: slot,
+            status: RvPhotoUploadStatus.missingLocal,
+            retryCount: ref.retryCount,
+            lastError: 'El archivo local no existe.',
+          );
+          refs[slot] = slotRefs;
+          continue;
+        }
+        slotRefs[index] = RvPhotoReference(
           photoId: ref.photoId,
           slotCode: slot,
-          status: RvPhotoUploadStatus.missingLocal,
-          retryCount: ref.retryCount,
-          lastError: 'El archivo local no existe.',
-        );
-        continue;
-      }
-      refs[slot] = RvPhotoReference(
-        photoId: ref.photoId,
-        slotCode: slot,
-        status: RvPhotoUploadStatus.uploading,
-        retryCount: ref.retryCount,
-      );
-      draft = await _save(
-        draft.copyWith(
-          photos: refs,
-          photosStatus: RvPartStatus.syncing,
-          localStatus: RvLocalStatus.pendingPhotos,
-          currentStep: RvSyncStep.photos,
-        ),
-      );
-      try {
-        _debug(draft, 'fotografía', 'subiendo slot=$slot');
-        final uploaded = await remote.uploadPhoto(
-          draft.serverInspectionId!,
-          slot,
-          photo,
-        );
-        refs[slot] = RvPhotoReference(
-          photoId: ref.photoId,
-          serverPhotoId: uploaded.id,
-          slotCode: slot,
-          status: RvPhotoUploadStatus.verified,
+          status: RvPhotoUploadStatus.uploading,
           retryCount: ref.retryCount,
         );
-        await _markPhotoVerified(photo, uploaded.sha256);
-        _debug(draft, 'fotografía', 'verificada slot=$slot');
-      } on ApiException catch (error) {
-        refs[slot] = RvPhotoReference(
-          photoId: ref.photoId,
-          slotCode: slot,
-          status: RvPhotoUploadStatus.error,
-          retryCount: ref.retryCount + 1,
-          lastError: error.message,
+        refs[slot] = slotRefs;
+        draft = await _save(
+          draft.copyWith(
+            photos: refs,
+            photosStatus: RvPartStatus.syncing,
+            localStatus: RvLocalStatus.pendingPhotos,
+            currentStep: RvSyncStep.photos,
+          ),
         );
-        if (!_retryable(error)) rethrow;
+        try {
+          _debug(draft, 'fotografía', 'subiendo slot=$slot');
+          final uploaded = await remote.uploadPhoto(
+            draft.serverInspectionId!,
+            slot,
+            photo,
+          );
+          slotRefs[index] = RvPhotoReference(
+            photoId: ref.photoId,
+            serverPhotoId: uploaded.id,
+            slotCode: slot,
+            status: RvPhotoUploadStatus.verified,
+            retryCount: ref.retryCount,
+          );
+          await _markPhotoVerified(photo, uploaded.sha256);
+          _debug(draft, 'fotografía', 'verificada slot=$slot');
+        } on ApiException catch (error) {
+          slotRefs[index] = RvPhotoReference(
+            photoId: ref.photoId,
+            slotCode: slot,
+            status: RvPhotoUploadStatus.error,
+            retryCount: ref.retryCount + 1,
+            lastError: error.message,
+          );
+          if (!_retryable(error)) rethrow;
+        }
+        refs[slot] = slotRefs;
+        draft = await _save(draft.copyWith(photos: refs));
       }
-      draft = await _save(draft.copyWith(photos: refs));
     }
     final complete = requiredRvPhotoSlots.every(
-      (slot) => refs[slot]?.status == RvPhotoUploadStatus.verified,
+      (slot) => (refs[slot] ?? const []).any(
+        (photo) => photo.status == RvPhotoUploadStatus.verified,
+      ),
     );
     return _save(
       draft.copyWith(
@@ -259,25 +335,30 @@ class InspectionSyncCoordinator {
   Future<RvDraft> _reconcilePhotos(RvDraft draft) async {
     final server = await remote.photos(draft.serverInspectionId!);
     _debug(draft, 'reconciliación', '${server.length} fotos remotas');
-    final refs = {...draft.photos};
+    final refs = <String, List<RvPhotoReference>>{...draft.photos};
     for (final remotePhoto in server) {
-      final local = refs[remotePhoto.slotCode];
-      if (local != null &&
-          local.photoId == remotePhoto.id &&
-          remotePhoto.status == 'verified') {
-        refs[remotePhoto.slotCode] = RvPhotoReference(
+      final slotRefs = [...draft.photosFor(remotePhoto.slotCode)];
+      final index = slotRefs.indexWhere(
+        (photo) => photo.photoId == remotePhoto.id,
+      );
+      if (index >= 0 && remotePhoto.status == 'verified') {
+        final local = slotRefs[index];
+        slotRefs[index] = RvPhotoReference(
           photoId: local.photoId,
           serverPhotoId: remotePhoto.id,
           slotCode: local.slotCode,
           status: RvPhotoUploadStatus.verified,
           retryCount: local.retryCount,
         );
+        refs[remotePhoto.slotCode] = slotRefs;
         final photo = _photo(local.photoId);
         if (photo != null) await _markPhotoVerified(photo, remotePhoto.sha256);
       }
     }
     final complete = requiredRvPhotoSlots.every(
-      (slot) => refs[slot]?.status == RvPhotoUploadStatus.verified,
+      (slot) => (refs[slot] ?? const []).any(
+        (photo) => photo.status == RvPhotoUploadStatus.verified,
+      ),
     );
     return _save(
       draft.copyWith(
@@ -336,17 +417,25 @@ class InspectionSyncCoordinator {
 
   Future<RvDraft> _failure(RvDraft draft, ApiException error) {
     final retry = draft.retryCount + 1;
+    final failedAt = DateTime.now().toUtc();
     final delay = switch (retry) {
       1 => const Duration(seconds: 5),
       2 => const Duration(seconds: 15),
       _ => const Duration(seconds: 45),
     };
-    _debug(draft, 'error', '${error.kind.name}; intento=$retry');
+    _debug(
+      draft,
+      'error',
+      '${error.kind.name}; retryable=${_retryable(error)}; intento=$retry '
+          'requestId=${error.requestId ?? '-'} field=${error.field ?? '-'}',
+    );
     return _save(
       draft.copyWith(
         localStatus: RvLocalStatus.syncError,
         lastSyncError: error.message,
         retryCount: retry,
+        lastAttemptAt: failedAt,
+        updatedAt: failedAt,
         nextRetryAt: _retryable(error)
             ? DateTime.now().toUtc().add(delay)
             : null,

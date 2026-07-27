@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -9,6 +10,8 @@ import '../../checklist/presentation/dynamic_checklist_renderer.dart';
 import '../domain/rv_draft.dart';
 import '../domain/rv_sync_state.dart';
 import 'rv_inspection_controller.dart';
+import 'rv_review_navigation.dart';
+import 'rv_steps_one_two.dart';
 
 class RvInspectionPage extends StatefulWidget {
   const RvInspectionPage({required this.hydrantId, super.key});
@@ -20,6 +23,27 @@ class RvInspectionPage extends StatefulWidget {
 class _RvInspectionPageState extends State<RvInspectionPage> {
   RvInspectionController? controller;
   String? startupError;
+  bool _allowPop = false;
+
+  Future<void> _leaveFlow() async {
+    if (!mounted) return;
+    setState(() => _allowPop = true);
+    await WidgetsBinding.instance.endOfFrame;
+    if (mounted) context.pop();
+  }
+
+  Future<void> _handleBack() async {
+    final activeController = controller;
+    final draft = activeController?.draft;
+    if (draft == null || activeController!.busy) return;
+    if (draft.activeFormStep > 0) {
+      await activeController.goToPreviousStep();
+      return;
+    }
+    final exit = await RvReviewNavigation.requestExitReview(context);
+    if (!exit || !mounted) return;
+    await _leaveFlow();
+  }
 
   @override
   void didChangeDependencies() {
@@ -39,6 +63,7 @@ class _RvInspectionPageState extends State<RvInspectionPage> {
       hydrant: state.hydrant(widget.hydrantId),
       user: state.user,
       checklist: checklist,
+      catalogs: state.dynamicCatalogRepository,
     )..initialize();
   }
 
@@ -61,63 +86,100 @@ class _RvInspectionPageState extends State<RvInspectionPage> {
         ),
       );
     }
-    return AnimatedBuilder(
-      animation: controller!,
-      builder: (context, _) {
-        final draft = controller!.draft;
-        if (draft == null)
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        final validation = controller!.validator.validate(draft);
-        return Scaffold(
-          appBar: AppPageHeader(
-            title: 'Revisión visual',
-            subtitle: draft.accountNumber,
-          ),
-          body: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _Status(draft: draft),
-              if (controller!.message != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  controller!.message!,
-                  style: TextStyle(
-                    color: draft.lastSyncError == null
-                        ? AppColors.green
-                        : AppColors.red,
+    return PopScope(
+      canPop: _allowPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleBack();
+      },
+      child: AnimatedBuilder(
+        animation: controller!,
+        builder: (context, _) {
+          final draft = controller!.draft;
+          if (draft == null)
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          final validation = controller!.validator.validate(draft);
+          return Scaffold(
+            appBar: AppPageHeader(
+              title: 'Revisión visual',
+              subtitle: draft.accountNumber,
+              automaticallyImplyLeading: false,
+              leading: IconButton(
+                key: const ValueKey('rv-header-back'),
+                tooltip: 'Atrás',
+                onPressed: controller!.busy ? null : _handleBack,
+                icon: const Icon(Icons.arrow_back),
+              ),
+            ),
+            body: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                _Status(draft: draft),
+                if (controller!.message != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    controller!.message!,
+                    style: TextStyle(
+                      color: draft.lastSyncError == null
+                          ? AppColors.green
+                          : AppColors.red,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                DynamicChecklistRenderer(
+                  controller: controller!,
+                  stepOne: RvStepOnePanel(controller: controller!),
+                  stepTwo: RvStepTwoPhotoPanel(controller: controller!),
+                  onExitRequested: _handleBack,
+                  onSummary: () => context.push(
+                    '/hydrants/${widget.hydrantId}/inspection/a/summary/${draft.clientInspectionId}',
                   ),
                 ),
-              ],
-              const SizedBox(height: 14),
-              DynamicChecklistRenderer(controller: controller!),
-              _Evidence(controller: controller!),
-              const SizedBox(height: 14),
-              FilledButton.icon(
-                onPressed: controller!.busy || draft.isReadOnly
-                    ? null
-                    : () => controller!.synchronize(),
-                icon: const Icon(Icons.sync),
-                label: const Text('Sincronizar ahora'),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: () => context.push(
-                  '/hydrants/${widget.hydrantId}/inspection/a/summary/${draft.clientInspectionId}',
+                if (draft.returnToSummary) ...[
+                  const SizedBox(height: 10),
+                  FilledButton.tonalIcon(
+                    onPressed: () async {
+                      await controller!.clearSummaryReturn();
+                      if (context.mounted) {
+                        context.push(
+                          '/hydrants/${widget.hydrantId}/inspection/a/summary/${draft.clientInspectionId}',
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.arrow_back),
+                    label: const Text('Volver al resumen'),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                FilledButton.icon(
+                  onPressed: controller!.busy || draft.isReadOnly
+                      ? null
+                      : () => controller!.synchronize(),
+                  icon: const Icon(Icons.sync),
+                  label: const Text('Sincronizar ahora'),
                 ),
-                icon: const Icon(Icons.fact_check_outlined),
-                label: Text('Resumen · ${validation.issues.length} pendientes'),
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () => context.pop(),
-                child: const Text('Continuar después'),
-              ),
-            ],
-          ),
-        );
-      },
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () => context.push(
+                    '/hydrants/${widget.hydrantId}/inspection/a/summary/${draft.clientInspectionId}',
+                  ),
+                  icon: const Icon(Icons.fact_check_outlined),
+                  label: Text(
+                    'Resumen · ${validation.issues.length} pendientes',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: _leaveFlow,
+                  child: const Text('Continuar después'),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -166,6 +228,8 @@ class _Status extends StatelessWidget {
   };
 }
 
+// Kept temporarily as a reference while the pattern remains limited to steps 1–2.
+// ignore: unused_element
 class _Evidence extends StatelessWidget {
   const _Evidence({required this.controller});
   final RvInspectionController controller;
@@ -198,7 +262,7 @@ class _Evidence extends StatelessWidget {
                 trailing: TextButton(
                   onPressed: draft.isReadOnly
                       ? null
-                      : controller.captureLocation,
+                      : controller.captureLocationAndSignal,
                   child: const Text('Capturar'),
                 ),
               ),
@@ -216,7 +280,9 @@ class _Evidence extends StatelessWidget {
                         '${draft.signal!.networkType ?? draft.signal!.generation} · ${draft.signal!.capturedAt.toLocal()}',
                       ),
                 trailing: TextButton(
-                  onPressed: draft.isReadOnly ? null : controller.captureSignal,
+                  onPressed: draft.isReadOnly
+                      ? null
+                      : controller.captureLocationAndSignal,
                   child: const Text('Capturar'),
                 ),
               ),
@@ -236,31 +302,41 @@ class _Evidence extends StatelessWidget {
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(
-                    draft.photos.containsKey(slot)
+                    draft.photosFor(slot).isNotEmpty
                         ? Icons.check_circle
                         : Icons.camera_alt_outlined,
-                    color: draft.photos.containsKey(slot)
+                    color: draft.photosFor(slot).isNotEmpty
                         ? AppColors.green
                         : AppColors.orange,
                   ),
                   title: Text(rvPhotoSlotLabels[slot]!),
-                  subtitle: Text(_photoLabel(draft.photos[slot]?.status)),
+                  subtitle: Text(
+                    _photoLabel(
+                      draft.photosFor(slot).isEmpty
+                          ? null
+                          : draft.photosFor(slot).first.status,
+                    ),
+                  ),
                   trailing: Wrap(
                     children: [
-                      if (draft.photos.containsKey(slot))
+                      if (draft.photosFor(slot).isNotEmpty)
                         IconButton(
                           tooltip: 'Eliminar',
                           onPressed: draft.isReadOnly
                               ? null
-                              : () => controller.removePhoto(slot),
+                              : () => controller.removePhoto(
+                                  slot,
+                                  draft.photosFor(slot).first.photoId,
+                                ),
                           icon: const Icon(Icons.delete_outline),
                         ),
                       TextButton(
                         onPressed: draft.isReadOnly
                             ? null
-                            : () => controller.capturePhoto(slot),
+                            : () =>
+                                  controller.addPhoto(slot, ImageSource.camera),
                         child: Text(
-                          draft.photos.containsKey(slot)
+                          draft.photosFor(slot).isNotEmpty
                               ? 'Reemplazar'
                               : 'Capturar',
                         ),
