@@ -14,9 +14,7 @@ Rama conservada: `feature/rv-crs-and-catalog-resolution`
 ## Ambiente autorizado de trabajo
 
 - App: `development` o `test`.
-- API local: `http://192.168.1.111:3000/api/v1` para el Pixel en la red
-  autorizada; `http://127.0.0.1:3000/api/v1` solo para pruebas ejecutadas en
-  la estación de desarrollo.
+- API de prueba: valor inyectado mediante `API_BASE_URL`.
 - Producción no se usa para pruebas ni se modifica.
 
 ## Flujo encontrado antes de modificar código
@@ -40,8 +38,7 @@ Flutter main/bootstrap
 ### URL y transporte
 
 - La URL se resuelve centralmente en `lib/core/config/app_config.dart`.
-- Desarrollo debug usa actualmente
-  `http://192.168.1.111:3000/api/v1`.
+- Desarrollo requiere una URL explícita mediante `API_BASE_URL`.
 - El endpoint configurado previamente para producción es
   `http://cifra.aquafim.com:3002/api/v1`.
 - Android usa una excepción de cleartext limitada por Network Security Config;
@@ -181,8 +178,7 @@ revalidación en `AppLifecycleState.resumed`.
 
 - Flutter: 166 archivos formateados, cero cambios de formato; `flutter
   analyze` sin hallazgos; 233/233 pruebas aprobadas.
-- APK debug: construida para `development` con
-  `http://192.168.1.111:3000/api/v1`.
+- APK debug: construida para `development` con URL inyectada.
 - API: Node `22.23.1`; lint, type-check, 85/85 pruebas unitarias, 12/12
   pruebas de integración SQL (6 archivos) y build aprobados.
 - La integración se ejecutó serialmente para evitar que fixtures SQL
@@ -194,7 +190,7 @@ revalidación en `AppLifecycleState.resumed`.
 - `health/live`, cinco muestras desde la estación: 858 ms en el primer
   arranque y 17–20 ms en caliente.
 - `health/ready`, cinco muestras: 32–135 ms.
-- El Pixel confirmó conectividad TCP directa a `192.168.1.111:3000`.
+- El Pixel confirmó conectividad TCP directa al endpoint inyectado.
 
 ### Instalación física
 

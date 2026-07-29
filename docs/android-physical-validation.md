@@ -45,7 +45,7 @@ segura verificable. No se enviaron inspecciones.
 Validación realizada el 23–24 de julio de 2026 en Pixel 7 Pro
 (`2730…04R7`), Android 17/API 37, contra
 `RevisionVisualStarter_Test` mediante la API local
-`192.168.1.111:3000`. No se incluyeron secretos, coordenadas exactas ni
+el endpoint inyectado mediante `API_BASE_URL`. No se incluyeron secretos, coordenadas exactas ni
 fotografías.
 
 ## Matriz ejecutada

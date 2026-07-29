@@ -40,7 +40,7 @@ Por seguridad no se generó AAB release: aunque Gradle podría producir uno con 
 
 ## 5. Configuración de entorno y HTTP local
 
-`AppConfig` lee `APP_ENV` y `API_BASE_URL` con `String.fromEnvironment`, expone `isDevelopment` y `rvOnly`, valida URL y exige HTTPS en release. Solo development debug usa temporalmente `http://192.168.1.111:3000/api/v1` si falta el define.
+`AppConfig` lee `APP_ENV` y `API_BASE_URL` con `String.fromEnvironment`, expone `isDevelopment` y `rvOnly`, valida URL y exige configuración explícita.
 
 El manifest principal no habilita cleartext. `android/app/src/debug/AndroidManifest.xml` agrega `usesCleartextTraffic=true`; release conserva la política segura. `INTERNET` existe en main.
 
@@ -154,13 +154,13 @@ No había un dispositivo/emulador y datos reales de un inspector autorizados par
 
 ```powershell
 flutter pub get
-flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://192.168.1.111:3000/api/v1
+flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=https://api.example.com/api/v1
 ```
 
 Build reproducible:
 
 ```powershell
-flutter build apk --debug --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://192.168.1.111:3000/api/v1
+flutter build apk --debug --dart-define=APP_ENV=development --dart-define=API_BASE_URL=https://api.example.com/api/v1
 ```
 
 Release futuro debe recibir URL HTTPS:

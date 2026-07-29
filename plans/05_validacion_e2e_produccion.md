@@ -17,7 +17,7 @@ Ejecutado contra `RevisionVisualStarter_Test`, nunca producción. El test creó 
 No hubo dispositivo interactivo. No se declara ejecutada. Procedimiento:
 
 ```powershell
-flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://192.168.1.111:3000/api/v1
+flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=https://api.example.com/api/v1
 ```
 
 Iniciar sesión; seleccionar hidrante; crear RV; contestar; GPS/señal; tomar siete fotos; activar modo avión; cerrar/reabrir; confirmar restauración y continuación offline; reconectar; sincronizar; comprobar siete fotos; submit; verificar API, SQL y dashboard. Registrar cuenta, `clientInspectionId`, `serverInspectionId`, siete UUID, hashes y timestamps sin tokens.

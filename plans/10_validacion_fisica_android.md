@@ -8,7 +8,7 @@ Fecha de cierre: 24 de julio de 2026.
 - Android 17/API 37, `arm64-v8a`; ADB 1.0.41.
 - Flutter 3.44.5, Dart 3.12.2.
 - Aplicación `com.aquafim.ddr001diag`, actualización local probada hasta `0.2.1+6`.
-- API local `192.168.1.111:3000/api/v1`; base exclusiva
+- API proporcionada mediante `API_BASE_URL`; base exclusiva
   `RevisionVisualStarter_Test`.
 - Usuario de prueba enmascarado. No se registran credenciales, tokens,
   coordenadas exactas, serie completa ni imágenes.

@@ -61,10 +61,10 @@ Modificados: bootstrap, router, AppState, repositorio/modelo visual, prueba de A
 ## Comandos
 
 ```powershell
-flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://192.168.1.111:3000/api/v1
+flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=https://api.example.com/api/v1
 flutter test
 flutter analyze
-flutter build apk --debug --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://192.168.1.111:3000/api/v1
+flutter build apk --debug --dart-define=APP_ENV=development --dart-define=API_BASE_URL=https://api.example.com/api/v1
 ```
 
 ## Pendientes

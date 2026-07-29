@@ -45,7 +45,7 @@ ni operado manualmente Inicio, Hidrantes, búsqueda o borrador en el dispositivo
 Para completar:
 
 ```powershell
-flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://192.168.1.111:3000/api/v1
+flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=https://api.example.com/api/v1
 ```
 
 Validar sesión, búsqueda de una cuenta del manifiesto, creación/restauración del borrador,

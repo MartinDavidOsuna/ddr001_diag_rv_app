@@ -2,7 +2,7 @@
 
 Versión objetivo: `0.2.1+4`  
 Ambiente: desarrollo  
-API: `http://192.168.1.111:3000/api/v1`  
+API: valor inyectado mediante `API_BASE_URL`
 Fecha: 2026-07-22
 
 Usar datos ficticios y evidencia sin tokens, PII ni fotos sensibles. `PENDIENTE` requiere dispositivo físico y no equivale a aprobado.

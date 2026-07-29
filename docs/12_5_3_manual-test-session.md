@@ -6,7 +6,7 @@
 
 ## Entorno preparado
 
-- API: `http://192.168.1.111:3000/api/v1`
+- API: valor inyectado mediante `API_BASE_URL`
 - Base exclusiva: `RevisionVisualStarter_Test`
 - Pixel 7 Pro: `com.aquafim.ddr001diag`, versión `0.2.1+12`
 - Usuario de campo: `Responsable Test` (`field.test@example.invalid`)

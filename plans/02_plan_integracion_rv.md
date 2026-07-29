@@ -122,7 +122,7 @@ Ocultar F02-B/RF y navegación no necesaria por feature flag; probar cierre/reap
 - Widget: formulario de campo, errores en español, render de cada tipo real, progreso, slots y estados de sync.
 - Integración con servidor falso: 201/304/401+refresh/409/422/5xx, multipart, reintento y submit.
 - Offline: crear, responder, capturar fotos, cerrar proceso, reabrir y sincronizar.
-- Contrato manual real: API local `http://192.168.1.111:3000/api/v1` desde dispositivo Android en la misma red.
+- Contrato manual: API inyectada mediante `API_BASE_URL` desde el dispositivo de prueba.
 - Regresión: `flutter analyze`, `flutter test` y pruebas existentes; build APK debug y release cuando se restaure plataforma/firma disponible.
 
 ## 10. Criterios de aceptación
