@@ -11,9 +11,12 @@ import 'package:ddr001diag/features/inspections/data/inspection_remote_repositor
 import 'package:ddr001diag/features/inspections/data/inspection_sync_coordinator.dart';
 import 'package:ddr001diag/features/inspections/data/rv_draft_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ddr001diag/features/profile/profile_pages.dart';
 
 import '../helpers/hive_test_environment.dart';
 import '../helpers/foundation_fakes.dart';
@@ -137,5 +140,39 @@ void main() {
         state.hydrantsForFilter(filter).length,
       );
     }
+  });
+
+  testWidgets('Perfil no expone simulación ni actualizaciones', (tester) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: ProfilePage()),
+      ),
+    );
+    expect(find.text('ESTADÍSTICAS DE HOY'), findsOneWidget);
+    expect(find.text('Enviados'), findsOneWidget);
+    expect(find.text('Simular conexión'), findsNothing);
+    expect(find.text('Revisar actualización'), findsNothing);
+    expect(find.textContaining('demostración'), findsNothing);
+  });
+
+  testWidgets('Manual operativo contiene flujo RV y no contenido provisional', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: ManualPage()),
+      ),
+    );
+    expect(find.byKey(const ValueKey('manual-scroll-view')), findsOneWidget);
+    expect(find.textContaining('Inicio de sesión'), findsOneWidget);
+    final content = ManualPage.sections
+        .map((section) => '${section.$1} ${section.$2}')
+        .join(' ');
+    expect(content, contains('Válvulas parcelarias'));
+    expect(content, contains('Solución de problemas'));
+    expect(content.toLowerCase(), isNot(contains('demo')));
+    expect(find.textContaining('demo', findRichText: true), findsNothing);
   });
 }

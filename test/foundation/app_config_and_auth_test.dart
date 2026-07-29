@@ -10,6 +10,9 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../helpers/foundation_fakes.dart';
 
 void main() {
+  test('actualizaciones permanecen desactivadas en builds normales', () {
+    expect(AppConfig.appUpdatesEnabled, isFalse);
+  });
   test('AppConfig lee entorno y URL explícitos', () {
     final config = AppConfig.fromEnvironment(
       environmentOverride: 'development',
@@ -19,11 +22,28 @@ void main() {
     expect(config.apiBaseUrl.path, '/api/v1');
   });
 
-  test('AppConfig rechaza URL vacía en release', () {
+  test('AppConfig usa el endpoint predeterminado de producción en release', () {
+    final config = AppConfig.fromEnvironment(
+      environmentOverride: 'production',
+      apiBaseUrlOverride: '',
+      debugMode: false,
+    );
+    expect(config.apiBaseUrl.toString(), AppConfig.productionBaseUrl);
+  });
+
+  test('AppConfig permite únicamente el endpoint HTTP de producción', () {
+    final config = AppConfig.fromEnvironment(
+      environmentOverride: 'production',
+      apiBaseUrlOverride: AppConfig.productionBaseUrl,
+      debugMode: false,
+    );
+    expect(config.apiBaseUrl.host, 'cifra.aquafim.com');
+    expect(config.apiBaseUrl.port, 3002);
+
     expect(
       () => AppConfig.fromEnvironment(
         environmentOverride: 'production',
-        apiBaseUrlOverride: '',
+        apiBaseUrlOverride: 'http://otro.example:3002/api/v1',
         debugMode: false,
       ),
       throwsStateError,
@@ -72,6 +92,7 @@ void main() {
     expect(second, first);
     final session = FieldSession(
       sessionId: 'session',
+      userId: 'user',
       accessToken: 'access',
       refreshToken: 'refresh',
       installationId: first,
@@ -102,7 +123,7 @@ void main() {
         ]),
       );
       return jsonResponse(
-        '{"sessionId":"session","accessToken":"access","refreshToken":"refresh","tokenId":"token"}',
+        '{"sessionId":"session","userId":"user","crewId":"crew","role":"field","accessToken":"access","refreshToken":"refresh","tokenId":"token"}',
         201,
       );
     });
@@ -145,11 +166,131 @@ void main() {
     expect(adapter.requests.single.extra['skipAuth'], isTrue);
   });
 
+  test(
+    'cambio A → B reemplaza tokens solo después de autenticar correctamente',
+    () async {
+      final storage = MemorySessionStorage()
+        ..installation = '9d025d12-bc54-4aa2-8237-e2fb1fa0d67a'
+        ..value = const FieldSession(
+          sessionId: 'session-a',
+          userId: 'user-a',
+          accessToken: 'access-a',
+          refreshToken: 'refresh-a',
+          installationId: '9d025d12-bc54-4aa2-8237-e2fb1fa0d67a',
+          email: 'a@example.test',
+        );
+      var valid = false;
+      final adapter = FakeHttpAdapter((options) async {
+        expect(options.extra['skipAuth'], isTrue);
+        expect(options.headers['Authorization'], isNull);
+        if (!valid) {
+          return jsonResponse(
+            '{"type":"invalid-registration","detail":"Credenciales inválidas."}',
+            422,
+          );
+        }
+        return jsonResponse(
+          '{"sessionId":"session-b","userId":"user-b","crewId":"crew-b","role":"field","accessToken":"access-b","refreshToken":"refresh-b"}',
+          201,
+        );
+      });
+      final dio = Dio()..httpClientAdapter = adapter;
+      final repository = FieldSessionRepository(
+        client: ApiClient(
+          config: AppConfig.fromEnvironment(
+            environmentOverride: 'development',
+            apiBaseUrlOverride: 'https://example.test/api/v1',
+          ),
+          sessionStorage: storage,
+          dio: dio,
+        ),
+        storage: storage,
+        packageInfo: PackageInfo(
+          appName: 'DIAGNOSTICO HIDRANTES',
+          packageName: 'ddr001diag',
+          version: '0.2.0',
+          buildNumber: '3',
+        ),
+        deviceLoader: () async => const DeviceDescriptor(
+          platform: 'android',
+          manufacturer: 'Google',
+          model: 'Pixel',
+          androidVersion: '16',
+          appVersion: '0.2.0+3',
+        ),
+      );
+      const registration = FieldRegistration(
+        name: 'Usuario B',
+        email: 'b@example.test',
+        phone: '4491234567',
+        crew: 'crew b',
+      );
+
+      await expectLater(
+        repository.start(registration),
+        throwsA(isA<ApiException>()),
+      );
+      expect(storage.value?.userId, 'user-a');
+      expect(storage.value?.accessToken, 'access-a');
+
+      valid = true;
+      final sessionB = await repository.start(registration);
+      expect(sessionB.userId, 'user-b');
+      expect(storage.value?.userId, 'user-b');
+      expect(storage.value?.accessToken, 'access-b');
+      expect(storage.value?.refreshToken, 'refresh-b');
+    },
+  );
+
+  test(
+    'cierre sin conexión elimina tokens locales y conserva instalación',
+    () async {
+      final storage = MemorySessionStorage()
+        ..installation = '9d025d12-bc54-4aa2-8237-e2fb1fa0d67a'
+        ..value = const FieldSession(
+          sessionId: 'session-a',
+          userId: 'user-a',
+          accessToken: 'access-a',
+          refreshToken: 'refresh-a',
+          installationId: '9d025d12-bc54-4aa2-8237-e2fb1fa0d67a',
+        );
+      final adapter = FakeHttpAdapter(
+        (options) async => throw DioException(
+          requestOptions: options,
+          type: DioExceptionType.connectionError,
+        ),
+      );
+      final dio = Dio()..httpClientAdapter = adapter;
+      final repository = FieldSessionRepository(
+        client: ApiClient(
+          config: AppConfig.fromEnvironment(
+            environmentOverride: 'development',
+            apiBaseUrlOverride: 'https://example.test/api/v1',
+          ),
+          sessionStorage: storage,
+          dio: dio,
+        ),
+        storage: storage,
+        packageInfo: PackageInfo(
+          appName: 'DIAGNOSTICO HIDRANTES',
+          packageName: 'ddr001diag',
+          version: '0.2.0',
+          buildNumber: '3',
+        ),
+      );
+
+      expect(await repository.end(), isFalse);
+      expect(await storage.read(), isNull);
+      expect(await storage.installationId(), storage.installation);
+    },
+  );
+
   test('restauración conserva sesión local cuando no hay conexión', () async {
     final storage = MemorySessionStorage()
       ..installation = '9d025d12-bc54-4aa2-8237-e2fb1fa0d67a'
       ..value = const FieldSession(
         sessionId: 'session',
+        userId: 'user',
         accessToken: 'access',
         refreshToken: 'refresh',
         installationId: '9d025d12-bc54-4aa2-8237-e2fb1fa0d67a',
@@ -189,6 +330,7 @@ void main() {
       ..installation = '9d025d12-bc54-4aa2-8237-e2fb1fa0d67a'
       ..value = const FieldSession(
         sessionId: 'session',
+        userId: 'user',
         accessToken: 'old-access',
         refreshToken: 'old-refresh',
         installationId: '9d025d12-bc54-4aa2-8237-e2fb1fa0d67a',
@@ -221,7 +363,57 @@ void main() {
     expect(storage.value?.refreshToken, 'new-refresh');
   });
 
-  test('errores 401 y sin conexión se traducen al español', () {
+  test(
+    'reemplazar sesión cancela peticiones autenticadas pero no login',
+    () async {
+      final storage = MemorySessionStorage()
+        ..value = const FieldSession(
+          sessionId: 'session-a',
+          userId: 'user-a',
+          accessToken: 'access-a',
+          refreshToken: 'refresh-a',
+          installationId: 'installation',
+        );
+      final started = <String>[];
+      final adapter = FakeHttpAdapter((options) async {
+        started.add(options.path);
+        await Future<void>.delayed(const Duration(seconds: 1));
+        return jsonResponse('{}', 200);
+      });
+      final dio = Dio()..httpClientAdapter = adapter;
+      final client = ApiClient(
+        config: AppConfig.fromEnvironment(
+          environmentOverride: 'development',
+          apiBaseUrlOverride: 'https://example.test/api/v1',
+        ),
+        sessionStorage: storage,
+        dio: dio,
+      );
+
+      final privateRequest = dio.get<void>('/hydrants');
+      final loginRequest = dio.post<void>(
+        '/field-sessions/start',
+        options: Options(extra: {'skipAuth': true}),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      client.cancelAuthenticatedRequests();
+
+      await expectLater(
+        privateRequest,
+        throwsA(
+          isA<DioException>().having(
+            (error) => error.type,
+            'type',
+            DioExceptionType.cancel,
+          ),
+        ),
+      );
+      await expectLater(loginRequest, completes);
+      expect(started, containsAll(['/hydrants', '/field-sessions/start']));
+    },
+  );
+
+  test('401 y error de conexión no se confunden con falta de interfaz', () {
     final request = RequestOptions(path: '/private');
     final unauthorized = DioException(
       requestOptions: request,
@@ -232,8 +424,8 @@ void main() {
       type: DioExceptionType.connectionError,
       error: 'network',
     );
-    expect(ApiException.fromDio(unauthorized).message, 'Sesión expirada.');
-    expect(ApiException.fromDio(offline).message, 'Sin conexión.');
+    expect(ApiException.fromDio(unauthorized).message, 'Tu sesión expiró.');
+    expect(ApiException.fromDio(offline).message, 'Servidor no disponible.');
   });
 
   test('conflicto de teléfono explica cómo corregir el inicio de sesión', () {
@@ -257,7 +449,7 @@ void main() {
     expect(translated.message, contains('teléfono ya está registrado'));
   });
 
-  test('conflicto de sesión abierta identifica el dispositivo', () {
+  test('conflicto 409 no introduce bloqueo local por usuario anterior', () {
     final request = RequestOptions(path: '/field-sessions/start');
     final error = DioException(
       requestOptions: request,
@@ -267,6 +459,7 @@ void main() {
         data: {
           'type': 'https://rvs.example/problems/open-session-conflict',
           'title': 'Open session conflict',
+          'detail': 'Device already has an incompatible open session.',
           'requestId': 'request-session',
         },
       ),
@@ -275,7 +468,13 @@ void main() {
     final translated = ApiException.fromDio(error);
     expect(translated.statusCode, 409);
     expect(translated.requestId, 'request-session');
-    expect(translated.message, contains('sesión abierta de otro usuario'));
+    expect(
+      translated.message,
+      'No fue posible reemplazar la sesión del dispositivo. Intenta nuevamente.',
+    );
+    expect(translated.message, isNot(contains('usuario anterior')));
+    expect(translated.message, isNot(contains('solicita cerrar')));
+    expect(translated.message, isNot(contains('incompatible open session')));
   });
 
   test('configuración RV bloquea F02-B y conserva RV', () {

@@ -34,6 +34,8 @@ void main() {
       HydrantListFilter.inProgress,
       HydrantListFilter.synchronizationPending,
       HydrantListFilter.completed,
+      HydrantListFilter.submittedToday,
+      HydrantListFilter.pendingToday,
       HydrantListFilter.incidents,
     ]);
     expect(

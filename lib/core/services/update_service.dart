@@ -8,13 +8,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../domain/enums/app_enums.dart';
 import '../../domain/models/app_models.dart';
 
-enum UpdateDemoScenario { current, optional, required, error }
-
 class UpdateService {
   UpdateService({this.remoteManifestUrl = ''});
   final String remoteManifestUrl;
-  static const demoAndroidUrl =
-      'https://example.invalid/diagnostico-hidrantes-demo.apk';
   DateTime? _lastCheck;
   UpdateInfo? _cached;
   static const minimumCheckInterval = Duration(minutes: 15);
@@ -23,11 +19,7 @@ class UpdateService {
     required String installedVersion,
     required int installedBuild,
     bool manual = false,
-    UpdateDemoScenario? demoScenario,
   }) async {
-    if (demoScenario != null) {
-      return _demo(demoScenario);
-    }
     if (!manual &&
         _cached != null &&
         _lastCheck != null &&
@@ -120,56 +112,8 @@ class UpdateService {
     );
   }
 
-  UpdateInfo _demo(UpdateDemoScenario scenario) => switch (scenario) {
-    UpdateDemoScenario.current => const UpdateInfo(
-      latestVersion: '0.2.0',
-      minimumSupportedVersion: '0.1.0',
-      buildNumber: 3,
-      title: 'Aplicación actualizada',
-      message: 'Tienes instalada la versión disponible.',
-      status: UpdateStatus.current,
-    ),
-    UpdateDemoScenario.optional => const UpdateInfo(
-      latestVersion: '0.2.1',
-      minimumSupportedVersion: '0.1.0',
-      buildNumber: 4,
-      title: 'Nueva versión disponible',
-      message: 'Incluye correcciones de navegación, sincronización y mapa.',
-      status: UpdateStatus.optional,
-      androidUrl: demoAndroidUrl,
-      releaseNotes: [
-        'Navegación y control de Atrás',
-        'Sincronización incremental',
-        'Etiquetas visibles en mapa',
-      ],
-    ),
-    UpdateDemoScenario.required => const UpdateInfo(
-      latestVersion: '0.3.0',
-      minimumSupportedVersion: '0.3.0',
-      buildNumber: 5,
-      title: 'Actualización obligatoria',
-      message:
-          'Debes actualizar para continuar creando o modificando diagnósticos.',
-      status: UpdateStatus.required,
-      isRequired: true,
-      androidUrl: demoAndroidUrl,
-      releaseNotes: ['Actualización requerida para nuevas capturas'],
-    ),
-    UpdateDemoScenario.error => const UpdateInfo(
-      latestVersion: '',
-      minimumSupportedVersion: '',
-      buildNumber: 0,
-      title: 'No fue posible comprobar actualizaciones',
-      message: 'Puedes reintentar. Tus datos locales permanecen disponibles.',
-      status: UpdateStatus.unavailable,
-    ),
-  };
-
   Future<bool> openAndroidDownload(UpdateInfo info) async {
-    if (info.androidUrl.isEmpty ||
-        info.androidUrl.contains('example.invalid')) {
-      return false;
-    }
+    if (info.androidUrl.isEmpty) return false;
     final uri = Uri.tryParse(info.androidUrl);
     if (uri == null) {
       return false;

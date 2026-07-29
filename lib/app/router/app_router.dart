@@ -132,7 +132,6 @@ GoRouter createRouter(AppState state) => GoRouter(
                   const BranchRootPopScope(index: 3, child: ProfilePage()),
               routes: [
                 GoRoute(path: 'manual', builder: (_, _) => const ManualPage()),
-                GoRoute(path: 'update', builder: (_, _) => const UpdatePage()),
                 GoRoute(
                   path: 'integrity',
                   builder: (_, _) => const LocalIntegrityPage(),

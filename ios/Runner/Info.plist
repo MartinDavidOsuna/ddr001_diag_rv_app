@@ -8,6 +8,19 @@
 	<string>Seleccionar evidencia fotográfica durante una inspección.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Registrar la ubicación real del hidrante durante el diagnóstico.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>cifra.aquafim.com</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSIncludesSubdomains</key>
+				<false/>
+			</dict>
+		</dict>
+	</dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

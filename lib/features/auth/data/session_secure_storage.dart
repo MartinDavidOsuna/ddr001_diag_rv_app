@@ -18,11 +18,14 @@ class SessionSecureStorage implements SessionStorage {
   static const _access = 'field_access_token';
   static const _refresh = 'field_refresh_token';
   static const _session = 'field_session_id';
+  static const _user = 'field_user_id';
   static const _installation = 'installation_id';
   static const _name = 'field_name';
   static const _email = 'field_email';
   static const _phone = 'field_phone';
   static const _crew = 'field_crew';
+  static const _crewId = 'field_crew_id';
+  static const _role = 'field_role';
   static const _started = 'field_started_at';
 
   @override
@@ -51,6 +54,7 @@ class SessionSecureStorage implements SessionStorage {
     }
     return FieldSession(
       sessionId: sessionId!,
+      userId: values[_user] ?? '',
       accessToken: access!,
       refreshToken: refresh!,
       installationId: installation!,
@@ -58,6 +62,8 @@ class SessionSecureStorage implements SessionStorage {
       email: values[_email] ?? '',
       phone: values[_phone] ?? '',
       crew: values[_crew] ?? '',
+      crewId: values[_crewId] ?? '',
+      role: values[_role] ?? 'field',
       startedAt: DateTime.tryParse(values[_started] ?? ''),
     );
   }
@@ -68,11 +74,14 @@ class SessionSecureStorage implements SessionStorage {
       _access: session.accessToken,
       _refresh: session.refreshToken,
       _session: session.sessionId,
+      _user: session.userId,
       _installation: session.installationId,
       _name: session.name,
       _email: session.email,
       _phone: session.phone,
       _crew: session.crew,
+      _crewId: session.crewId,
+      _role: session.role,
       _started: (session.startedAt ?? DateTime.now().toUtc()).toIso8601String(),
     };
     await Future.wait(
@@ -88,10 +97,13 @@ class SessionSecureStorage implements SessionStorage {
       _access,
       _refresh,
       _session,
+      _user,
       _name,
       _email,
       _phone,
       _crew,
+      _crewId,
+      _role,
       _started,
     ]) {
       await _storage.delete(key: key);

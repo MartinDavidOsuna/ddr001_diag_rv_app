@@ -6,6 +6,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/network/api_client.dart';
+import 'brand_name_normalizer.dart';
 
 enum CatalogSyncStatus { local, pending, synced, error }
 
@@ -68,20 +69,25 @@ class BrandOption {
     'active': active,
     'userCreated': userCreated,
   };
-  factory BrandOption.fromJson(Map<String, dynamic> json) => BrandOption(
-    localId: json['localId'] as String,
-    remoteId: json['remoteId'] as String?,
-    name: json['name'] as String,
-    normalizedName: json['normalizedName'] as String,
-    elementType: BrandElementType.parse(
-      json['elementType'] ?? json['category'],
-    ),
-    status: CatalogSyncStatus.values.byName(
-      json['status'] as String? ?? 'synced',
-    ),
-    active: json['active'] as bool? ?? true,
-    userCreated: json['userCreated'] as bool? ?? false,
-  );
+  factory BrandOption.fromJson(Map<String, dynamic> json) {
+    final normalizedName = normalizeBrandName(
+      '${json['name'] ?? json['normalizedName'] ?? ''}',
+    );
+    return BrandOption(
+      localId: json['localId'] as String,
+      remoteId: json['remoteId'] as String?,
+      name: normalizedName,
+      normalizedName: normalizedName,
+      elementType: BrandElementType.parse(
+        json['elementType'] ?? json['category'],
+      ),
+      status: CatalogSyncStatus.values.byName(
+        json['status'] as String? ?? 'synced',
+      ),
+      active: json['active'] as bool? ?? true,
+      userCreated: json['userCreated'] as bool? ?? false,
+    );
+  }
 }
 
 @immutable
@@ -129,12 +135,6 @@ class DynamicCatalogRepository extends ChangeNotifier {
   DynamicCatalogRepository({required this.client, required this.box});
   final ApiClient client;
   final Box<String> box;
-
-  static String normalizeBrand(String value) => value
-      .trim()
-      .toLowerCase()
-      .replaceAll(RegExp(r'''[.,;:_/\\()[\]{}'"`´-]+'''), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ');
 
   List<BrandOption> brands(BrandElementType elementType) =>
       box.values
@@ -189,15 +189,14 @@ class DynamicCatalogRepository extends ChangeNotifier {
     String name,
     BrandElementType elementType,
   ) async {
-    final normalized = normalizeBrand(name);
-    if (normalized.isEmpty) throw const FormatException('Nombre requerido.');
+    final normalized = normalizeBrandName(name);
     final duplicate = brands(
       elementType,
     ).where((item) => item.normalizedName == normalized).firstOrNull;
     if (duplicate != null) return duplicate;
     final value = BrandOption(
       localId: const Uuid().v4(),
-      name: name.trim().replaceAll(RegExp(r'\s+'), ' '),
+      name: normalized,
       normalizedName: normalized,
       elementType: elementType,
       status: CatalogSyncStatus.pending,
@@ -243,7 +242,7 @@ class DynamicCatalogRepository extends ChangeNotifier {
           '/catalogs/brands',
           data: {
             'clientUuid': brand.localId,
-            'name': brand.name,
+            'name': normalizeBrandName(brand.name),
             'elementType': brand.elementType?.wireName,
           },
           options: Options(
@@ -254,8 +253,10 @@ class DynamicCatalogRepository extends ChangeNotifier {
           BrandOption(
             localId: brand.localId,
             remoteId: '${response.data?['brand_id'] ?? response.data?['id']}',
-            name: brand.name,
-            normalizedName: brand.normalizedName,
+            name: normalizeBrandName('${response.data?['name'] ?? brand.name}'),
+            normalizedName: normalizeBrandName(
+              '${response.data?['normalized_name'] ?? response.data?['normalizedName'] ?? brand.name}',
+            ),
             elementType: brand.elementType,
             status: CatalogSyncStatus.synced,
             userCreated: true,
@@ -275,6 +276,7 @@ class DynamicCatalogRepository extends ChangeNotifier {
         );
       }
     }
+    await _refreshAllBrands();
     for (final diameter in diameters.where(
       (item) => item.status != CatalogSyncStatus.synced,
     )) {
@@ -315,6 +317,41 @@ class DynamicCatalogRepository extends ChangeNotifier {
       }
     }
     notifyListeners();
+  }
+
+  Future<void> _refreshAllBrands() async {
+    for (final elementType in BrandElementType.values) {
+      try {
+        final response = await client.dio.get<Map<String, dynamic>>(
+          '/catalogs/brands',
+          queryParameters: {'elementType': elementType.wireName},
+        );
+        final items = response.data?['items'];
+        if (items is! List) continue;
+        for (final raw in items.whereType<Map>()) {
+          final json = Map<String, dynamic>.from(raw);
+          final remoteId = '${json['id'] ?? json['brand_id']}';
+          final existing = brands(
+            elementType,
+          ).where((item) => item.remoteId == remoteId).firstOrNull;
+          final normalized = normalizeBrandName('${json['name']}');
+          await _putBrand(
+            BrandOption(
+              localId: existing?.localId ?? '${json['clientId'] ?? remoteId}',
+              remoteId: remoteId,
+              name: normalized,
+              normalizedName: normalized,
+              elementType: elementType,
+              status: CatalogSyncStatus.synced,
+              active: json['active'] as bool? ?? true,
+              userCreated: json['source'] == 'user_created',
+            ),
+          );
+        }
+      } on Object {
+        // A failed catalog download must not discard or downgrade local brands.
+      }
+    }
   }
 
   Future<void> _putBrand(BrandOption value) => box.put(

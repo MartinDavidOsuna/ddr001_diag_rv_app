@@ -203,18 +203,17 @@ void main() {
               await release.future;
             },
             onPrevious: () async {},
-            child: const SizedBox.expand(key: ValueKey('locked-area')),
+            child: const ColoredBox(
+              color: Colors.white,
+              child: SizedBox.expand(key: ValueKey('locked-area')),
+            ),
           ),
         ),
       );
-      await tester.drag(
-        find.byKey(const ValueKey('locked-area')),
-        const Offset(-220, 0),
-      );
-      await tester.drag(
-        find.byKey(const ValueKey('locked-area')),
-        const Offset(-220, 0),
-      );
+      final detector = find.byKey(const ValueKey('rv-horizontal-navigation'));
+      await tester.drag(detector, const Offset(-220, 0));
+      await tester.pump();
+      await tester.drag(detector, const Offset(-220, 0));
       expect(navigations, 1);
       release.complete();
     });

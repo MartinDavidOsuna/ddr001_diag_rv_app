@@ -3,8 +3,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:provider/provider.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
 import '../../core/constants/report_type_labels.dart';
 import '../../domain/media/inspection_photo.dart';
@@ -58,7 +60,10 @@ class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
         final photo = InspectionPhoto.fromJson(
           Map<String, dynamic>.from(jsonDecode(raw) as Map),
         );
-        if (photo.hydrantId == widget.hydrantId && !photo.isDeleted) {
+        final userId = context.read<AppState>().user.id;
+        if (photo.hydrantId == widget.hydrantId &&
+            photo.capturedByUserId == userId &&
+            !photo.isDeleted) {
           values.add(photo);
         }
       } on Object {

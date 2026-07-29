@@ -31,6 +31,7 @@ class FieldRegistration {
 class FieldSession {
   const FieldSession({
     required this.sessionId,
+    required this.userId,
     required this.accessToken,
     required this.refreshToken,
     required this.installationId,
@@ -38,16 +39,19 @@ class FieldSession {
     this.email = '',
     this.phone = '',
     this.crew = '',
+    this.crewId = '',
+    this.role = 'field',
     this.startedAt,
   });
 
-  final String sessionId, accessToken, refreshToken, installationId;
-  final String name, email, phone, crew;
+  final String sessionId, userId, accessToken, refreshToken, installationId;
+  final String name, email, phone, crew, crewId, role;
   final DateTime? startedAt;
 
   FieldSession copyWith({String? accessToken, String? refreshToken}) =>
       FieldSession(
         sessionId: sessionId,
+        userId: userId,
         accessToken: accessToken ?? this.accessToken,
         refreshToken: refreshToken ?? this.refreshToken,
         installationId: installationId,
@@ -55,6 +59,8 @@ class FieldSession {
         email: email,
         phone: phone,
         crew: crew,
+        crewId: crewId,
+        role: role,
         startedAt: startedAt,
       );
 }

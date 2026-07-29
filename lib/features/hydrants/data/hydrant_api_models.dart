@@ -28,6 +28,12 @@ class CachedHydrant {
     this.installationAngleDeg,
     this.elevationM,
     this.outletCount,
+    this.source = 'remote',
+    this.createdByUserId,
+    this.accountId,
+    this.environment,
+    this.remoteId,
+    this.reason,
   });
 
   final String hydrantId, accountNumber, scope;
@@ -49,6 +55,8 @@ class CachedHydrant {
       sectionCode;
   final DateTime? latestInspectionStartedAt, latestInspectionSubmittedAt;
   final Object? metadata;
+  final String source;
+  final String? createdByUserId, accountId, environment, remoteId, reason;
   final DateTime updatedAt;
 
   factory CachedHydrant.fromApi(
@@ -83,6 +91,13 @@ class CachedHydrant {
     elevationM: _double(json['elevation_m']),
     outletCount: _int(json['outlet_count']),
     updatedAt: updatedAt,
+    source: json['source_type']?.toString() == 'manual' ? 'manual' : 'remote',
+    createdByUserId: json['created_by_user_id']?.toString(),
+    environment: json['source_environment']?.toString(),
+    remoteId: json['source_type']?.toString() == 'manual'
+        ? '${json['hydrant_id'] ?? json['hydrantId']}'
+        : null,
+    reason: json['manual_reason']?.toString(),
   );
 
   factory CachedHydrant.fromJson(Map<String, dynamic> json) => CachedHydrant(
@@ -113,6 +128,12 @@ class CachedHydrant {
     elevationM: _double(json['elevationM']),
     outletCount: _int(json['outletCount']),
     updatedAt: DateTime.parse(json['updatedAt'] as String),
+    source: json['source'] as String? ?? 'remote',
+    createdByUserId: json['createdByUserId'] as String?,
+    accountId: json['accountId'] as String?,
+    environment: json['environment'] as String?,
+    remoteId: json['remoteId'] as String?,
+    reason: json['reason'] as String?,
   );
 
   Map<String, dynamic> toJson() => {
@@ -145,6 +166,12 @@ class CachedHydrant {
     'elevationM': elevationM,
     'outletCount': outletCount,
     'updatedAt': updatedAt.toUtc().toIso8601String(),
+    'source': source,
+    'createdByUserId': createdByUserId,
+    'accountId': accountId,
+    'environment': environment,
+    'remoteId': remoteId,
+    'reason': reason,
   };
 
   Hydrant toAppModel() {
@@ -162,7 +189,9 @@ class CachedHydrant {
       parcel: municipality ?? 'Sin municipio',
       priority: PriorityLevel.medium,
       access: AccessType.both,
-      syncStatus: SyncStatus.synced,
+      syncStatus: source == 'manual' && remoteId == null
+          ? SyncStatus.pending
+          : SyncStatus.synced,
       f02a: InspectionSummary(
         type: InspectionType.f02A,
         status: status,
@@ -175,6 +204,9 @@ class CachedHydrant {
       ),
       latitude: latitude ?? 0,
       longitude: longitude ?? 0,
+      source: source == 'manual'
+          ? HydrantSource.fieldCreated
+          : HydrantSource.assigned,
     );
   }
 

@@ -16,6 +16,8 @@ class HydrantFilterFacts {
     required this.functionalFailed,
     required this.pendingValidation,
     required this.hasIncidents,
+    this.visualSubmittedToday = false,
+    this.visualPendingToday = false,
   });
 
   final bool visualAvailable;
@@ -32,6 +34,8 @@ class HydrantFilterFacts {
   final bool functionalFailed;
   final bool pendingValidation;
   final bool hasIncidents;
+  final bool visualSubmittedToday;
+  final bool visualPendingToday;
 }
 
 abstract final class HydrantQueryProjection {
@@ -40,6 +44,8 @@ abstract final class HydrantQueryProjection {
     HydrantListFilter.inProgress,
     HydrantListFilter.synchronizationPending,
     HydrantListFilter.completed,
+    HydrantListFilter.submittedToday,
+    HydrantListFilter.pendingToday,
     HydrantListFilter.incidents,
   ];
 
@@ -54,6 +60,8 @@ abstract final class HydrantQueryProjection {
         HydrantListFilter.synchronizationPending => facts.unsynchronized,
         HydrantListFilter.completed =>
           facts.visualCompleted || facts.functionalCompleted,
+        HydrantListFilter.submittedToday => facts.visualSubmittedToday,
+        HydrantListFilter.pendingToday => facts.visualPendingToday,
         HydrantListFilter.visualPending => facts.visualPending,
         HydrantListFilter.visualInProgress => facts.visualInProgress,
         HydrantListFilter.visualCompleted => facts.visualCompleted,

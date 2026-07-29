@@ -47,18 +47,21 @@ class ApiException implements Exception {
         error.type == DioExceptionType.sendTimeout) {
       return ApiException(
         ApiErrorKind.timeout,
-        'Tiempo de espera agotado.',
+        'El servidor tardó demasiado en responder.',
         statusCode: status,
         requestId: requestId,
       );
     }
     if (error.type == DioExceptionType.connectionError) {
-      return const ApiException(ApiErrorKind.offline, 'Sin conexión.');
+      return const ApiException(
+        ApiErrorKind.serverUnavailable,
+        'Servidor no disponible.',
+      );
     }
     if (status == 401 || status == 403) {
       return ApiException(
         ApiErrorKind.sessionExpired,
-        status == 401 ? 'Sesión expirada.' : 'Acceso no autorizado.',
+        status == 401 ? 'Tu sesión expiró.' : 'No tienes permiso.',
         statusCode: status,
         requestId: requestId,
       );
@@ -66,6 +69,7 @@ class ApiException implements Exception {
     if (status == 409) {
       final type = problem['type']?.toString() ?? '';
       final title = problem['title']?.toString().toLowerCase() ?? '';
+      final detail = problem['detail']?.toString() ?? '';
       if (type.endsWith('/phone-conflict') || title == 'phone conflict') {
         return ApiException(
           ApiErrorKind.invalidData,
@@ -75,18 +79,18 @@ class ApiException implements Exception {
         );
       }
       if (type.endsWith('/open-session-conflict') ||
-          title == 'open session conflict') {
+          title == 'open session conflict' ||
+          detail.toLowerCase().contains('incompatible open session')) {
         return ApiException(
           ApiErrorKind.invalidData,
-          'Este dispositivo tiene una sesión abierta de otro usuario. Inicia con el correo anterior o solicita cerrar esa sesión.',
+          'No fue posible reemplazar la sesión del dispositivo. Intenta nuevamente.',
           statusCode: status,
           requestId: requestId,
         );
       }
       return ApiException(
         ApiErrorKind.invalidData,
-        problem['detail']?.toString() ??
-            'Existe un conflicto con los datos enviados.',
+        detail.isEmpty ? 'Existe un conflicto con los datos enviados.' : detail,
         statusCode: status,
         requestId: requestId,
       );

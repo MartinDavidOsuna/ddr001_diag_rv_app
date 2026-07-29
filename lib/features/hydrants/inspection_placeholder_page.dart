@@ -951,7 +951,7 @@ class _CellularDiagnosticsPanel extends StatelessWidget {
             'Método: ${probe?.methodVersion ?? value?.method ?? 'Pendiente'}',
           ),
           const Text(
-            'Metodología DEMO. Esta prueba evalúa la red celular del teléfono y no certifica directamente el módem instalado en el hidrante.',
+            'Esta prueba evalúa la red celular del teléfono y no certifica directamente el módem instalado en el hidrante.',
             style: TextStyle(fontSize: 11, color: AppColors.orange),
           ),
           Align(

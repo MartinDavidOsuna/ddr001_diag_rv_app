@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -35,28 +33,16 @@ class _SyncPageState extends State<SyncPage> {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final diagnostics = <({String id, String label, String status})>[];
-    for (final key in state.syncBox.keys) {
-      final raw = state.syncBox.get(key);
-      if (raw == null || raw == 'Sincronizado') continue;
-      try {
-        final item = SyncQueueItem.fromJson(
-          Map<String, dynamic>.from(jsonDecode(raw) as Map),
-        );
-        if (item.status == SyncQueueStatus.synced) continue;
-        diagnostics.add((
-          id: item.id,
-          label: '${item.entityType} · ${item.entityId}',
-          status: item.status.name,
-        ));
-      } on Object {
-        diagnostics.add((id: '$key', label: '$key', status: raw));
-      }
+    for (final item in state.syncQueueRepository.all()) {
+      if (item.status == SyncQueueStatus.synced) continue;
+      diagnostics.add((
+        id: item.id,
+        label: '${item.entityType} · ${item.entityId}',
+        status: item.status.name,
+      ));
     }
-    final photos = state.mediaBox.keys
-        .where(
-          (key) => state.mediaBox.get(key) != MediaSyncStatus.verified.name,
-        )
-        .map((e) => '$e')
+    final photos = state.accessiblePhotoIds
+        .where((id) => state.mediaBox.get(id) != MediaSyncStatus.verified.name)
         .toList();
     return PopScope(
       canPop: false,
@@ -141,7 +127,6 @@ class _SyncPageState extends State<SyncPage> {
                     value: state.pendingPhotos,
                     detail: '${state.verifiedPhotos} verificadas',
                   ),
-                  SyncCount(label: 'Trazabilidad', value: state.pendingTrace),
                   SyncCount(
                     label: 'Errores',
                     value: state.syncErrors,

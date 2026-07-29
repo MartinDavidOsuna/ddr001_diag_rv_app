@@ -84,7 +84,7 @@ void main() {
 
     final result = await adapter.start(
       probeId: 'probe-2',
-      configuration: CellularProbeConfiguration.demo,
+      configuration: CellularProbeConfiguration.standard,
     );
 
     expect(result.result, CellularInternetProbeOutcome.indeterminate);
@@ -107,7 +107,7 @@ void main() {
 
       final result = await adapter.start(
         probeId: 'probe-ios',
-        configuration: CellularProbeConfiguration.demo,
+        configuration: CellularProbeConfiguration.standard,
       );
 
       expect(invoked, isFalse);

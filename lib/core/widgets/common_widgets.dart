@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../network/connectivity_monitor.dart';
+import 'app_brand_logo.dart';
 
 class SectionCard extends StatelessWidget {
   const SectionCard({
@@ -35,13 +37,37 @@ class StatusBadge extends StatelessWidget {
 }
 
 class ConnectionBadge extends StatelessWidget {
-  const ConnectionBadge({required this.online, super.key});
+  const ConnectionBadge({
+    required this.online,
+    this.state,
+    this.pending = false,
+    super.key,
+  });
   final bool online;
+  final NetworkAvailabilityState? state;
+  final bool pending;
   @override
-  Widget build(BuildContext context) => StatusBadge(
-    online ? 'En línea' : 'Sin conexión',
-    color: online ? AppColors.green : AppColors.orange,
-  );
+  Widget build(BuildContext context) {
+    final label = pending
+        ? 'Pendiente de sincronizar'
+        : switch (state) {
+            NetworkAvailabilityState.noNetwork => 'Sin conexión',
+            NetworkAvailabilityState.internetAvailable => 'Internet disponible',
+            NetworkAvailabilityState.apiUnavailable => 'Servidor no disponible',
+            NetworkAvailabilityState.apiAvailable => 'API disponible',
+            NetworkAvailabilityState.checking => 'Comprobando',
+            null => online ? 'En línea' : 'Sin conexión',
+          };
+    final color = pending
+        ? AppColors.orange
+        : state == NetworkAvailabilityState.apiAvailable ||
+              (state == null && online)
+        ? AppColors.green
+        : state == NetworkAvailabilityState.noNetwork
+        ? AppColors.red
+        : AppColors.orange;
+    return StatusBadge(label, color: color);
+  }
 }
 
 class AppPageHeader extends StatelessWidget implements PreferredSizeWidget {
@@ -64,15 +90,33 @@ class AppPageHeader extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) => AppBar(
     leading: leading,
     automaticallyImplyLeading: automaticallyImplyLeading,
-    title: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    title: Row(
       children: [
-        Text(title),
-        if (subtitle != null)
-          Text(
-            subtitle!,
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w400),
+        const AppBrandLogo(
+          variant: AppBrandLogoVariant.symbol,
+          width: 30,
+          height: 30,
+        ),
+        const SizedBox(width: 9),
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              if (subtitle != null)
+                Text(
+                  subtitle!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+            ],
           ),
+        ),
       ],
     ),
     actions: actions,

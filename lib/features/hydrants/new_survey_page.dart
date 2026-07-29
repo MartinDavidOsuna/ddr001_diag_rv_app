@@ -105,6 +105,18 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
                 ],
               ),
             ),
+          if (matches.isEmpty || normalized.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 8),
+              child: FilledButton.icon(
+                key: const ValueKey('register-manual-hydrant'),
+                onPressed: startingId == null
+                    ? () => _registerManual(state)
+                    : null,
+                icon: const Icon(Icons.add_location_alt_outlined),
+                label: const Text('Registrar hidrante no encontrado'),
+              ),
+            ),
           for (final hydrant in matches)
             Card(
               child: ListTile(
@@ -124,6 +136,100 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _registerManual(AppState state) async {
+    final account = TextEditingController(text: query.trim());
+    final locality = TextEditingController();
+    final municipality = TextEditingController();
+    final reason = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Registrar hidrante no encontrado'),
+        content: Form(
+          key: formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  key: const ValueKey('manual-hydrant-account'),
+                  controller: account,
+                  decoration: const InputDecoration(
+                    labelText: 'Número o clave visible',
+                  ),
+                  validator: (value) => value?.trim().isEmpty == true
+                      ? 'Captura una clave visible.'
+                      : null,
+                ),
+                TextFormField(
+                  controller: locality,
+                  decoration: const InputDecoration(labelText: 'Localidad'),
+                ),
+                TextFormField(
+                  controller: municipality,
+                  decoration: const InputDecoration(
+                    labelText: 'Municipio o módulo',
+                  ),
+                ),
+                TextFormField(
+                  key: const ValueKey('manual-hydrant-reason'),
+                  controller: reason,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Motivo del alta manual',
+                  ),
+                  validator: (value) => value?.trim().isEmpty == true
+                      ? 'Describe por qué no está en el catálogo.'
+                      : null,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() == true) {
+                Navigator.pop(dialogContext, true);
+              }
+            },
+            child: const Text('Guardar localmente'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || !mounted) {
+      account.dispose();
+      locality.dispose();
+      municipality.dispose();
+      reason.dispose();
+      return;
+    }
+    setState(() => startingId = 'manual');
+    try {
+      final hydrant = await state.createManualHydrant(
+        accountNumber: account.text,
+        locality: locality.text,
+        municipality: municipality.text,
+        reason: reason.text,
+      );
+      if (!mounted) return;
+      await _confirmAndStart(state, hydrant);
+    } finally {
+      account.dispose();
+      locality.dispose();
+      municipality.dispose();
+      reason.dispose();
+      if (mounted) setState(() => startingId = null);
+    }
   }
 
   Future<void> _confirmAndStart(AppState state, Hydrant hydrant) async {

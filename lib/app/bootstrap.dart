@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/services/app_state.dart';
 import '../core/config/app_config.dart';
 import '../core/network/api_client.dart';
+import '../core/network/connectivity_monitor.dart';
 import '../data/local/visual_inspection_repository.dart';
 import '../data/local/functional_repositories.dart';
 import '../data/local/integrity_audit_service.dart';
@@ -134,6 +135,7 @@ Future<AppState> bootstrap() async {
     rvDraftRepository: rvDraftRepository,
     inspectionSyncCoordinator: inspectionSyncCoordinator,
     dynamicCatalogRepository: dynamicCatalogRepository,
+    connectivityMonitor: ConnectivityMonitor(apiClient.dio),
   );
   await state.initialize();
   return state;

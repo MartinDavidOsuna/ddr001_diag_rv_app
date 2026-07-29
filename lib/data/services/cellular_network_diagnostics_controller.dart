@@ -16,7 +16,7 @@ class CellularNetworkDiagnosticsController extends ChangeNotifier {
     required this.persist,
     CellularNetworkDiagnostic? restored,
     CellularInternetProbeChannel? probeChannel,
-    this.configuration = CellularProbeConfiguration.demo,
+    this.configuration = CellularProbeConfiguration.standard,
   }) : _probeChannel = probeChannel ?? CellularInternetProbeChannel.instance,
        diagnostic =
            restored ??

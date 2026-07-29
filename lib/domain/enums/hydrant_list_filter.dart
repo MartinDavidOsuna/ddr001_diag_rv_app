@@ -5,6 +5,8 @@ enum HydrantListFilter {
   inProgress,
   completed,
   synchronizationPending,
+  submittedToday,
+  pendingToday,
   // Detailed filters remain for compatibility and internal projections.
   visualPending,
   visualInProgress,

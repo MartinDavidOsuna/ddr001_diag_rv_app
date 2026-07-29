@@ -1,6 +1,5 @@
 import 'package:uuid/uuid.dart';
 
-import '../../../core/persistence/versioned_json_codec.dart';
 import '../../../data/local/visual_inspection_repository.dart';
 import '../../../domain/inspections/visual_inspection.dart';
 import '../../../domain/models/app_models.dart';
@@ -48,16 +47,9 @@ class RvDraftRepository {
 
   List<RvDraft> pending() {
     final values = <RvDraft>[];
-    for (final raw in visualRepository.documents.values) {
-      try {
-        final inspection = VisualInspection.fromJson(
-          VersionedJsonCodec.decode(raw).payload,
-        );
-        final value = fromInspection(inspection);
-        if (value != null && !value.isReadOnly) values.add(value);
-      } on Object {
-        continue;
-      }
+    for (final inspection in visualRepository.accessible()) {
+      final value = fromInspection(inspection);
+      if (value != null && !value.isReadOnly) values.add(value);
     }
     return values;
   }

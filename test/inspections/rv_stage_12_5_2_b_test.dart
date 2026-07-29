@@ -15,7 +15,7 @@ void main() {
       const option = BrandOption(
         localId: 'local-1',
         name: 'MARCA-PRUEBA',
-        normalizedName: 'marca prueba',
+        normalizedName: 'MARCA-PRUEBA',
         elementType: BrandElementType.filter,
         status: CatalogSyncStatus.pending,
       );

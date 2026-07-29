@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
+import '../../core/widgets/app_brand_logo.dart';
 import '../../core/widgets/common_widgets.dart';
 import 'data/field_session_models.dart';
 
@@ -25,32 +26,24 @@ class _SplashPageState extends State<SplashPage> {
   }
 
   @override
-  Widget build(BuildContext context) => const Scaffold(
+  Widget build(BuildContext context) => Scaffold(
     backgroundColor: AppColors.blue,
     body: SafeArea(
       child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.water_drop_outlined, size: 72, color: Colors.white),
-            SizedBox(height: 22),
-            Text(
-              'DIAGNOSTICO HIDRANTES',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 25,
-                fontWeight: FontWeight.w800,
+        child: LayoutBuilder(
+          builder: (context, constraints) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppBrandLogo(
+                variant: AppBrandLogoVariant.splash,
+                width: constraints.maxWidth.clamp(180, 380).toDouble(),
+                height: 150,
+                borderRadius: BorderRadius.circular(AppTheme.cardCornerRadius),
               ),
-            ),
-            SizedBox(height: 8),
-            Text(
-              'Distrito de Riego 001',
-              style: TextStyle(color: Color(0xFFC9D5FF), fontSize: 16),
-            ),
-            SizedBox(height: 40),
-            CircularProgressIndicator(color: Colors.white),
-          ],
+              const SizedBox(height: 40),
+              const CircularProgressIndicator(color: Colors.white),
+            ],
+          ),
         ),
       ),
     ),
@@ -122,25 +115,7 @@ class _LoginPageState extends State<LoginPage> {
                 constraints: const BoxConstraints(maxWidth: 460),
                 child: Column(
                   children: [
-                    const Icon(
-                      Icons.water_drop_outlined,
-                      color: Colors.white,
-                      size: 60,
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'DIAGNOSTICO HIDRANTES',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const Text(
-                      'Distrito de Riego 001',
-                      style: TextStyle(color: Color(0xFFC9D5FF), fontSize: 15),
-                    ),
+                    const LoginBrandHeader(),
                     const SizedBox(height: 28),
                     Card(
                       child: Padding(
@@ -247,4 +222,23 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+}
+
+class LoginBrandHeader extends StatelessWidget {
+  const LoginBrandHeader({super.key});
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final compact = constraints.maxWidth < 300;
+      return AppBrandLogo(
+        variant: compact
+            ? AppBrandLogoVariant.symbol
+            : AppBrandLogoVariant.horizontal,
+        width: compact ? 92 : constraints.maxWidth.clamp(220, 340).toDouble(),
+        height: compact ? 92 : 108,
+        borderRadius: BorderRadius.circular(AppTheme.cardCornerRadius),
+      );
+    },
+  );
 }

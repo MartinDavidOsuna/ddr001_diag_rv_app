@@ -23,14 +23,30 @@ class ApiClient {
                  RegExp(r'/$'),
                  '',
                ),
-               connectTimeout: const Duration(seconds: 15),
-               receiveTimeout: const Duration(seconds: 25),
-               sendTimeout: const Duration(seconds: 25),
+               connectTimeout: const Duration(seconds: 10),
+               receiveTimeout: const Duration(seconds: 30),
+               sendTimeout: const Duration(seconds: 30),
                headers: const {'Accept': 'application/json'},
              ),
            ) {
     this.dio.interceptors.add(
-      InterceptorsWrapper(onRequest: _onRequest, onError: _onError),
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          options.extra['startedAt'] = DateTime.now().microsecondsSinceEpoch;
+          handler.next(options);
+        },
+        onError: _retrySafeGet,
+      ),
+    );
+    this.dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: _onRequest,
+        onResponse: (response, handler) {
+          _releaseRequest(response.requestOptions);
+          handler.next(response);
+        },
+        onError: _onError,
+      ),
     );
     if (kDebugMode) {
       this.dio.interceptors.add(
@@ -40,8 +56,13 @@ class ApiClient {
             handler.next(options);
           },
           onResponse: (response, handler) {
+            final elapsed = _elapsed(response.requestOptions);
+            final size = _responseSize(response.data);
             debugPrint(
-              '[API] ${response.statusCode} ${response.requestOptions.path}',
+              '[API] ${response.requestOptions.method} '
+              '${response.requestOptions.path} → ${response.statusCode} → '
+              '${elapsed.inMilliseconds} ms → ~$size bytes → intento '
+              '${response.requestOptions.extra['retryAttempt'] ?? 1}',
             );
             handler.next(response);
           },
@@ -80,6 +101,52 @@ class ApiClient {
   final Dio dio;
   final SessionStorage _storage;
   Future<FieldSession?>? _refreshing;
+  final Set<CancelToken> _authenticatedRequests = {};
+
+  Future<void> _retrySafeGet(
+    DioException error,
+    ErrorInterceptorHandler handler,
+  ) async {
+    final request = error.requestOptions;
+    final attempt = request.extra['retryAttempt'] as int? ?? 1;
+    final maxRetries = request.extra['maxRetries'] as int? ?? 1;
+    final retryable =
+        request.method == 'GET' &&
+        !CancelToken.isCancel(error) &&
+        (error.type == DioExceptionType.connectionError ||
+            error.type == DioExceptionType.connectionTimeout ||
+            error.type == DioExceptionType.receiveTimeout ||
+            (error.response?.statusCode ?? 0) >= 500);
+    if (!retryable || attempt > maxRetries) {
+      handler.next(error);
+      return;
+    }
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      final response = await dio.fetch<dynamic>(
+        request.copyWith(
+          extra: {...request.extra, 'retryAttempt': attempt + 1},
+        ),
+      );
+      handler.resolve(response);
+    } on DioException catch (nextError) {
+      handler.next(nextError);
+    }
+  }
+
+  static Duration _elapsed(RequestOptions options) {
+    final started = options.extra['startedAt'] as int?;
+    if (started == null) return Duration.zero;
+    return Duration(
+      microseconds: DateTime.now().microsecondsSinceEpoch - started,
+    );
+  }
+
+  static int _responseSize(Object? data) {
+    if (data == null) return 0;
+    if (data is List<int>) return data.length;
+    return data.toString().length;
+  }
 
   Future<void> _onRequest(
     RequestOptions options,
@@ -87,6 +154,9 @@ class ApiClient {
   ) async {
     options.headers.putIfAbsent('X-Request-ID', () => const Uuid().v4());
     if (options.extra['skipAuth'] != true) {
+      final cancelToken = options.cancelToken ?? CancelToken();
+      options.cancelToken = cancelToken;
+      _authenticatedRequests.add(cancelToken);
       final session = await _storage.read();
       if (session != null) {
         options.headers['Authorization'] = 'Bearer ${session.accessToken}';
@@ -100,6 +170,7 @@ class ApiClient {
     ErrorInterceptorHandler handler,
   ) async {
     final request = error.requestOptions;
+    _releaseRequest(request);
     if (error.response?.statusCode != 401 ||
         request.extra['skipAuth'] == true ||
         request.extra['retriedAfterRefresh'] == true ||
@@ -127,6 +198,21 @@ class ApiClient {
       await _storage.clear();
       handler.next(error);
     }
+  }
+
+  void cancelAuthenticatedRequests() {
+    final active = _authenticatedRequests.toList(growable: false);
+    _authenticatedRequests.clear();
+    for (final token in active) {
+      if (!token.isCancelled) {
+        token.cancel('La sesión activa fue reemplazada.');
+      }
+    }
+  }
+
+  void _releaseRequest(RequestOptions request) {
+    final token = request.cancelToken;
+    if (token != null) _authenticatedRequests.remove(token);
   }
 
   Future<FieldSession?> refreshSession() {

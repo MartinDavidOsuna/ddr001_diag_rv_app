@@ -34,6 +34,8 @@ class FieldSessionRepository {
   final Future<DeviceDescriptor> Function()? deviceLoader;
   bool lastRestoreOffline = false;
 
+  void cancelActiveRequests() => client.cancelAuthenticatedRequests();
+
   Future<DeviceDescriptor> _device() async {
     if (deviceLoader != null) return deviceLoader!();
     final info = DeviceInfoPlugin();
@@ -95,6 +97,7 @@ class FieldSessionRepository {
       final data = response.data ?? const {};
       final session = FieldSession(
         sessionId: _required(data, 'sessionId'),
+        userId: _required(data, 'userId'),
         accessToken: _required(data, 'accessToken'),
         refreshToken: _required(data, 'refreshToken'),
         installationId: installationId,
@@ -102,6 +105,8 @@ class FieldSessionRepository {
         email: registration.normalizedEmail,
         phone: registration.phone.trim(),
         crew: registration.normalizedCrew,
+        crewId: _required(data, 'crewId'),
+        role: data['role']?.toString() ?? 'field',
         startedAt: DateTime.now().toUtc(),
       );
       await storage.save(session);
@@ -116,8 +121,26 @@ class FieldSessionRepository {
     final local = await storage.read();
     if (local == null) return null;
     try {
-      await client.dio.get<Map<String, dynamic>>('/field-sessions/current');
-      return await storage.read();
+      final response = await client.dio.get<Map<String, dynamic>>(
+        '/field-sessions/current',
+      );
+      final data = response.data ?? const {};
+      final restored = FieldSession(
+        sessionId: local.sessionId,
+        userId: _required(data, 'user_id'),
+        accessToken: local.accessToken,
+        refreshToken: local.refreshToken,
+        installationId: local.installationId,
+        name: local.name,
+        email: local.email,
+        phone: local.phone,
+        crew: local.crew,
+        crewId: _required(data, 'crew_id'),
+        role: 'field',
+        startedAt: local.startedAt,
+      );
+      await storage.save(restored);
+      return restored;
     } on DioException catch (error) {
       if (error.type == DioExceptionType.connectionError ||
           error.type == DioExceptionType.connectionTimeout ||
@@ -146,7 +169,12 @@ class FieldSessionRepository {
       return true;
     } on DioException catch (error) {
       if (error.type == DioExceptionType.connectionError ||
-          error.type == DioExceptionType.connectionTimeout) {
+          error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.receiveTimeout ||
+          error.type == DioExceptionType.sendTimeout) {
+        // El cierre remoto queda pendiente, pero la sesión local no debe
+        // vincular el dispositivo ni impedir que otro usuario se autentique.
+        await storage.clear();
         return false;
       }
       client.rethrowAsApi(error);

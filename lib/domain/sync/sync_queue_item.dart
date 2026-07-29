@@ -26,12 +26,16 @@ class SyncQueueItem {
     this.nextAttemptAt,
     this.conflictStatus = 'none',
     this.correlationId = '',
+    this.ownerUserId = '',
+    this.accountId = '',
+    this.environment = '',
     required this.createdAt,
     required this.updatedAt,
     this.schemaVersion = 1,
   });
   final String id, entityType, entityId, operation, idempotencyKey;
   final String conflictStatus, correlationId;
+  final String ownerUserId, accountId, environment;
   final String? inspectionId, hydrantId, lastError;
   final List<String> dependencyIds;
   final SyncQueueStatus status;
@@ -58,6 +62,9 @@ class SyncQueueItem {
     'nextAttemptAt': nextAttemptAt?.toUtc().toIso8601String(),
     'conflictStatus': conflictStatus,
     'correlationId': correlationId,
+    'ownerUserId': ownerUserId,
+    'accountId': accountId,
+    'environment': environment,
     'createdAt': createdAt.toUtc().toIso8601String(),
     'updatedAt': updatedAt.toUtc().toIso8601String(),
     'schemaVersion': schemaVersion,
@@ -86,6 +93,9 @@ class SyncQueueItem {
     )?.toUtc(),
     conflictStatus: j['conflictStatus'] as String? ?? 'none',
     correlationId: j['correlationId'] as String? ?? '',
+    ownerUserId: j['ownerUserId'] as String? ?? '',
+    accountId: j['accountId'] as String? ?? '',
+    environment: j['environment'] as String? ?? '',
     createdAt:
         DateTime.tryParse(j['createdAt'] as String? ?? '')?.toUtc() ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),

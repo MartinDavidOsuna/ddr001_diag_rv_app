@@ -55,7 +55,7 @@ void main() {
   });
 
   test(
-    'caché de hidrantes conserva datos y no elimina páginas previas',
+    'respuesta completa reconcilia registros remotos y retira obsoletos',
     () async {
       final adapter = FakeHttpAdapter(
         (_) async => jsonResponse(
@@ -79,10 +79,7 @@ void main() {
         ),
       );
       final values = await repository.refresh();
-      expect(
-        values.map((e) => e.accountNumber),
-        containsAll(['CTA-000', 'CTA-001']),
-      );
+      expect(values.map((e) => e.accountNumber), ['CTA-001']);
       expect(repository.lastUpdated, isNotNull);
     },
   );
@@ -106,6 +103,63 @@ void main() {
       repository.cached(scope: 'all').single.toAppModel().f02a.status.name,
       'completed',
     );
+  });
+
+  test('alta manual conserva UUID, propietario y ámbito local', () async {
+    final repository = HydrantRepository(
+      client: clientWith(FakeHttpAdapter((_) async => jsonResponse('{}', 500))),
+      box: Hive.box<String>('local_hydrants_v1'),
+    );
+    const localId = '735d3d0e-78a3-4ca8-a34b-6c0513458d29';
+    final value = await repository.createManual(
+      localId: localId,
+      accountNumber: 'CAMPO-01',
+      createdByUserId: 'user-a',
+      accountId: 'rv-field',
+      environment: 'test',
+      reason: 'No aparece en catálogo',
+    );
+
+    expect(value.hydrantId, localId);
+    expect(value.createdByUserId, 'user-a');
+    expect(value.source, 'manual');
+    expect(value.toAppModel().source.name, 'fieldCreated');
+    expect(repository.cached(scope: 'mine').single.hydrantId, localId);
+  });
+
+  test('sincronización manual envía idempotencia y enlaza ID remoto', () async {
+    late FakeHttpAdapter adapter;
+    adapter = FakeHttpAdapter(
+      (_) async => jsonResponse(
+        '{"id":"remote-01","localReference":"735d3d0e-78a3-4ca8-a34b-6c0513458d29","status":"created"}',
+        201,
+      ),
+    );
+    final repository = HydrantRepository(
+      client: clientWith(adapter),
+      box: Hive.box<String>('local_hydrants_v1'),
+    );
+    const localId = '735d3d0e-78a3-4ca8-a34b-6c0513458d29';
+    await repository.createManual(
+      localId: localId,
+      accountNumber: 'CAMPO-02',
+      createdByUserId: 'user-a',
+      accountId: 'rv-field',
+      environment: 'test',
+      reason: 'No aparece en catálogo',
+    );
+    final linked = await repository.synchronizeManual(
+      localId,
+      idempotencyKey: 'manualHydrant:$localId',
+    );
+
+    expect(adapter.requests.single.path, '/hydrants/manual');
+    expect(
+      adapter.requests.single.headers['Idempotency-Key'],
+      'manualHydrant:$localId',
+    );
+    expect(linked.remoteId, 'remote-01');
+    expect(linked.hydrantId, localId);
   });
 
   test('checklist 200 guarda definición y ETag', () async {

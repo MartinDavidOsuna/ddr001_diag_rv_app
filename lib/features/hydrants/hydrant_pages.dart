@@ -141,25 +141,24 @@ class _HydrantsPageState extends State<HydrantsPage> {
           ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: ConnectionBadge(online: state.online),
+            child: ConnectionBadge(
+              online: state.online,
+              state: state.connectivityState,
+              pending: state.pendingCount > 0,
+            ),
           ),
         ],
       ),
-      floatingActionButton: AppConfig.rvOnly
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: state.editingRestricted
-                  ? null
-                  : () {
-                      state.trace(
-                        'new_survey_open',
-                        'Abrir nuevo levantamiento',
-                      );
-                      context.push('/hydrants/new');
-                    },
-              icon: const Icon(Icons.add_location_alt_outlined),
-              label: const Text('NUEVO LEVANTAMIENTO'),
-            ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: state.editingRestricted
+            ? null
+            : () {
+                state.trace('new_survey_open', 'Abrir nuevo levantamiento');
+                context.push('/hydrants/new');
+              },
+        icon: const Icon(Icons.add_location_alt_outlined),
+        label: const Text('NUEVO LEVANTAMIENTO'),
+      ),
       body: Column(
         children: [
           Padding(
@@ -202,22 +201,33 @@ class _HydrantsPageState extends State<HydrantsPage> {
             ),
           ),
           Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
-              itemCount: items.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 9),
-              itemBuilder: (_, i) => HydrantCard(
-                hydrant: items[i],
-                onTap: () {
-                  state.trace(
-                    'hydrant_open',
-                    'Abrir ficha de hidrante',
-                    hydrantId: items[i].id,
-                  );
-                  context.push('/hydrants/${items[i].id}');
-                },
-              ),
-            ),
+            child: items.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        _emptyMessage(state.hydrantListFilter),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppColors.muted),
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
+                    itemCount: items.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 9),
+                    itemBuilder: (_, i) => HydrantCard(
+                      hydrant: items[i],
+                      onTap: () {
+                        state.trace(
+                          'hydrant_open',
+                          'Abrir ficha de hidrante',
+                          hydrantId: items[i].id,
+                        );
+                        context.push('/hydrants/${items[i].id}');
+                      },
+                    ),
+                  ),
           ),
         ],
       ),
@@ -250,7 +260,17 @@ class _HydrantsPageState extends State<HydrantsPage> {
       '${ReportTypeLabels.functionalShort} con falla',
     HydrantListFilter.pendingValidation => 'Pendiente de validación',
     HydrantListFilter.synchronizationPending => 'Sin sincronizar',
+    HydrantListFilter.submittedToday => 'Enviados hoy',
+    HydrantListFilter.pendingToday => 'Pendientes hoy',
     HydrantListFilter.incidents => 'Con incidencias',
+  };
+
+  String _emptyMessage(HydrantListFilter value) => switch (value) {
+    HydrantListFilter.submittedToday => 'No hay inspecciones enviadas hoy.',
+    HydrantListFilter.pendingToday => 'No hay inspecciones pendientes hoy.',
+    HydrantListFilter.synchronizationPending =>
+      'No hay inspecciones sin sincronizar.',
+    _ => 'No hay hidrantes para el filtro activo.',
   };
 }
 
