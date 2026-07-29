@@ -61,7 +61,7 @@ class ConnectivityMonitor extends ChangeNotifier {
 
   Future<void> start() async {
     _subscription ??= _deviceConnectivity.onConnectivityChanged.listen(
-      (_) => unawaited(check(force: true)),
+      (_) => unawaited(check()),
     );
     await check(force: true);
   }
@@ -96,9 +96,9 @@ class ConnectivityMonitor extends ChangeNotifier {
           extra: const {
             'skipAuth': true,
             'connectivityProbe': true,
-            'maxRetries': 1,
+            'maxRetries': 0,
           },
-          receiveTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 4),
         ),
       );
       stopwatch.stop();

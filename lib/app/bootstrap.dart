@@ -4,7 +4,11 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/material.dart';
 
+import 'app.dart';
+import 'theme/app_theme.dart';
+import '../core/widgets/app_brand_logo.dart';
 import '../core/services/app_state.dart';
 import '../core/config/app_config.dart';
 import '../core/network/api_client.dart';
@@ -25,9 +29,17 @@ import '../features/inspections/data/inspection_sync_coordinator.dart';
 import '../features/inspections/data/rv_draft_repository.dart';
 import '../features/catalogs/dynamic_catalog_repository.dart';
 
-Future<AppState> bootstrap() async {
+typedef BootstrapStatusCallback = void Function(String status);
+
+Future<AppState> bootstrap({BootstrapStatusCallback? onStatus}) async {
+  final total = Stopwatch()..start();
+  var stage = Stopwatch()..start();
+  onStatus?.call('Preparando la aplicación');
   await initializeDateFormatting('es');
   await Hive.initFlutter();
+  debugPrint('[PERF] flutter_local_init_ms=${stage.elapsedMilliseconds}');
+  stage = Stopwatch()..start();
+  onStatus?.call('Inicializando almacenamiento');
   final traceBox = await Hive.openBox<String>('trace_events');
   final syncBox = await Hive.openBox<String>('sync_queue');
   final mediaBox = await Hive.openBox<String>('media_sync_queue');
@@ -79,11 +91,13 @@ Future<AppState> bootstrap() async {
     journal: OperationJournalRepository(operationJournalBox),
     quarantine: QuarantineRepository(quarantineBox),
   ).runLightweight();
+  debugPrint('[PERF] local_storage_recovery_ms=${stage.elapsedMilliseconds}');
   await integrityReportBox.put(
     recovery.audit.id,
     jsonEncode(recovery.audit.toJson()),
   );
   await MediaReconciliationService().reconcile();
+  onStatus?.call('Recuperando sesión y datos guardados');
   final preferences = await SharedPreferences.getInstance();
   final packageInfo = await PackageInfo.fromPlatform();
   final config = AppConfig.fromEnvironment();
@@ -138,5 +152,114 @@ Future<AppState> bootstrap() async {
     connectivityMonitor: ConnectivityMonitor(apiClient.dio),
   );
   await state.initialize();
+  debugPrint('[PERF] bootstrap_total_ms=${total.elapsedMilliseconds}');
   return state;
+}
+
+class AppBootstrapShell extends StatefulWidget {
+  const AppBootstrapShell({this.bootstrapLoader, super.key});
+
+  final Future<AppState> Function(BootstrapStatusCallback onStatus)?
+  bootstrapLoader;
+
+  @override
+  State<AppBootstrapShell> createState() => _AppBootstrapShellState();
+}
+
+class _AppBootstrapShellState extends State<AppBootstrapShell> {
+  AppState? _state;
+  Object? _error;
+  String _status = 'Iniciando';
+  bool _running = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initialize());
+  }
+
+  Future<void> _initialize() async {
+    if (_running) return;
+    setState(() {
+      _running = true;
+      _error = null;
+    });
+    try {
+      void report(String status) {
+        if (mounted) setState(() => _status = status);
+      }
+
+      final state =
+          await (widget.bootstrapLoader?.call(report) ??
+                  bootstrap(onStatus: report))
+              .timeout(const Duration(seconds: 30));
+      if (mounted) setState(() => _state = state);
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = error);
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = _state;
+    if (state != null) return DiagnosticApp(state: state);
+    return MaterialApp(
+      title: 'DIAGNOSTICO HIDRANTES',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light,
+      home: Scaffold(
+        backgroundColor: AppColors.blue,
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const AppBrandLogo(
+                      variant: AppBrandLogoVariant.splash,
+                      width: 320,
+                      height: 140,
+                    ),
+                    const SizedBox(height: 32),
+                    if (_error == null) ...[
+                      const CircularProgressIndicator(color: Colors.white),
+                      const SizedBox(height: 18),
+                      Text(
+                        _status,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ] else ...[
+                      const Icon(
+                        Icons.settings_outlined,
+                        color: Colors.white,
+                        size: 40,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'No fue posible preparar la aplicación. Revisa la '
+                        'configuración e inténtalo nuevamente.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      const SizedBox(height: 18),
+                      FilledButton(
+                        onPressed: _running ? null : _initialize,
+                        child: const Text('Reintentar'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

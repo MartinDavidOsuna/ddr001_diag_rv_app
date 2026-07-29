@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
@@ -195,34 +196,38 @@ class AppState extends ChangeNotifier {
 
   Future<void> initialize() async {
     connectivityMonitor?.addListener(_onConnectivityChanged);
-    await connectivityMonitor?.start();
     _clearAccessScope();
     _replaceHydrantsFromCache();
     activeChecklist = checklistRepository.cached();
     final localSession = await sessionRepository.storage.read();
     if (localSession != null) {
-      try {
-        _session = await sessionRepository.restore();
-        sessionOffline = sessionRepository.lastRestoreOffline;
-      } on Object {
-        _session = await sessionRepository.storage.read();
-        sessionOffline = _session != null;
-      }
-      if (_session != null) _applySession(_session!);
-      online = connectivityMonitor?.apiAvailable ?? !sessionOffline;
-    }
-    if (AppConfig.appUpdatesEnabled) {
-      updateInfo = await updateService.check(
-        installedVersion: packageInfo.version,
-        installedBuild: installedBuild,
-      );
-    }
-    if (_session != null && !sessionOffline) {
-      await synchronizeAssignments();
-      await refreshChecklist();
+      _session = localSession;
+      sessionOffline = true;
+      _applySession(localSession);
     }
     initialized = true;
     notifyListeners();
+    unawaited(_initializeRemoteServices());
+  }
+
+  Future<void> _initializeRemoteServices() async {
+    await connectivityMonitor?.start();
+    if (_session == null) return;
+    try {
+      final restored = await sessionRepository.restore();
+      if (restored != null) {
+        _session = restored;
+        sessionOffline = sessionRepository.lastRestoreOffline;
+        _applySession(restored);
+      }
+    } on Object {
+      sessionOffline = true;
+    }
+    notifyListeners();
+    if (connectivityMonitor?.apiAvailable ?? false) {
+      unawaited(synchronizeAssignments());
+      unawaited(refreshChecklist());
+    }
   }
 
   void _onConnectivityChanged() {
@@ -236,18 +241,20 @@ class AppState extends ChangeNotifier {
   }
 
   Future<String?> startFieldSession(FieldRegistration registration) async {
+    final stopwatch = Stopwatch()..start();
     try {
       final newSession = await sessionRepository.start(registration);
       _resetActiveSessionState();
       _session = newSession;
       _applySession(newSession);
       sessionOffline = false;
-      await recheckConnectivity();
-      online = connectivityMonitor?.apiAvailable ?? true;
       await trace('login', 'Inicio de sesión de campo');
       notifyListeners();
-      await synchronizeAssignments();
-      await refreshChecklist();
+      unawaited(synchronizeAssignments());
+      unawaited(refreshChecklist());
+      final monitor = connectivityMonitor;
+      if (monitor != null) unawaited(monitor.check());
+      debugPrint('[PERF] login_session_ms=${stopwatch.elapsedMilliseconds}');
       return null;
     } on ApiException catch (error) {
       return error.message;
@@ -827,25 +834,33 @@ class AppState extends ChangeNotifier {
     await trace('assignment_sync_started', 'Consulta de hidrantes iniciada');
     try {
       final before = {for (final item in hydrants) item.id: item};
-      final results = await Future.wait<Object>([
-        hydrantRepository.refresh(scope: 'all'),
-        hydrantRepository.refresh(scope: 'mine'),
-        hydrantRepository.todayStats(),
-      ]);
-      final catalog = results[0] as List<CachedHydrant>;
-      final refreshed = results[1] as List<CachedHydrant>;
-      final remoteStats =
-          results[2] as ({DateTime date, int submitted, int pending});
-      _remoteProfileStats = ProfileTodayStats(
-        date: DateTime(
-          remoteStats.date.year,
-          remoteStats.date.month,
-          remoteStats.date.day,
+      List<CachedHydrant>? catalog;
+      List<CachedHydrant>? refreshed;
+      final partialErrors = <Object>[];
+      await Future.wait<void>([
+        hydrantRepository.refreshCatalogSnapshot().then<void>(
+          (value) => catalog = value,
+          onError: (Object error) => partialErrors.add(error),
         ),
-        submitted: remoteStats.submitted,
-        pending: remoteStats.pending,
-        unsynced: 0,
-      );
+        hydrantRepository
+            .refresh(scope: 'mine')
+            .then<void>(
+              (value) => refreshed = value,
+              onError: (Object error) => partialErrors.add(error),
+            ),
+        hydrantRepository.todayStats().then((remoteStats) {
+          _remoteProfileStats = ProfileTodayStats(
+            date: DateTime(
+              remoteStats.date.year,
+              remoteStats.date.month,
+              remoteStats.date.day,
+            ),
+            submitted: remoteStats.submitted,
+            pending: remoteStats.pending,
+            unsynced: 0,
+          );
+        }, onError: (Object error) => partialErrors.add(error)),
+      ]);
       profileStatsLoading = false;
       _replaceHydrantsFromCache();
       final newItems = hydrants
@@ -860,10 +875,11 @@ class AppState extends ChangeNotifier {
         updatedAssignments: updated,
         removedIds: const [],
         message:
-            '${refreshed.length} hidrantes personales · ${catalog.length} en catálogo',
+            '${refreshed?.length ?? hydrants.length} hidrantes personales · '
+            '${catalog?.length ?? catalogHydrants.length} en catálogo',
       );
       lastAssignmentResult = result;
-      online = true;
+      online = connectivityMonitor?.apiAvailable ?? partialErrors.length < 3;
       lastAssignmentCheck = DateTime.now();
       if (result.newCount > 0) {
         await trace(
@@ -890,6 +906,10 @@ class AppState extends ChangeNotifier {
         'assignment_sync_finished',
         'Consulta de asignaciones finalizada',
       );
+      if (partialErrors.isNotEmpty) {
+        assignmentError =
+            'Algunos datos no pudieron actualizarse. Se conservan los datos guardados.';
+      }
     } on ApiException catch (error) {
       assignmentError = error.message;
       if (error.kind == ApiErrorKind.serverUnavailable ||

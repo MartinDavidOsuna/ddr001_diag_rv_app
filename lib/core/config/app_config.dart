@@ -3,8 +3,13 @@ import 'package:flutter/foundation.dart';
 class AppConfig {
   const AppConfig({required this.environment, required this.apiBaseUrl});
 
-  static const developmentFallback = 'http://192.168.1.111:3000/api/v1';
   static const productionBaseUrl = 'http://cifra.aquafim.com:3002/api/v1';
+  static const supportedEnvironments = {
+    'development',
+    'test',
+    'staging',
+    'production',
+  };
   static const rvOnly = true;
   static const appUpdatesEnabled = false;
   static bool isInspectionTypeEnabled(String type) => !rvOnly || type == 'a';
@@ -27,19 +32,14 @@ class AppConfig {
                 ))
             .trim()
             .toLowerCase();
-    var raw =
+    if (!supportedEnvironments.contains(environment)) {
+      throw StateError('APP_ENV no corresponde a un ambiente válido.');
+    }
+    final raw =
         (apiBaseUrlOverride ?? const String.fromEnvironment('API_BASE_URL'))
             .trim();
-    if (raw.isEmpty && environment == 'production') {
-      raw = productionBaseUrl;
-    }
-    if (raw.isEmpty && debugMode && environment == 'development') {
-      raw = developmentFallback;
-    }
     if (raw.isEmpty) {
-      throw StateError(
-        'API_BASE_URL es obligatorio fuera del entorno de desarrollo debug.',
-      );
+      throw StateError('Falta la configuración del servicio.');
     }
     final uri = Uri.tryParse(raw);
     if (uri == null || !uri.hasScheme || !uri.hasAuthority) {
@@ -53,10 +53,9 @@ class AppConfig {
         uri.path == '/api/v1' &&
         !uri.hasQuery &&
         !uri.hasFragment;
-    if (!debugMode && uri.scheme != 'https' && !isApprovedProductionHttp) {
+    if (uri.scheme != 'https' && !isApprovedProductionHttp) {
       throw StateError(
-        'API_BASE_URL debe usar HTTPS en release o coincidir con el endpoint '
-        'HTTP de producción autorizado.',
+        'La conexión configurada no cumple la política de seguridad.',
       );
     }
     return AppConfig(environment: environment, apiBaseUrl: uri);
