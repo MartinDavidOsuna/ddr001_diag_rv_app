@@ -30,9 +30,9 @@ Widget _app({
   final inspection = _projected();
   return MaterialApp(
     builder: (context, child) => MediaQuery(
-      data: MediaQuery.of(context).copyWith(
-        textScaler: TextScaler.linear(textScale),
-      ),
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: TextScaler.linear(textScale)),
       child: child!,
     ),
     home: Scaffold(
@@ -63,12 +63,17 @@ Widget _app({
 }
 
 void main() {
-  testWidgets('defaults favorables aparecen sin marcar revisado', (tester) async {
+  testWidgets('defaults favorables aparecen sin marcar revisado', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       _app(section: VisualComponentsSection.publicNetwork),
     );
     expect(find.text('Válvula de servicio 1'), findsOneWidget);
-    expect(find.text('Valores sugeridos — confirme la revisión.'), findsOneWidget);
+    expect(
+      find.text('Valores sugeridos — confirme la revisión.'),
+      findsOneWidget,
+    );
     expect(find.text('Sin confirmar'), findsOneWidget);
     expect(find.widgetWithText(ChoiceChip, 'Sí'), findsOneWidget);
     expect(find.widgetWithText(ChoiceChip, 'Bueno'), findsOneWidget);
@@ -76,25 +81,31 @@ void main() {
 
   testWidgets('abrir no persiste ni confirma', (tester) async {
     var writes = 0;
-    await tester.pumpWidget(_app(
-      section: VisualComponentsSection.publicNetwork,
-      onChanged: (_) async {
-        writes++;
-      },
-    ));
+    await tester.pumpWidget(
+      _app(
+        section: VisualComponentsSection.publicNetwork,
+        onChanged: (_) async {
+          writes++;
+        },
+      ),
+    );
     await tester.pump();
     expect(writes, 0);
     expect(find.text('Sin confirmar'), findsOneWidget);
   });
 
-  testWidgets('confirmar establece revisión explícita y avanza', (tester) async {
+  testWidgets('confirmar establece revisión explícita y avanza', (
+    tester,
+  ) async {
     VisualComponentInspection? saved;
-    await tester.pumpWidget(_app(
-      section: VisualComponentsSection.publicNetwork,
-      onChanged: (values) async {
-        saved = values.first;
-      },
-    ));
+    await tester.pumpWidget(
+      _app(
+        section: VisualComponentsSection.publicNetwork,
+        onChanged: (values) async {
+          saved = values.first;
+        },
+      ),
+    );
     final confirmButton = find.text('Confirmar componente y continuar');
     await tester.ensureVisible(confirmButton);
     await tester.tap(confirmButton);
@@ -124,22 +135,29 @@ void main() {
   });
 
   testWidgets('modo lectura no ofrece confirmación editable', (tester) async {
-    await tester.pumpWidget(_app(
-      section: VisualComponentsSection.publicNetwork,
-      readOnly: true,
-    ));
+    await tester.pumpWidget(
+      _app(section: VisualComponentsSection.publicNetwork, readOnly: true),
+    );
     expect(find.text('Confirmar componente y continuar'), findsNothing);
     expect(find.text('Siguiente'), findsOneWidget);
   });
 
-  testWidgets('texto a 2x conserva encabezado y target principal', (tester) async {
-    await tester.pumpWidget(_app(
-      section: VisualComponentsSection.privateNetwork,
-      textScale: 2,
-    ));
+  testWidgets('texto a 2x conserva encabezado y target principal', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(section: VisualComponentsSection.privateNetwork, textScale: 2),
+    );
     expect(tester.takeException(), isNull);
     final button = find.text('Confirmar componente y continuar');
     expect(button, findsOneWidget);
-    expect(tester.getSize(find.ancestor(of: button, matching: find.byType(FilledButton))).height, greaterThanOrEqualTo(48));
+    expect(
+      tester
+          .getSize(
+            find.ancestor(of: button, matching: find.byType(FilledButton)),
+          )
+          .height,
+      greaterThanOrEqualTo(48),
+    );
   });
 }

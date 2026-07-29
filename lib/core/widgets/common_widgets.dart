@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../network/connectivity_monitor.dart';
+import 'app_brand_logo.dart';
 
 class SectionCard extends StatelessWidget {
   const SectionCard({
@@ -35,13 +37,37 @@ class StatusBadge extends StatelessWidget {
 }
 
 class ConnectionBadge extends StatelessWidget {
-  const ConnectionBadge({required this.online, super.key});
+  const ConnectionBadge({
+    required this.online,
+    this.state,
+    this.pending = false,
+    super.key,
+  });
   final bool online;
+  final NetworkAvailabilityState? state;
+  final bool pending;
   @override
-  Widget build(BuildContext context) => StatusBadge(
-    online ? 'En línea' : 'Sin conexión',
-    color: online ? AppColors.green : AppColors.orange,
-  );
+  Widget build(BuildContext context) {
+    final label = pending
+        ? 'Pendiente de sincronizar'
+        : switch (state) {
+            NetworkAvailabilityState.noNetwork => 'Sin conexión',
+            NetworkAvailabilityState.internetAvailable => 'Internet disponible',
+            NetworkAvailabilityState.apiUnavailable => 'Servidor no disponible',
+            NetworkAvailabilityState.apiAvailable => 'API disponible',
+            NetworkAvailabilityState.checking => 'Comprobando',
+            null => online ? 'En línea' : 'Sin conexión',
+          };
+    final color = pending
+        ? AppColors.orange
+        : state == NetworkAvailabilityState.apiAvailable ||
+              (state == null && online)
+        ? AppColors.green
+        : state == NetworkAvailabilityState.noNetwork
+        ? AppColors.red
+        : AppColors.orange;
+    return StatusBadge(label, color: color);
+  }
 }
 
 class AppPageHeader extends StatelessWidget implements PreferredSizeWidget {
@@ -49,24 +75,48 @@ class AppPageHeader extends StatelessWidget implements PreferredSizeWidget {
     required this.title,
     this.subtitle,
     this.actions,
+    this.leading,
+    this.automaticallyImplyLeading = true,
     super.key,
   });
   final String title;
   final String? subtitle;
   final List<Widget>? actions;
+  final Widget? leading;
+  final bool automaticallyImplyLeading;
   @override
   Size get preferredSize => Size.fromHeight(subtitle == null ? 56 : 62);
   @override
   Widget build(BuildContext context) => AppBar(
-    title: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    leading: leading,
+    automaticallyImplyLeading: automaticallyImplyLeading,
+    title: Row(
       children: [
-        Text(title),
-        if (subtitle != null)
-          Text(
-            subtitle!,
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w400),
+        const AppBrandLogo(
+          variant: AppBrandLogoVariant.symbol,
+          width: 30,
+          height: 30,
+        ),
+        const SizedBox(width: 9),
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              if (subtitle != null)
+                Text(
+                  subtitle!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+            ],
           ),
+        ),
       ],
     ),
     actions: actions,

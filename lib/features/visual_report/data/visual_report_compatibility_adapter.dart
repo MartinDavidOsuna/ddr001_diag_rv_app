@@ -23,10 +23,30 @@ class VisualReportCompatibilityAdapter {
         upgraded.componentInspections.isNotEmpty) {
       return upgraded;
     }
-    final configuration=upgraded.hydrantConfiguration ?? VisualHydrantConfigurationFactory.standard(VisualHydrantType.a1,inspectionId:upgraded.id);
-    final now=upgraded.updatedAt;
-    final components=[for(var index=0;index<configuration.components.length;index++) if (configuration.components[index].type != VisualComponentType.flowMeter) _legacyComponent(upgraded,configuration.components[index],index,now)];
-    return upgraded.copyWith(hydrantConfiguration:configuration,componentInspections:components,outletInspections:configuration.outlets,updatedAt:source.updatedAt);
+    final configuration =
+        upgraded.hydrantConfiguration ??
+        VisualHydrantConfigurationFactory.standard(
+          VisualHydrantType.a1,
+          inspectionId: upgraded.id,
+        );
+    final now = upgraded.updatedAt;
+    final components = [
+      for (var index = 0; index < configuration.components.length; index++)
+        if (configuration.components[index].type !=
+            VisualComponentType.flowMeter)
+          _legacyComponent(
+            upgraded,
+            configuration.components[index],
+            index,
+            now,
+          ),
+    ];
+    return upgraded.copyWith(
+      hydrantConfiguration: configuration,
+      componentInspections: components,
+      outletInspections: configuration.outlets,
+      updatedAt: source.updatedAt,
+    );
   }
 
   int _mapLegacyStep(int step) => switch (step) {
@@ -36,20 +56,58 @@ class VisualReportCompatibilityAdapter {
     _ => step.clamp(1, 9),
   };
 
-  VisualComponentInspection _legacyComponent(VisualInspection source,VisualComponentDefinition definition,int sequence,DateTime now){
-    PresenceAnswer? presence; VisualComponentCondition? condition;
-    if(definition.type==VisualComponentType.flowMeter){
-      presence=source.flowMeter.exists==null?null:source.flowMeter.exists!?PresenceAnswer.installed:PresenceAnswer.notInstalled;
-      condition=_legacyCondition(source.flowMeter.condition);
-    }else if(definition.type==VisualComponentType.regulatingValve){
-      presence=source.pressureValve.exists==null?null:source.pressureValve.exists!?PresenceAnswer.installed:PresenceAnswer.notInstalled;
-      condition=_legacyCondition(source.pressureValve.condition);
+  VisualComponentInspection _legacyComponent(
+    VisualInspection source,
+    VisualComponentDefinition definition,
+    int sequence,
+    DateTime now,
+  ) {
+    PresenceAnswer? presence;
+    VisualComponentCondition? condition;
+    if (definition.type == VisualComponentType.flowMeter) {
+      presence = source.flowMeter.exists == null
+          ? null
+          : source.flowMeter.exists!
+          ? PresenceAnswer.installed
+          : PresenceAnswer.notInstalled;
+      condition = _legacyCondition(source.flowMeter.condition);
+    } else if (definition.type == VisualComponentType.regulatingValve) {
+      presence = source.pressureValve.exists == null
+          ? null
+          : source.pressureValve.exists!
+          ? PresenceAnswer.installed
+          : PresenceAnswer.notInstalled;
+      condition = _legacyCondition(source.pressureValve.condition);
     }
     return VisualComponentInspection(
-      id:const Uuid().v5(Namespace.url.value,'ddr001-visual-component:${source.id}:${definition.id}'),
-      inspectionId:source.id,componentDefinitionId:definition.id,componentType:definition.type,compartment:definition.compartment,outletId:definition.outletNumber==null?null:'outlet-${definition.outletNumber}',sequence:sequence,presenceAnswer:presence,visualCondition:condition,reviewStatus:ComponentReviewStatus.pending,legacyRequiresConfirmation:true,createdAt:source.createdAt,updatedAt:now,
+      id: const Uuid().v5(
+        Namespace.url.value,
+        'ddr001-visual-component:${source.id}:${definition.id}',
+      ),
+      inspectionId: source.id,
+      componentDefinitionId: definition.id,
+      componentType: definition.type,
+      compartment: definition.compartment,
+      outletId: definition.outletNumber == null
+          ? null
+          : 'outlet-${definition.outletNumber}',
+      sequence: sequence,
+      presenceAnswer: presence,
+      visualCondition: condition,
+      reviewStatus: ComponentReviewStatus.pending,
+      legacyRequiresConfirmation: true,
+      createdAt: source.createdAt,
+      updatedAt: now,
     );
   }
 
-  VisualComponentCondition? _legacyCondition(PhysicalCondition? value)=>switch(value){PhysicalCondition.good=>VisualComponentCondition.good,PhysicalCondition.fair=>VisualComponentCondition.minorFinding,PhysicalCondition.bad=>VisualComponentCondition.majorFinding,PhysicalCondition.critical=>VisualComponentCondition.critical,PhysicalCondition.unknown=>VisualComponentCondition.notVerifiable,null=>null};
+  VisualComponentCondition? _legacyCondition(PhysicalCondition? value) =>
+      switch (value) {
+        PhysicalCondition.good => VisualComponentCondition.good,
+        PhysicalCondition.fair => VisualComponentCondition.minorFinding,
+        PhysicalCondition.bad => VisualComponentCondition.majorFinding,
+        PhysicalCondition.critical => VisualComponentCondition.critical,
+        PhysicalCondition.unknown => VisualComponentCondition.notVerifiable,
+        null => null,
+      };
 }

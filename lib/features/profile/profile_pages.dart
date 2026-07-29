@@ -4,15 +4,16 @@ import 'package:provider/provider.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
-import '../../core/services/update_service.dart';
 import '../../core/widgets/common_widgets.dart';
-import '../../domain/enums/app_enums.dart';
+import '../../domain/enums/hydrant_list_filter.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+    final stats = state.profileTodayStats;
     return Scaffold(
       appBar: AppPageHeader(
         title: 'Perfil',
@@ -35,8 +36,9 @@ class ProfilePage extends StatelessWidget {
                   backgroundColor: AppColors.blue,
                   child: Text(
                     state.user.fullName
-                        .split(' ')
-                        .map((x) => x[0])
+                        .split(RegExp(r'\s+'))
+                        .where((value) => value.isNotEmpty)
+                        .map((value) => value[0])
                         .take(2)
                         .join(),
                     style: const TextStyle(
@@ -63,7 +65,7 @@ class ProfilePage extends StatelessWidget {
                         style: const TextStyle(color: AppColors.muted),
                       ),
                       Text(
-                        '${state.user.brigadeName} · ${state.user.deviceId}',
+                        state.user.brigadeName,
                         style: const TextStyle(
                           color: AppColors.muted,
                           fontSize: 12,
@@ -76,27 +78,52 @@ class ProfilePage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          const SectionCard(
+          SectionCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                const Text(
                   'ESTADÍSTICAS DE HOY',
                   style: TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
-                SizedBox(height: 18),
+                const SizedBox(height: 18),
                 Row(
                   children: [
-                    Metric(value: '5', label: 'Completados'),
-                    Metric(
-                      value: '5',
+                    _StatMetric(
+                      value: state.profileStatsLoading
+                          ? '—'
+                          : '${stats.submitted}',
+                      label: 'Enviados',
+                      color: AppColors.green,
+                      onTap: () => _openFilter(
+                        context,
+                        state,
+                        HydrantListFilter.submittedToday,
+                      ),
+                    ),
+                    _StatMetric(
+                      value: state.profileStatsLoading
+                          ? '—'
+                          : '${stats.pending}',
                       label: 'Pendientes',
                       color: AppColors.orange,
+                      onTap: () => _openFilter(
+                        context,
+                        state,
+                        HydrantListFilter.pendingToday,
+                      ),
                     ),
-                    Metric(
-                      value: '2',
+                    _StatMetric(
+                      value: state.profileStatsLoading
+                          ? '—'
+                          : '${stats.unsynced}',
                       label: 'Sin sincronizar',
                       color: AppColors.red,
+                      onTap: () => _openFilter(
+                        context,
+                        state,
+                        HydrantListFilter.synchronizationPending,
+                      ),
                     ),
                   ],
                 ),
@@ -111,23 +138,8 @@ class ProfilePage extends StatelessWidget {
                 _Menu(
                   icon: Icons.sync,
                   title: 'Sincronización',
-                  subtitle: '${state.pendingCount} registros pendientes',
+                  subtitle: '${stats.unsynced} inspecciones pendientes',
                   onTap: () => context.push('/sync'),
-                ),
-                _Menu(
-                  icon: Icons.history,
-                  title: 'Historial de actividad',
-                  subtitle: '${state.traceBox.length} eventos locales',
-                  onTap: () => _message(
-                    context,
-                    'El historial detallado se incorporará en Etapa 2.',
-                  ),
-                ),
-                _Menu(
-                  icon: Icons.lock_outline,
-                  title: 'Cambiar contraseña',
-                  onTap: () =>
-                      _message(context, 'Función no disponible en modo demo.'),
                 ),
                 _Menu(
                   icon: Icons.menu_book_outlined,
@@ -135,15 +147,6 @@ class ProfilePage extends StatelessWidget {
                   onTap: () {
                     state.trace('manual_open', 'Abrir manual de uso');
                     context.push('/profile/manual');
-                  },
-                ),
-                _Menu(
-                  icon: Icons.system_update_alt,
-                  title: 'Revisar actualización',
-                  subtitle: state.updateInfo?.status.name,
-                  onTap: () {
-                    state.trace('update_check', 'Revisar actualización');
-                    context.push('/profile/update');
                   },
                 ),
                 if (state.user.role.toLowerCase().contains('supervisor') ||
@@ -158,16 +161,6 @@ class ProfilePage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          SectionCard(
-            child: SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Simular conexión'),
-              subtitle: const Text('Solo para demostración'),
-              value: state.online,
-              onChanged: (_) => state.toggleConnection(),
-            ),
-          ),
-          const SizedBox(height: 16),
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
               minimumSize: const Size(48, 52),
@@ -175,9 +168,17 @@ class ProfilePage extends StatelessWidget {
               side: const BorderSide(color: Color(0xFFFFAAAA)),
             ),
             onPressed: () async {
-              await state.logout();
-              if (context.mounted) {
+              final closed = await state.logout();
+              if (context.mounted && closed) {
                 context.go('/login');
+              } else if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Sin conexión. El cierre de sesión quedó pendiente.',
+                    ),
+                  ),
+                );
               }
             },
             icon: const Icon(Icons.logout),
@@ -190,10 +191,56 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  static void _message(BuildContext context, String value) =>
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(value)));
+  static void _openFilter(
+    BuildContext context,
+    AppState state,
+    HydrantListFilter filter,
+  ) {
+    state.requestHydrantListFilterFromHome(filter);
+    context.go('/hydrants');
+  }
+}
+
+class _StatMetric extends StatelessWidget {
+  const _StatMetric({
+    required this.value,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String value;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+        child: Column(
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                color: color,
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _Menu extends StatelessWidget {
@@ -203,10 +250,12 @@ class _Menu extends StatelessWidget {
     required this.onTap,
     this.subtitle,
   });
+
   final IconData icon;
   final String title;
   final String? subtitle;
   final VoidCallback onTap;
+
   @override
   Widget build(BuildContext context) => ListTile(
     leading: Icon(icon, color: AppColors.muted),
@@ -221,88 +270,107 @@ class _Menu extends StatelessWidget {
 
 class ManualPage extends StatelessWidget {
   const ManualPage({super.key});
+
+  static const sections = <(String, String)>[
+    (
+      '1. Inicio de sesión',
+      'Ingresa con las credenciales autorizadas y no compartas tu contraseña. '
+          'Cada sesión mantiene separados los borradores y operaciones de su usuario. '
+          'Cierra sesión desde Perfil cuando termines.',
+    ),
+    (
+      '2. Hidrantes asignados',
+      'Consulta, busca y filtra los hidrantes autorizados. Un hidrante es el '
+          'activo físico; una inspección registra su revisión y un borrador es '
+          'una inspección todavía editable.',
+    ),
+    (
+      '3. Crear inspección',
+      'Selecciona un hidrante, inicia la revisión visual y completa sus '
+          'secciones. Los avances se guardan como borrador y puedes continuar '
+          'posteriormente.',
+    ),
+    (
+      '4. Respuestas',
+      'Completa los selectores y campos obligatorios. Registra observaciones, '
+          'marcas, diámetros, condiciones y componentes según lo observado.',
+    ),
+    (
+      '5. Fotografías',
+      'Toma una fotografía o selecciónala desde la galería, revísala antes de '
+          'continuar y elimina únicamente evidencia incorrecta. Sin conexión, '
+          'las fotografías permanecen pendientes hasta sincronizar.',
+    ),
+    (
+      '6. Válvulas parcelarias — paso 8',
+      'Selecciona la configuración y cantidad de válvulas. Completa la marca, '
+          'diámetro y componentes de cada una. Usa “Otro” cuando la '
+          'configuración o medida no esté disponible y revisa los datos.',
+    ),
+    (
+      '7. Resumen',
+      'Revisa pendientes y advertencias. Toca un pendiente para ir al campo, '
+          'corrígelo y utiliza “Volver al resumen” antes de validar el envío.',
+    ),
+    (
+      '8. Trabajo sin conexión',
+      'Puedes capturar respuestas, válvulas y fotografías sin red. La '
+          'información queda guardada para el usuario activo y muestra estado '
+          'pendiente. Recupera la conexión para sincronizar; evita cerrar la '
+          'sesión mientras exista trabajo offline.',
+    ),
+    (
+      '9. Sincronización',
+      'Pendiente de sincronizar significa que aún existe información local. '
+          'Sincronizando indica una operación activa; Sincronizado confirma la '
+          'respuesta remota; Error requiere revisar la causa y reintentar.',
+    ),
+    (
+      '10. Envío',
+      'Guardar conserva el borrador; sincronizar transfiere sus elementos; '
+          'enviar cierra la inspección tras confirmación. Una inspección enviada '
+          'queda bloqueada para edición normal.',
+    ),
+    (
+      '11. Perfil',
+      'Consulta tu nombre, rol, cuadrilla, estadísticas del día, versión, '
+          'manual y cierre de sesión. Las estadísticas pertenecen únicamente '
+          'a la sesión activa.',
+    ),
+    (
+      '12. Solución de problemas',
+      'Sin conexión: continúa offline. Cámara sin permiso: habilítalo en el '
+          'sistema. Fotografía rechazada: revisa el archivo. Error de '
+          'sincronización: conserva el borrador y reintenta. Sesión vencida: '
+          'vuelve a autenticarte. Si la aplicación se cierra, ábrela de nuevo. '
+          'Si faltan datos autorizados, contacta a soporte.',
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final version = context.watch<AppState>().versionLabel;
     return Scaffold(
       appBar: const AppPageHeader(
         title: 'Manual de uso',
-        subtitle: 'Guía rápida',
+        subtitle: 'Guía de operación',
       ),
       body: ListView(
+        key: const ValueKey('manual-scroll-view'),
         padding: const EdgeInsets.all(16),
         children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppColors.blue,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Credenciales de prueba',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                SizedBox(height: 12),
-                Text(
-                  'Usuario: inspector.demo@ddr001.mx\nContraseña: demo123',
-                  style: TextStyle(color: Colors.white, height: 1.7),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          for (final item in const [
-            (
-              '1. Inicio de sesión',
-              'Ingresa con la cuenta demo. La sesión puede recordarse localmente.',
-            ),
-            (
-              '2. Inicio',
-              'Consulta asignaciones, avances y registros devueltos.',
-            ),
-            (
-              '3. Lista de hidrantes',
-              'Busca, filtra y abre la ficha de un hidrante.',
-            ),
-            (
-              '4. Mapa simulado',
-              'Toca un marcador para consultar datos y abrir la ficha.',
-            ),
-            (
-              '5. Sincronización',
-              'Ejecuta la simulación sin borrar datos de evidencia reales.',
-            ),
-            (
-              '6. Trabajo offline',
-              'Las trazas y la cola demo se conservan localmente.',
-            ),
-            (
-              '7. Estados de reportes',
-              'Borrador: información guardada sin finalizar.\nListo: preparación mínima completa.\nEn proceso: inspección activa.\nPausado: detención temporal recuperable.\nSuspendido: detención técnica, operativa o de seguridad.\nFinalizado: reporte cerrado e inmutable.\nCancelado: no continuará.\nRequiere repetición: debe crearse una inspección relacionada.\nPendiente de revisión: requiere supervisión.\nSincronizado: confirmación local simulada hasta contar con backend real.',
-            ),
-            (
-              '8. Términos de captura',
-              'RV es REPORTE VISUAL y RF es REPORTE FUNCIONAL. Sin sincronizar indica datos pendientes. No aplica es diferente de No realizada. No verificado indica que no fue posible confirmar Sí o No. Visita sin prueba documenta una visita donde no se ejecutaron pruebas.',
-            ),
-          ]) ...[
+          for (final section in sections) ...[
             SectionCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    item.$1,
+                    section.$1,
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                   const SizedBox(height: 9),
                   Text(
-                    item.$2,
+                    section.$2,
                     style: const TextStyle(
                       color: AppColors.muted,
                       height: 1.45,
@@ -317,190 +385,5 @@ class ManualPage extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-class UpdatePage extends StatelessWidget {
-  const UpdatePage({super.key});
-  @override
-  Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
-    final info = state.updateInfo;
-    final color = info?.status == UpdateStatus.required
-        ? AppColors.red
-        : info?.status == UpdateStatus.optional
-        ? AppColors.orange
-        : AppColors.green;
-    return Scaffold(
-      appBar: const AppPageHeader(title: 'Actualizaciones'),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.violet.withValues(alpha: .09),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: AppColors.violet.withValues(alpha: .25),
-              ),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.science_outlined, color: AppColors.violet),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Modo demostración de actualización',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.violet,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<UpdateDemoScenario>(
-            key: ValueKey(state.updateDemoScenario),
-            initialValue: state.updateDemoScenario,
-            decoration: const InputDecoration(labelText: 'Escenario'),
-            items: const [
-              DropdownMenuItem(
-                value: UpdateDemoScenario.current,
-                child: Text('Aplicación actualizada'),
-              ),
-              DropdownMenuItem(
-                value: UpdateDemoScenario.optional,
-                child: Text('Actualización opcional'),
-              ),
-              DropdownMenuItem(
-                value: UpdateDemoScenario.required,
-                child: Text('Actualización obligatoria'),
-              ),
-              DropdownMenuItem(
-                value: UpdateDemoScenario.error,
-                child: Text('Error de consulta'),
-              ),
-            ],
-            onChanged: (value) {
-              if (value != null) {
-                state.setUpdateScenario(value);
-              }
-            },
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: () => state.checkConfiguredManifest(),
-            icon: const Icon(Icons.public),
-            label: const Text('Comprobar manifiesto configurado'),
-          ),
-          const SizedBox(height: 12),
-          SectionCard(
-            child: Column(
-              children: [
-                Icon(Icons.system_update_alt, size: 54, color: color),
-                const SizedBox(height: 15),
-                Text(
-                  info?.title ?? 'Comprobando...',
-                  style: const TextStyle(
-                    fontSize: 19,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 9),
-                Text(
-                  'Instalada: ${state.versionLabel}',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                if (info != null && info.latestVersion.isNotEmpty)
-                  Text(
-                    'Disponible: ${info.latestVersion}+${info.buildNumber}',
-                    style: TextStyle(color: color, fontWeight: FontWeight.w700),
-                  ),
-                const SizedBox(height: 9),
-                Text(
-                  info?.message ?? '',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.muted),
-                ),
-                const SizedBox(height: 14),
-                StatusBadge(info?.status.name ?? 'unavailable', color: color),
-                if (info != null && info.releaseNotes.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Notas: ${info.releaseNotes.join(' · ')}',
-                      style: const TextStyle(color: AppColors.muted),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                const Text(
-                  'No se descargan ni instalan paquetes automáticamente. Una actualización obligatoria permite consultar datos locales y sincronizar.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: AppColors.muted),
-                ),
-                const SizedBox(height: 16),
-                if (info?.status == UpdateStatus.optional)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () {
-                            state.postponeUpdate();
-                            context.pop();
-                          },
-                          child: const Text('Más tarde'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: () => _openDemo(context, state),
-                          child: const Text('Actualizar'),
-                        ),
-                      ),
-                    ],
-                  ),
-                if (info?.status == UpdateStatus.required) ...[
-                  FilledButton(
-                    onPressed: () => _openDemo(context, state),
-                    child: const Text('Actualizar ahora'),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () => context.push('/sync'),
-                    icon: const Icon(Icons.sync),
-                    label: const Text('Abrir sincronización'),
-                  ),
-                ],
-                if (info?.status == UpdateStatus.unavailable)
-                  FilledButton.icon(
-                    onPressed: () => state.checkUpdates(),
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Reintentar'),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static Future<void> _openDemo(BuildContext context, AppState state) async {
-    final opened = await state.openUpdate();
-    if (context.mounted && !opened) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'URL de demostración: no se iniciará ninguna descarga.',
-          ),
-        ),
-      );
-    }
   }
 }

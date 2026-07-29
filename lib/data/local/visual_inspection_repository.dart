@@ -2,6 +2,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/persistence/versioned_json_codec.dart';
+import '../../core/security/local_data_scope.dart';
 import '../../domain/enums/app_enums.dart';
 import '../../domain/inspections/visual_inspection.dart';
 import '../../domain/models/app_models.dart';
@@ -14,31 +15,82 @@ class VisualInspectionRepository {
 
   final Box<String> documents;
   final Box<String> index;
+  LocalDataScope? _scope;
+  bool _scopeConfigured = false;
 
-  String _indexKey(String hydrantId) => '$hydrantId:f02A';
-
-  bool hasLocalInspection(String hydrantId) {
-    final id = index.get(_indexKey(hydrantId));
-    return id != null && documents.containsKey(id);
+  void setAccessScope(LocalDataScope? scope) {
+    _scope = scope;
+    _scopeConfigured = true;
   }
 
-  List<VisualInspection> forHydrant(String hydrantId) {
+  bool _canAccess(VisualInspection value) {
+    if (!_scopeConfigured) return true;
+    final scope = _scope;
+    if (scope == null || !scope.isUsable) return false;
+    if (scope.isAdministrator) return true;
+    final rawScope = value.unknownFields['dataScope'];
+    if (rawScope is! Map) return false;
+    final storedScope = Map<String, dynamic>.from(rawScope);
+    if (storedScope['environment'] != scope.environment ||
+        storedScope['accountId'] != scope.accountId) {
+      return false;
+    }
+    return scope.owns(ownerUserId: value.createdBy) ||
+        scope.owns(ownerUserId: value.inspectorId);
+  }
+
+  String _indexKey(String hydrantId) {
+    final prefix = _scope?.namespace;
+    return prefix == null ? '$hydrantId:f02A' : '$prefix/$hydrantId/f02A';
+  }
+
+  List<VisualInspection> accessible() {
     final values = <VisualInspection>[];
     for (final raw in documents.values) {
       try {
         final value = VisualInspection.fromJson(
           VersionedJsonCodec.decode(raw).payload,
         );
-        if (value.hydrantId == hydrantId) values.add(value);
+        if (_canAccess(value)) values.add(value);
       } on Object {
         continue;
       }
+    }
+    return values;
+  }
+
+  bool hasLocalInspection(String hydrantId) {
+    final id = index.get(_indexKey(hydrantId));
+    return id != null && findById(id) != null;
+  }
+
+  VisualInspection? findById(String id) {
+    final raw = documents.get(id);
+    if (raw == null) return null;
+    try {
+      final value = VisualInspection.fromJson(
+        VersionedJsonCodec.decode(raw).payload,
+      );
+      return _canAccess(value) ? value : null;
+    } on Object {
+      return null;
+    }
+  }
+
+  List<VisualInspection> forHydrant(String hydrantId) {
+    final values = <VisualInspection>[];
+    for (final value in accessible()) {
+      if (value.hydrantId == hydrantId) values.add(value);
     }
     values.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     return values;
   }
 
   Future<VisualInspection> openOrCreate(Hydrant hydrant, AppUser user) async {
+    if (_scopeConfigured &&
+        (_scope == null || !_scope!.owns(ownerUserId: user.id))) {
+      throw StateError('La sesión activa no autoriza crear este borrador.');
+    }
     final existingId = index.get(_indexKey(hydrant.id));
     if (existingId != null) {
       final raw = documents.get(existingId);
@@ -82,6 +134,14 @@ class VisualInspectionRepository {
       updatedAt: now,
       updatedBy: user.id,
       identification: HydrantIdentification(assignedCode: hydrant.code),
+      unknownFields: {
+        'dataScope': {
+          'environment': _scope?.environment ?? 'legacy',
+          'accountId': _scope?.accountId ?? 'legacy',
+          'ownerUserId': user.id,
+          'brigadeId': user.brigadeId,
+        },
+      },
     );
     await save(inspection);
     await index.put(_indexKey(hydrant.id), inspection.id);
@@ -89,6 +149,9 @@ class VisualInspectionRepository {
   }
 
   Future<void> save(VisualInspection inspection) async {
+    if (_scopeConfigured && !_canAccess(inspection)) {
+      throw StateError('La sesión activa no autoriza modificar este borrador.');
+    }
     final encoded = VersionedJsonCodec.encode(
       schemaVersion: inspection.schemaVersion,
       payload: inspection.toJson(),

@@ -17,16 +17,31 @@ void main() {
       TechnicalAssessmentAnswer.no,
     );
 
-    expect(value.wifiConnectionPossibleAnswer, TechnicalAssessmentAnswer.notApplicable);
-    expect(value.wifiSignalAdequateAnswer, TechnicalAssessmentAnswer.notApplicable);
-    expect(value.wifiInternetAvailableAnswer, TechnicalAssessmentAnswer.notApplicable);
+    expect(
+      value.wifiConnectionPossibleAnswer,
+      TechnicalAssessmentAnswer.notApplicable,
+    );
+    expect(
+      value.wifiSignalAdequateAnswer,
+      TechnicalAssessmentAnswer.notApplicable,
+    );
+    expect(
+      value.wifiInternetAvailableAnswer,
+      TechnicalAssessmentAnswer.notApplicable,
+    );
     expect(value.comments, isEmpty);
     expect(WifiAssessmentRules.validate(value).isValid, isTrue);
   });
 
   test('cambiar No a Sí no restaura respuestas obsoletas', () {
-    final no = WifiAssessmentRules.changeNearby(empty, TechnicalAssessmentAnswer.no);
-    final yes = WifiAssessmentRules.changeNearby(no, TechnicalAssessmentAnswer.yes);
+    final no = WifiAssessmentRules.changeNearby(
+      empty,
+      TechnicalAssessmentAnswer.no,
+    );
+    final yes = WifiAssessmentRules.changeNearby(
+      no,
+      TechnicalAssessmentAnswer.yes,
+    );
     expect(yes.wifiConnectionPossibleAnswer, isNull);
     expect(yes.wifiSignalAdequateAnswer, isNull);
     expect(WifiAssessmentRules.validate(yes).errors.keys, [
@@ -35,21 +50,30 @@ void main() {
   });
 
   test('solo exige señal e internet cuando conexión es Sí', () {
-    final nearby = WifiAssessmentRules.changeNearby(empty, TechnicalAssessmentAnswer.yes);
+    final nearby = WifiAssessmentRules.changeNearby(
+      empty,
+      TechnicalAssessmentAnswer.yes,
+    );
     final connected = WifiAssessmentRules.changeConnection(
       nearby,
       TechnicalAssessmentAnswer.yes,
     );
-    expect(WifiAssessmentRules.evaluate(connected).requiredQuestions, containsAll([
-      WifiAssessmentQuestion.signal,
-      WifiAssessmentQuestion.internet,
-    ]));
+    expect(
+      WifiAssessmentRules.evaluate(connected).requiredQuestions,
+      containsAll([
+        WifiAssessmentQuestion.signal,
+        WifiAssessmentQuestion.internet,
+      ]),
+    );
 
     final notVerified = WifiAssessmentRules.changeConnection(
       connected,
       TechnicalAssessmentAnswer.notVerified,
     );
-    expect(notVerified.wifiSignalAdequateAnswer, TechnicalAssessmentAnswer.notApplicable);
+    expect(
+      notVerified.wifiSignalAdequateAnswer,
+      TechnicalAssessmentAnswer.notApplicable,
+    );
     expect(WifiAssessmentRules.validate(notVerified).isValid, isTrue);
   });
 }

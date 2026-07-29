@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+
+import '../../core/services/app_state.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({required this.navigationShell, super.key});
@@ -31,6 +34,7 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final sessionOffline = context.watch<AppState>().sessionOffline;
     final path = GoRouterState.of(context).uri.path;
     final isBranchRoot = const {
       '/home',
@@ -39,14 +43,39 @@ class _MainShellState extends State<MainShell> {
       '/profile',
     }.contains(path);
     return Scaffold(
-      body: isBranchRoot
-          ? GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onHorizontalDragStart: (d) => dragStartX = d.globalPosition.dx,
-              onHorizontalDragEnd: swipe,
-              child: widget.navigationShell,
-            )
-          : widget.navigationShell,
+      body: Column(
+        children: [
+          if (sessionOffline)
+            const Material(
+              color: Color(0xFFFFE5A8),
+              child: SafeArea(
+                bottom: false,
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text(
+                      'Sesión sin verificar — modo sin conexión',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          Expanded(
+            child: isBranchRoot
+                ? GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onHorizontalDragStart: (d) =>
+                        dragStartX = d.globalPosition.dx,
+                    onHorizontalDragEnd: swipe,
+                    child: widget.navigationShell,
+                  )
+                : widget.navigationShell,
+          ),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: widget.navigationShell.currentIndex,
         onDestinationSelected: navigate,

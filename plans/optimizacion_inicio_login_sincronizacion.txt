@@ -1,0 +1,83 @@
+OPTIMIZACIÓN DE INICIO, LOGIN Y SINCRONIZACIÓN
+Fecha: 2026-07-28
+
+DIAGNÓSTICO CONFIRMADO
+- main espera bootstrap antes de runApp.
+- bootstrap abre más de treinta cajas, ejecuta auditoría y reconciliación antes
+  del primer frame.
+- AppState.initialize espera health, restauración remota, catálogo, estadísticas
+  y checklist.
+- startFieldSession espera un segundo health y toda la sincronización inicial.
+- Future.wait acopla catálogo, mine y estadísticas: un error descarta la
+  aplicación coordinada de resultados exitosos.
+- El catálogo se pagina de 200 en 200 y cada página repite CTE, ROW_NUMBER,
+  COUNT OVER y ordenamiento.
+- scope=mine usa inspecciones anteriores y altas manuales; el esquema no tiene
+  asignaciones de usuario o brigada.
+- Hive recorre, decodifica y ordena la caja completa en cada lectura.
+- Existen referencias de red privada en código, tests, documentos y evidencias.
+
+ARQUITECTURA PROPUESTA
+App launch
+  -> shell Flutter visible
+  -> bootstrap local visible y medido
+  -> resolución de sesión local
+       -> sin sesión: login inmediato
+       -> sesión + caché: home inmediato
+  -> conectividad en background
+  -> validación remota de sesión en background
+  -> sincronización de recursos independiente
+       -> hidrantes personales
+       -> snapshot de catálogo con ETag
+       -> checklist
+       -> estadísticas
+       -> catálogos dinámicos
+
+API
+- GET /hydrants permanece para consulta interactiva.
+- GET /hydrants/sync entrega snapshot móvil mínimo, ETag y 304.
+- Tabla aditiva hydrant_assignments para usuario/brigada, con vigencia y estado.
+- scope=mine consulta asignaciones directas o de brigada, altas propias y
+  compatibilidad temporal explícita con trabajo existente.
+
+ARCHIVOS PRINCIPALES
+Flutter: main.dart, app/bootstrap.dart, app/app.dart, AppConfig, AppState,
+ConnectivityMonitor, HydrantRepository, auth_pages.dart, hydrant_pages.dart,
+tests foundation/widgets/repositories y documentación.
+API: api.routes.ts, dominio hidrantes, migración 08, diagnósticos, pruebas
+unitarias/integración y documentación.
+
+RIESGOS
+- La asignación real requiere carga administrativa posterior; la migración no
+  inventará asignaciones.
+- El snapshot completo debe limitar campos y usar compresión del servidor.
+- La activación de una generación Hive no es transaccional entre cajas; se
+  conservará la generación anterior hasta validar y escribir la nueva.
+- Documentos históricos pueden contener evidencias de red; se sanearán sin
+  eliminar datos funcionales.
+
+ETAPAS
+1 configuración y shell visible; 2 sesión/login no bloqueante; 3 estados de
+recursos; 4 snapshot/ETag y caché generacional; 5 asignaciones; 6 saneamiento;
+7 pruebas, medición y revisión final.
+
+PRUEBAS
+- flutter analyze; flutter test.
+- npm run lint; npm run type-check; npm test; npm run test:integration;
+  npm run build.
+- búsqueda final de IPv4 privadas, loopback y URLs locales.
+- pruebas de primer frame, configuración, login no bloqueante, caché offline,
+  health deduplicado, errores parciales, ETag/304 y asignaciones.
+
+CRITERIOS DE ACEPTACIÓN
+- runApp antes de I/O; shell visible y recuperable.
+- login concluye al guardar sesión y aplicar ámbito.
+- caché visible antes de red; sincronización independiente y no bloqueante.
+- una consulta de snapshot por versión, con 304 cuando no cambia.
+- mine basado en asignación real, no solo inspecciones.
+- cero referencias locales relevantes.
+- identificadores y versión 0.2.3+16 sin cambios.
+
+MIGRACIONES POSIBLES
+- 08_hydrant_assignments_and_sync_indexes.sql: tabla aditiva, índices y rollback
+  documentado. No se ejecutará en producción.

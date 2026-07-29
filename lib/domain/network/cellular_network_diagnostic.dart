@@ -261,7 +261,7 @@ class CellularNetworkDiagnostic {
     this.effectivenessPercentage,
     this.internetProbe,
     this.effectivenessEvidence,
-    this.method = 'cellular-diagnostics-demo-v1',
+    this.method = 'cellular-diagnostics-v1',
     this.errorCode,
     this.errorMessage,
     this.permissionState = 'notRequiredByCurrentApi',
@@ -441,7 +441,7 @@ class CellularNetworkDiagnostic {
                 Map<String, dynamic>.from(json['effectivenessEvidence'] as Map),
               )
             : null,
-        method: json['method'] as String? ?? 'cellular-diagnostics-demo-v1',
+        method: json['method'] as String? ?? 'cellular-diagnostics-v1',
         errorCode: json['errorCode'] as String?,
         errorMessage: json['errorMessage'] as String?,
         permissionState:
@@ -455,7 +455,7 @@ class CellularNetworkDiagnostic {
 
 class CellularNetworkQualityCalculator {
   const CellularNetworkQualityCalculator._();
-  static const version = 'cellular-quality-demo-v1';
+  static const version = 'cellular-quality-v1';
 
   static int? qualityFromDbm(double? dbm) {
     if (dbm == null) return null;
@@ -478,7 +478,7 @@ class CellularNetworkQualityCalculator {
     required int attempts,
     required int successfulAttempts,
   }) {
-    const formulaVersion = 'cellular-effectiveness-demo-v2';
+    const formulaVersion = 'cellular-effectiveness-v2';
     final known = <({String key, double earned, double possible})>[
       (
         key: 'cellularNetworkAcquired',

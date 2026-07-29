@@ -16,6 +16,8 @@ abstract final class AppColors {
 }
 
 abstract final class AppTheme {
+  static const cardCornerRadius = 14.0;
+
   static ThemeData get light {
     final scheme = ColorScheme.fromSeed(
       seedColor: AppColors.blue,
@@ -40,7 +42,7 @@ abstract final class AppTheme {
         shadowColor: const Color(0x220F172A),
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(cardCornerRadius),
           side: const BorderSide(color: AppColors.border),
         ),
       ),

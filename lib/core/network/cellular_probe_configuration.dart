@@ -7,12 +7,11 @@ class CellularProbeConfiguration {
     this.readTimeout = const Duration(seconds: 12),
     this.networkTimeout = const Duration(seconds: 60),
     this.maximumResponseBytes = 1024,
-    this.methodVersion = 'cellular-network-http-demo-v1',
+    this.methodVersion = 'cellular-network-http-v1',
   });
 
-  /// Endpoint DEMO, centralizado y sustituible por uno controlado en Etapa 5.
-  /// La solicitud no incluye datos del reporte ni parámetros identificables.
-  static const demo = CellularProbeConfiguration(
+  /// Verificación técnica sin datos del reporte ni parámetros identificables.
+  static const standard = CellularProbeConfiguration(
     url: 'https://connectivitycheck.gstatic.com/generate_204',
   );
 

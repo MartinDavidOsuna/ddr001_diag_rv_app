@@ -1,0 +1,89 @@
+{
+  "filePath": "C:\\DEV\\AQAGS\\ddr001_diag_rv_app\\import\\input\\ATRIBUTOS.xlsx",
+  "sizeBytes": 181135,
+  "sha256": "2d1587d9223d21dafb0454afc8a7858fbd781c0846a4442548a6fe5788b104f2",
+  "sheets": [
+    "Hoja1"
+  ],
+  "worksheet": "Hoja1",
+  "headers": [
+    "<Feature Name>",
+    "<Feature Type>",
+    "Layer",
+    "Gasto",
+    "Salidas",
+    "Cuenta",
+    "Project_x",
+    "Project_y",
+    "Seccion",
+    "AÃ±o",
+    "Angulo",
+    "ELEVATION",
+    "<Feature Description>",
+    "<Feature Layer Name>",
+    "<Index in Layer>",
+    "<Last Modified Time>"
+  ],
+  "dataRows": 1956,
+  "acceptedRows": 1169,
+  "rejectedRows": 786,
+  "errorCount": 786,
+  "warningCount": 142,
+  "duplicates": 112,
+  "exactDuplicates": 1,
+  "conflictingDuplicateRows": 216,
+  "emptyRows": 0,
+  "accountFormats": {
+    "empty": 0,
+    "integerNumeric": 1956,
+    "decimalSuffix": 0,
+    "scientific": 0,
+    "spaces": 0,
+    "hyphens": 0,
+    "slashes": 0,
+    "letters": 0,
+    "leadingZeros": 0,
+    "nonPrintable": 0,
+    "other": 0
+  },
+  "issueCounts": {
+    "warning:ANGLE_OUT_OF_RANGE": 3,
+    "warning:YEAR_INVALID_FORMAT": 138,
+    "error:ACCOUNT_INVALID_FORMAT": 570,
+    "error:ACCOUNT_DUPLICATE": 216,
+    "warning:ACCOUNT_DUPLICATE": 1
+  },
+  "coordinates": {
+    "validPairs": 1169,
+    "x": {
+      "min": 774105.495288,
+      "max": 785222.1184,
+      "average": 781279.7682334053,
+      "zeros": 0,
+      "negatives": 0
+    },
+    "y": {
+      "min": 2447341.92094,
+      "max": 2467638.003,
+      "average": 2457926.041252765,
+      "zeros": 0,
+      "negatives": 0
+    }
+  },
+  "compatibilityFallbackUsed": false,
+  "sourceCrs": "UNKNOWN",
+  "reports": {
+    "summary": "C:\\DEV\\AQAGS\\ddr001_diag_rv_app\\import\\output\\atributos_summary.json",
+    "accepted": "C:\\DEV\\AQAGS\\ddr001_diag_rv_app\\import\\output\\atributos_accepted.csv",
+    "rejected": "C:\\DEV\\AQAGS\\ddr001_diag_rv_app\\import\\output\\atributos_rejected.csv",
+    "duplicates": "C:\\DEV\\AQAGS\\ddr001_diag_rv_app\\import\\output\\atributos_duplicates.csv",
+    "coordinateSample": "C:\\DEV\\AQAGS\\ddr001_diag_rv_app\\import\\output\\atributos_coordinate_sample.csv",
+    "pilotManifestJson": "C:\\DEV\\AQAGS\\ddr001_diag_rv_app\\import\\output\\pilot_20_manifest.json",
+    "pilotManifestCsv": "C:\\DEV\\AQAGS\\ddr001_diag_rv_app\\import\\output\\pilot_20_manifest.csv"
+  },
+  "requestedLimit": null,
+  "manifestPath": null,
+  "selectedRows": 1169,
+  "selectedWarnings": 142,
+  "databaseTouched": false
+}

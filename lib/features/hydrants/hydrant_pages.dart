@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../../core/config/app_config.dart';
 import '../../core/constants/report_type_labels.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
@@ -53,7 +54,7 @@ class _HydrantsPageState extends State<HydrantsPage> {
 
   Future<void> syncAssignments(AppState state) async {
     if (state.assignmentSyncing) return;
-    await state.synchronizeNextAssignmentScenario();
+    await state.synchronizeAssignments();
     if (!mounted) return;
     final result = state.lastAssignmentResult;
     final failed = state.assignmentError != null;
@@ -61,7 +62,8 @@ class _HydrantsPageState extends State<HydrantsPage> {
         result != null &&
         result.newCount + result.updatedCount + result.removedCount > 0;
     final message = failed
-        ? 'No fue posible actualizar asignaciones.'
+        ? 'No se pudieron actualizar las asignaciones. '
+              'Verifica tu conexión e intenta nuevamente.'
         : result?.newCount == 2
         ? '2 asignaciones nuevas.'
         : changed
@@ -140,7 +142,11 @@ class _HydrantsPageState extends State<HydrantsPage> {
           ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: ConnectionBadge(online: state.online),
+            child: ConnectionBadge(
+              online: state.online,
+              state: state.connectivityState,
+              pending: state.pendingCount > 0,
+            ),
           ),
         ],
       ),
@@ -187,31 +193,62 @@ class _HydrantsPageState extends State<HydrantsPage> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '${items.length} resultados',
-                style: const TextStyle(color: AppColors.muted, fontSize: 12),
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${items.length} resultados',
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                Text(
+                  state.assignmentSyncing
+                      ? 'Actualizando'
+                      : state.assignmentError != null
+                      ? 'Error de sincronización · datos guardados'
+                      : state.hydrantsLastUpdated == null
+                      ? 'Primera descarga pendiente'
+                      : 'Actualizado ${state.hydrantsLastUpdated!.toLocal()}',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 11),
+                ),
+              ],
             ),
           ),
           Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
-              itemCount: items.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 9),
-              itemBuilder: (_, i) => HydrantCard(
-                hydrant: items[i],
-                onTap: () {
-                  state.trace(
-                    'hydrant_open',
-                    'Abrir ficha de hidrante',
-                    hydrantId: items[i].id,
-                  );
-                  context.push('/hydrants/${items[i].id}');
-                },
-              ),
-            ),
+            child: items.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        state.hydrantListFilter == HydrantListFilter.all &&
+                                state.hydrants.isEmpty
+                            ? 'No tienes hidrantes asignados.\n'
+                                  'Puedes consultar el catálogo general o sincronizar nuevamente.'
+                            : _emptyMessage(state.hydrantListFilter),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppColors.muted),
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
+                    itemCount: items.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 9),
+                    itemBuilder: (_, i) => HydrantCard(
+                      hydrant: items[i],
+                      onTap: () {
+                        state.trace(
+                          'hydrant_open',
+                          'Abrir ficha de hidrante',
+                          hydrantId: items[i].id,
+                        );
+                        context.push('/hydrants/${items[i].id}');
+                      },
+                    ),
+                  ),
           ),
         ],
       ),
@@ -244,7 +281,17 @@ class _HydrantsPageState extends State<HydrantsPage> {
       '${ReportTypeLabels.functionalShort} con falla',
     HydrantListFilter.pendingValidation => 'Pendiente de validación',
     HydrantListFilter.synchronizationPending => 'Sin sincronizar',
+    HydrantListFilter.submittedToday => 'Enviados hoy',
+    HydrantListFilter.pendingToday => 'Pendientes hoy',
     HydrantListFilter.incidents => 'Con incidencias',
+  };
+
+  String _emptyMessage(HydrantListFilter value) => switch (value) {
+    HydrantListFilter.submittedToday => 'No hay inspecciones enviadas hoy.',
+    HydrantListFilter.pendingToday => 'No hay inspecciones pendientes hoy.',
+    HydrantListFilter.synchronizationPending =>
+      'No hay inspecciones sin sincronizar.',
+    _ => 'No hay hidrantes para el filtro activo.',
   };
 }
 
@@ -256,7 +303,8 @@ class HydrantCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final functional = state.functionalSummary(hydrant.id);
-    final isB = functional.status != InspectionStatus.notRequired;
+    final isB =
+        !AppConfig.rvOnly && functional.status != InspectionStatus.notRequired;
     final summary = isB ? functional : hydrant.f02a;
     final compactStatus = isB
         ? state.functionalStateLabel(hydrant.id)
@@ -454,16 +502,22 @@ class HydrantDetailPage extends StatelessWidget {
             onPressed: () => _openInspection(context, state, h.f02a, 'a'),
           ),
           const SizedBox(height: 13),
-          DiagnosticCard(
-            type: ReportTypeLabels.functionalFull,
-            summary: functionalSummary,
-            color: AppColors.violet,
-            forceEnabled: true,
-            statusOverride: state.functionalStateLabel(id),
-            onPressed: () =>
-                _openFunctionalInspection(context, state, h, functionalSummary),
-          ),
-          if (functionalSummary.status == InspectionStatus.completed) ...[
+          if (!AppConfig.rvOnly)
+            DiagnosticCard(
+              type: ReportTypeLabels.functionalFull,
+              summary: functionalSummary,
+              color: AppColors.violet,
+              forceEnabled: true,
+              statusOverride: state.functionalStateLabel(id),
+              onPressed: () => _openFunctionalInspection(
+                context,
+                state,
+                h,
+                functionalSummary,
+              ),
+            ),
+          if (!AppConfig.rvOnly &&
+              functionalSummary.status == InspectionStatus.completed) ...[
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: state.editingRestricted
@@ -487,7 +541,8 @@ class HydrantDetailPage extends StatelessWidget {
             icon: const Icon(Icons.photo_library_outlined),
             label: const Text('Abrir galería local'),
           ),
-          if (visualHistory.length > 1 || functionalHistory.length > 1) ...[
+          if (visualHistory.length > 1 ||
+              (!AppConfig.rvOnly && functionalHistory.length > 1)) ...[
             const SizedBox(height: 12),
             SectionCard(
               child: ExpansionTile(
@@ -502,15 +557,16 @@ class HydrantDetailPage extends StatelessWidget {
                         '${report.revisionReason.isEmpty ? 'Sin motivo de revisión' : report.revisionReason}\n${report.updatedAt.toLocal()}${report.activeRevision ? ' · Vigente' : ''}',
                       ),
                     ),
-                  for (final report in functionalHistory)
-                    ListTile(
-                      title: Text(
-                        'RF · ${report.revisionNumber == 0 ? 'Original' : 'Revisión ${report.revisionNumber}'}',
+                  if (!AppConfig.rvOnly)
+                    for (final report in functionalHistory)
+                      ListTile(
+                        title: Text(
+                          'RF · ${report.revisionNumber == 0 ? 'Original' : 'Revisión ${report.revisionNumber}'}',
+                        ),
+                        subtitle: Text(
+                          '${report.revisionReason.isEmpty ? 'Sin motivo de revisión' : report.revisionReason}\n${report.updatedAt.toLocal()}${report.activeRevision ? ' · Vigente' : ''}',
+                        ),
                       ),
-                      subtitle: Text(
-                        '${report.revisionReason.isEmpty ? 'Sin motivo de revisión' : report.revisionReason}\n${report.updatedAt.toLocal()}${report.activeRevision ? ' · Vigente' : ''}',
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -519,10 +575,12 @@ class HydrantDetailPage extends StatelessWidget {
               (visualHistory.any(
                     (report) => report.status == InspectionStatus.completed,
                   ) ||
-                  functionalHistory.any(
-                    (report) =>
-                        report.status == FunctionalInspectionStatus.completed,
-                  ))) ...[
+                  (!AppConfig.rvOnly &&
+                      functionalHistory.any(
+                        (report) =>
+                            report.status ==
+                            FunctionalInspectionStatus.completed,
+                      )))) ...[
             const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: () => _createRevision(

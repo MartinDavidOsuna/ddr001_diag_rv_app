@@ -20,6 +20,7 @@ const stage4BoxNames = <String>[
   'synced_trace_ids',
   'functional_eligibility_v1',
   'local_hydrants_v1',
+  'rv_checklist_cache_v1',
   'report_revisions_v1',
 ];
 

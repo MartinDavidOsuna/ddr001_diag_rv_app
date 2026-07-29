@@ -39,34 +39,43 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(channel.startedProbeIds, hasLength(1));
     channel.progress?.call('verifyingCapabilities');
-    expect(controller.diagnostic.stage, CellularDiagnosticStage.verifyingCapabilities);
+    expect(
+      controller.diagnostic.stage,
+      CellularDiagnosticStage.verifyingCapabilities,
+    );
     channel.result.complete(success());
     await running;
 
     expect(controller.diagnostic.status, CellularDiagnosticStatus.available);
-    expect(controller.diagnostic.internetStatus, CellularInternetStatus.available);
+    expect(
+      controller.diagnostic.internetStatus,
+      CellularInternetStatus.available,
+    );
     expect(controller.diagnostic.latencyMs, 100);
     expect(persisted.last.status, CellularDiagnosticStatus.available);
     controller.dispose();
   });
 
-  test('cancelar clasifica cancelado y solicita liberar el probe activo', () async {
-    final channel = FakeCellularProbeChannel();
-    final persisted = <CellularNetworkDiagnostic>[];
-    final controller = CellularNetworkDiagnosticsController(
-      inspectionId: 'rv-1',
-      persist: (value) async => persisted.add(value),
-      probeChannel: channel,
-    );
-    unawaited(controller.start());
-    await Future<void>.delayed(Duration.zero);
-    final activeId = channel.startedProbeIds.single;
+  test(
+    'cancelar clasifica cancelado y solicita liberar el probe activo',
+    () async {
+      final channel = FakeCellularProbeChannel();
+      final persisted = <CellularNetworkDiagnostic>[];
+      final controller = CellularNetworkDiagnosticsController(
+        inspectionId: 'rv-1',
+        persist: (value) async => persisted.add(value),
+        probeChannel: channel,
+      );
+      unawaited(controller.start());
+      await Future<void>.delayed(Duration.zero);
+      final activeId = channel.startedProbeIds.single;
 
-    await controller.cancel();
+      await controller.cancel();
 
-    expect(channel.cancelledProbeIds, [activeId]);
-    expect(controller.diagnostic.status, CellularDiagnosticStatus.cancelled);
-    expect(controller.diagnostic.timeoutReached, isFalse);
-    controller.dispose();
-  });
+      expect(channel.cancelledProbeIds, [activeId]);
+      expect(controller.diagnostic.status, CellularDiagnosticStatus.cancelled);
+      expect(controller.diagnostic.timeoutReached, isFalse);
+      controller.dispose();
+    },
+  );
 }

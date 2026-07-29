@@ -404,7 +404,8 @@ class _VisualReportPageState extends State<VisualReportPage> {
     }
     if (widget.type != 'a') return const _F02BPlaceholder();
     final value = inspection!;
-    final step = value.status == InspectionStatus.completed &&
+    final step =
+        value.status == InspectionStatus.completed &&
             value.visualFlowVersion < 2
         ? switch (value.currentStep) {
             6 => 7,
@@ -492,39 +493,39 @@ class _VisualReportPageState extends State<VisualReportPage> {
               ),
               if (step != 5 && step != 6)
                 SafeArea(
-                top: false,
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  color: Colors.white,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: saving ? null : _back,
-                          icon: const Icon(Icons.arrow_back),
-                          label: const Text('Anterior'),
+                  top: false,
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    color: Colors.white,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: saving ? null : _back,
+                            icon: const Icon(Icons.arrow_back),
+                            label: const Text('Anterior'),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: value.status == InspectionStatus.completed
-                            ? FilledButton(
-                                onPressed: () => context.pop(),
-                                child: const Text('Volver al hidrante'),
-                              )
-                            : FilledButton(
-                                onPressed: saving ? null : _next,
-                                child: Text(
-                                  step == 9
-                                      ? 'Finalizar ${ReportTypeLabels.visualFull}'
-                                      : 'Guardar y continuar',
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: value.status == InspectionStatus.completed
+                              ? FilledButton(
+                                  onPressed: () => context.pop(),
+                                  child: const Text('Volver al hidrante'),
+                                )
+                              : FilledButton(
+                                  onPressed: saving ? null : _next,
+                                  child: Text(
+                                    step == 9
+                                        ? 'Finalizar ${ReportTypeLabels.visualFull}'
+                                        : 'Guardar y continuar',
+                                  ),
                                 ),
-                              ),
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -950,7 +951,7 @@ class _CellularDiagnosticsPanel extends StatelessWidget {
             'Método: ${probe?.methodVersion ?? value?.method ?? 'Pendiente'}',
           ),
           const Text(
-            'Metodología DEMO. Esta prueba evalúa la red celular del teléfono y no certifica directamente el módem instalado en el hidrante.',
+            'Esta prueba evalúa la red celular del teléfono y no certifica directamente el módem instalado en el hidrante.',
             style: TextStyle(fontSize: 11, color: AppColors.orange),
           ),
           Align(
@@ -1281,18 +1282,30 @@ class _StepBody extends StatelessWidget {
               setValue('root', 'victaulicGroupInspection', group.toJson());
               await saveDraft();
             },
-            onComponentConfirmed: (componentId) => context.read<AppState>().trace(
-              'visual_component_confirmed',
-              'Componente de red pública confirmado',
-              hydrantId: inspection.hydrantId,
-              metadata: {'reportId': inspection.id, 'componentId': componentId},
-            ),
+            onComponentConfirmed: (componentId) =>
+                context.read<AppState>().trace(
+                  'visual_component_confirmed',
+                  'Componente de red pública confirmado',
+                  hydrantId: inspection.hydrantId,
+                  metadata: {
+                    'reportId': inspection.id,
+                    'componentId': componentId,
+                  },
+                ),
             onFlowMeterConfirmed: () async {
               final appState = context.read<AppState>();
               final now = DateTime.now().toUtc();
               setValue('root', 'flowMeterComponentConfirmed', true);
-              setValue('root', 'flowMeterComponentReviewedBy', inspection.inspectorId);
-              setValue('root', 'flowMeterComponentReviewedAt', now.toIso8601String());
+              setValue(
+                'root',
+                'flowMeterComponentReviewedBy',
+                inspection.inspectorId,
+              );
+              setValue(
+                'root',
+                'flowMeterComponentReviewedAt',
+                now.toIso8601String(),
+              );
               await saveDraft();
               await appState.trace(
                 'visual_flow_meter_summary_confirmed',
@@ -1341,12 +1354,16 @@ class _StepBody extends StatelessWidget {
               setValue('root', 'victaulicGroupInspection', group.toJson());
               await saveDraft();
             },
-            onComponentConfirmed: (componentId) => context.read<AppState>().trace(
-              'visual_component_confirmed',
-              'Componente de red privada confirmado',
-              hydrantId: inspection.hydrantId,
-              metadata: {'reportId': inspection.id, 'componentId': componentId},
-            ),
+            onComponentConfirmed: (componentId) =>
+                context.read<AppState>().trace(
+                  'visual_component_confirmed',
+                  'Componente de red privada confirmado',
+                  hydrantId: inspection.hydrantId,
+                  metadata: {
+                    'reportId': inspection.id,
+                    'componentId': componentId,
+                  },
+                ),
             onFlowMeterConfirmed: () async {},
             onIndexChanged: (index) async {
               setValue('root', 'privateComponentIndex', index);

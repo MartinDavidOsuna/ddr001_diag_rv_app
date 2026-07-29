@@ -43,6 +43,7 @@ abstract final class VisualComponentRules {
         data[key] ??= 'good';
       }
     }
+
     switch (value.componentType) {
       case VisualComponentType.serviceValve:
       case VisualComponentType.sectioningValve:
@@ -165,11 +166,11 @@ abstract final class VisualComponentRules {
     }.contains(condition);
     final conditions = finding
         ? value.observedConditions
-            .where((item) => item != ObservedCondition.noVisibleDamage)
-            .toSet()
+              .where((item) => item != ObservedCondition.noVisibleDamage)
+              .toSet()
         : condition == VisualComponentCondition.good
-            ? const {ObservedCondition.noVisibleDamage}
-            : value.observedConditions;
+        ? const {ObservedCondition.noVisibleDamage}
+        : value.observedConditions;
     return value.copyWith(
       visualCondition: condition,
       observedConditions: conditions,
@@ -201,30 +202,38 @@ abstract final class VisualComponentRules {
   }) {
     final issues = <VisualComponentValidationIssue>[];
     if (value.presenceAnswer == null) {
-      issues.add(const VisualComponentValidationIssue(
-        'presence',
-        'Indica si el componente está instalado.',
-      ));
+      issues.add(
+        const VisualComponentValidationIssue(
+          'presence',
+          'Indica si el componente está instalado.',
+        ),
+      );
     }
     if (value.presenceAnswer == PresenceAnswer.installed &&
         value.visualCondition == null) {
-      issues.add(const VisualComponentValidationIssue(
-        'condition',
-        'Selecciona el estado visual.',
-      ));
+      issues.add(
+        const VisualComponentValidationIssue(
+          'condition',
+          'Selecciona el estado visual.',
+        ),
+      );
     }
     if (value.observedConditions.contains(ObservedCondition.noVisibleDamage) &&
         value.observedConditions.length > 1) {
-      issues.add(const VisualComponentValidationIssue(
-        'conditionConflict',
-        'Sin daño visible no puede coexistir con daños.',
-      ));
+      issues.add(
+        const VisualComponentValidationIssue(
+          'conditionConflict',
+          'Sin daño visible no puede coexistir con daños.',
+        ),
+      );
     }
     if (value.hasFinding && value.observedConditions.isEmpty) {
-      issues.add(const VisualComponentValidationIssue(
-        'observedCondition',
-        'Selecciona al menos una condición observada para el hallazgo.',
-      ));
+      issues.add(
+        const VisualComponentValidationIssue(
+          'observedCondition',
+          'Selecciona al menos una condición observada para el hallazgo.',
+        ),
+      );
     }
     final needsComment =
         value.presenceAnswer == PresenceAnswer.notInstalled ||
@@ -237,17 +246,21 @@ abstract final class VisualComponentRules {
         value.observedConditions.contains(ObservedCondition.other) ||
         value.configurationDifference;
     if (needsComment && value.comment.trim().isEmpty) {
-      issues.add(const VisualComponentValidationIssue(
-        'comment',
-        'Captura un comentario para justificar la condición.',
-      ));
+      issues.add(
+        const VisualComponentValidationIssue(
+          'comment',
+          'Captura un comentario para justificar la condición.',
+        ),
+      );
     }
     if (value.observedConditions.contains(ObservedCondition.other) &&
         value.otherConditionDescription.trim().isEmpty) {
-      issues.add(const VisualComponentValidationIssue(
-        'otherDescription',
-        'Describe la condición “Otro”.',
-      ));
+      issues.add(
+        const VisualComponentValidationIssue(
+          'otherDescription',
+          'Describe la condición “Otro”.',
+        ),
+      );
     }
     final needsPhoto =
         value.visualCondition == VisualComponentCondition.majorFinding ||
@@ -257,48 +270,60 @@ abstract final class VisualComponentRules {
         value.configurationDifference ||
         value.componentType == VisualComponentType.other;
     if (needsPhoto && !hasValidPhoto) {
-      issues.add(const VisualComponentValidationIssue(
-        'photo',
-        'Esta condición requiere evidencia fotográfica.',
-        requiresPhoto: true,
-      ));
+      issues.add(
+        const VisualComponentValidationIssue(
+          'photo',
+          'Esta condición requiere evidencia fotográfica.',
+          requiresPhoto: true,
+        ),
+      );
     }
     if (value.componentType == VisualComponentType.pressureGauge &&
         value.presenceAnswer == PresenceAnswer.installed) {
       if (value.specificData.faceLegible == null) {
-        issues.add(const VisualComponentValidationIssue(
-          'faceLegible',
-          'Indica si la carátula es legible.',
-        ));
+        issues.add(
+          const VisualComponentValidationIssue(
+            'faceLegible',
+            'Indica si la carátula es legible.',
+          ),
+        );
       }
       if (value.specificData.visibleRange == null ||
           value.specificData.visibleRange!.trim().isEmpty) {
-        issues.add(const VisualComponentValidationIssue(
-          'visibleRange',
-          'Captura el rango visible o indica que no es identificable.',
-        ));
+        issues.add(
+          const VisualComponentValidationIssue(
+            'visibleRange',
+            'Captura el rango visible o indica que no es identificable.',
+          ),
+        );
       }
       if (value.specificData.visibleUnit == null ||
           value.specificData.visibleUnit!.trim().isEmpty) {
-        issues.add(const VisualComponentValidationIssue(
-          'visibleUnit',
-          'Captura la unidad visible o indica que no es identificable.',
-        ));
+        issues.add(
+          const VisualComponentValidationIssue(
+            'visibleUnit',
+            'Captura la unidad visible o indica que no es identificable.',
+          ),
+        );
       }
     }
     if (value.componentType == VisualComponentType.filterAssembly &&
         value.presenceAnswer == PresenceAnswer.installed &&
         value.specificData.internalVisibility == null) {
-      issues.add(const VisualComponentValidationIssue(
-        'internalVisibility',
-        'Indica si el conjunto es verificable visualmente.',
-      ));
+      issues.add(
+        const VisualComponentValidationIssue(
+          'internalVisibility',
+          'Indica si el conjunto es verificable visualmente.',
+        ),
+      );
     }
     if (!value.explicitlyConfirmed) {
-      issues.add(const VisualComponentValidationIssue(
-        'explicitConfirmation',
-        'Confirma explícitamente la revisión del componente.',
-      ));
+      issues.add(
+        const VisualComponentValidationIssue(
+          'explicitConfirmation',
+          'Confirma explícitamente la revisión del componente.',
+        ),
+      );
     }
     return issues;
   }

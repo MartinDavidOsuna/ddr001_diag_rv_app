@@ -223,12 +223,14 @@ class VisualInspectionStepValidator {
         value.componentInspections.isEmpty) {
       return step == 5
           ? validatePressureValve(value).errors
-              .map((error) => InspectionValidationError(
+                .map(
+                  (error) => InspectionValidationError(
                     step,
                     error.fieldKey,
                     error.message,
-                  ))
-              .toList()
+                  ),
+                )
+                .toList()
           : const [];
     }
     final errors = <InspectionValidationError>[];
@@ -243,11 +245,13 @@ class VisualInspectionStepValidator {
         component,
         hasValidPhoto: hasPhoto,
       )) {
-        errors.add(InspectionValidationError(
-          step,
-          'component:${component.id}:${issue.code}',
-          issue.message,
-        ));
+        errors.add(
+          InspectionValidationError(
+            step,
+            'component:${component.id}:${issue.code}',
+            issue.message,
+          ),
+        );
       }
     }
     return errors;

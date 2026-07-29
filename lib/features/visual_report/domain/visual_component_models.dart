@@ -60,9 +60,8 @@ enum ObservedCondition {
 }
 
 extension VisualHydrantTypeLabel on VisualHydrantType {
-  String get label => this == VisualHydrantType.a5Custom
-      ? 'A5 Custom'
-      : name.toUpperCase();
+  String get label =>
+      this == VisualHydrantType.a5Custom ? 'A5 Custom' : name.toUpperCase();
 }
 
 extension VisualCompartmentLabel on VisualCompartment {
@@ -416,8 +415,9 @@ class VisualComponentInspection {
     sequence: sequence,
     expected: expected,
     presenceAnswer: presenceAnswer ?? this.presenceAnswer,
-    visualCondition:
-        clearVisualCondition ? null : visualCondition ?? this.visualCondition,
+    visualCondition: clearVisualCondition
+        ? null
+        : visualCondition ?? this.visualCondition,
     observedConditions: observedConditions ?? this.observedConditions,
     reviewStatus: reviewStatus ?? this.reviewStatus,
     reviewedBy: clearReviewedBy ? null : reviewedBy ?? this.reviewedBy,
@@ -474,80 +474,258 @@ class VisualComponentInspection {
 
   factory VisualComponentInspection.fromJson(Map<String, dynamic> j) {
     const known = {
-      'id','inspectionId','componentDefinitionId','componentType','compartment',
-      'outletId','sequence','expected','presenceAnswer','visualCondition',
-      'observedConditions','reviewStatus','reviewedBy','reviewedAt',
-      'quickReviewApplied','suggestedDefaultsApplied','explicitlyConfirmed',
-      'comment','otherConditionDescription','photoIds',
-      'specificData','createdAt','updatedAt','retiredAt',
-      'configurationDifference','legacyRequiresConfirmation','schemaVersion',
+      'id',
+      'inspectionId',
+      'componentDefinitionId',
+      'componentType',
+      'compartment',
+      'outletId',
+      'sequence',
+      'expected',
+      'presenceAnswer',
+      'visualCondition',
+      'observedConditions',
+      'reviewStatus',
+      'reviewedBy',
+      'reviewedAt',
+      'quickReviewApplied',
+      'suggestedDefaultsApplied',
+      'explicitlyConfirmed',
+      'comment',
+      'otherConditionDescription',
+      'photoIds',
+      'specificData',
+      'createdAt',
+      'updatedAt',
+      'retiredAt',
+      'configurationDifference',
+      'legacyRequiresConfirmation',
+      'schemaVersion',
     };
     return VisualComponentInspection(
       id: j['id'] as String,
       inspectionId: j['inspectionId'] as String,
       componentDefinitionId: j['componentDefinitionId'] as String,
-      componentType: _enum(VisualComponentType.values, j['componentType'], VisualComponentType.other),
-      compartment: _enum(VisualCompartment.values, j['compartment'], VisualCompartment.privateNetwork),
+      componentType: _enum(
+        VisualComponentType.values,
+        j['componentType'],
+        VisualComponentType.other,
+      ),
+      compartment: _enum(
+        VisualCompartment.values,
+        j['compartment'],
+        VisualCompartment.privateNetwork,
+      ),
       outletId: j['outletId'] as String?,
       sequence: j['sequence'] as int? ?? 0,
       expected: j['expected'] as bool? ?? true,
       presenceAnswer: _nullableEnum(PresenceAnswer.values, j['presenceAnswer']),
-      visualCondition: _nullableEnum(VisualComponentCondition.values, j['visualCondition']),
+      visualCondition: _nullableEnum(
+        VisualComponentCondition.values,
+        j['visualCondition'],
+      ),
       observedConditions: (j['observedConditions'] as List? ?? const [])
           .map((v) => _nullableEnum(ObservedCondition.values, v))
-          .whereType<ObservedCondition>().toSet(),
-      reviewStatus: _enum(ComponentReviewStatus.values, j['reviewStatus'], ComponentReviewStatus.pending),
+          .whereType<ObservedCondition>()
+          .toSet(),
+      reviewStatus: _enum(
+        ComponentReviewStatus.values,
+        j['reviewStatus'],
+        ComponentReviewStatus.pending,
+      ),
       reviewedBy: j['reviewedBy'] as String?,
       reviewedAt: DateTime.tryParse(j['reviewedAt'] as String? ?? '')?.toUtc(),
       quickReviewApplied: j['quickReviewApplied'] as bool? ?? false,
-      suggestedDefaultsApplied:
-          j['suggestedDefaultsApplied'] as bool? ?? false,
+      suggestedDefaultsApplied: j['suggestedDefaultsApplied'] as bool? ?? false,
       explicitlyConfirmed: j['explicitlyConfirmed'] as bool? ?? false,
       comment: j['comment'] as String? ?? '',
-      otherConditionDescription: j['otherConditionDescription'] as String? ?? '',
+      otherConditionDescription:
+          j['otherConditionDescription'] as String? ?? '',
       photoIds: (j['photoIds'] as List? ?? const []).map((v) => '$v').toList(),
-      specificData: VisualComponentSpecificData.fromJson(Map<String,dynamic>.from(j['specificData'] as Map? ?? const {})),
-      createdAt: _date(j['createdAt']), updatedAt: _date(j['updatedAt']),
+      specificData: VisualComponentSpecificData.fromJson(
+        Map<String, dynamic>.from(j['specificData'] as Map? ?? const {}),
+      ),
+      createdAt: _date(j['createdAt']),
+      updatedAt: _date(j['updatedAt']),
       retiredAt: DateTime.tryParse(j['retiredAt'] as String? ?? '')?.toUtc(),
       configurationDifference: j['configurationDifference'] as bool? ?? false,
-      legacyRequiresConfirmation: j['legacyRequiresConfirmation'] as bool? ?? false,
+      legacyRequiresConfirmation:
+          j['legacyRequiresConfirmation'] as bool? ?? false,
       schemaVersion: j['schemaVersion'] as int? ?? 1,
-      unknownFields: {for(final e in j.entries) if(!known.contains(e.key)) e.key:e.value},
+      unknownFields: {
+        for (final e in j.entries)
+          if (!known.contains(e.key)) e.key: e.value,
+      },
     );
   }
 }
 
 class VisualOutletInspection {
-  const VisualOutletInspection({required this.id, required this.inspectionId, required this.outletNumber, required this.expectedDiameter, this.observedDiameter, required this.componentIds, this.active = true, this.photoIds = const [], this.schemaVersion = 2});
+  const VisualOutletInspection({
+    required this.id,
+    required this.inspectionId,
+    required this.outletNumber,
+    required this.expectedDiameter,
+    this.observedDiameter,
+    required this.componentIds,
+    this.active = true,
+    this.photoIds = const [],
+    this.schemaVersion = 2,
+  });
   final String id, inspectionId, expectedDiameter;
   final String? observedDiameter;
   final int outletNumber, schemaVersion;
   final List<String> componentIds, photoIds;
   final bool active;
-  Map<String,dynamic> toJson()=>{'id':id,'inspectionId':inspectionId,'outletNumber':outletNumber,'expectedDiameter':expectedDiameter,'observedDiameter':observedDiameter,'componentIds':componentIds,'active':active,'photoIds':photoIds,'schemaVersion':schemaVersion};
-  factory VisualOutletInspection.fromJson(Map<String,dynamic> j)=>VisualOutletInspection(id:j['id'] as String,inspectionId:j['inspectionId'] as String,outletNumber:j['outletNumber'] as int,expectedDiameter:j['expectedDiameter'] as String? ?? '',observedDiameter:j['observedDiameter'] as String?,componentIds:(j['componentIds'] as List? ?? const []).cast<String>(),active:j['active'] as bool? ?? true,photoIds:(j['photoIds'] as List? ?? const []).cast<String>(),schemaVersion:j['schemaVersion'] as int? ?? 1);
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'inspectionId': inspectionId,
+    'outletNumber': outletNumber,
+    'expectedDiameter': expectedDiameter,
+    'observedDiameter': observedDiameter,
+    'componentIds': componentIds,
+    'active': active,
+    'photoIds': photoIds,
+    'schemaVersion': schemaVersion,
+  };
+  factory VisualOutletInspection.fromJson(Map<String, dynamic> j) =>
+      VisualOutletInspection(
+        id: j['id'] as String,
+        inspectionId: j['inspectionId'] as String,
+        outletNumber: j['outletNumber'] as int,
+        expectedDiameter: j['expectedDiameter'] as String? ?? '',
+        observedDiameter: j['observedDiameter'] as String?,
+        componentIds: (j['componentIds'] as List? ?? const []).cast<String>(),
+        active: j['active'] as bool? ?? true,
+        photoIds: (j['photoIds'] as List? ?? const []).cast<String>(),
+        schemaVersion: j['schemaVersion'] as int? ?? 1,
+      );
 }
 
 class VisualJointInspection {
-  const VisualJointInspection({required this.id, required this.number, this.location='', this.material='', this.condition, this.observedConditions=const {}, this.photoIds=const [], this.comments=''});
-  final String id, location, material, comments; final int number;
-  final VisualComponentCondition? condition; final Set<ObservedCondition> observedConditions; final List<String> photoIds;
-  Map<String,dynamic> toJson()=>{'id':id,'number':number,'location':location,'material':material,'condition':condition?.name,'observedConditions':observedConditions.map((e)=>e.name).toList(),'photoIds':photoIds,'comments':comments};
-  factory VisualJointInspection.fromJson(Map<String,dynamic> j)=>VisualJointInspection(id:j['id'] as String,number:j['number'] as int? ?? 0,location:j['location'] as String? ?? '',material:j['material'] as String? ?? '',condition:_nullableEnum(VisualComponentCondition.values,j['condition']),observedConditions:(j['observedConditions'] as List? ?? const []).map((e)=>_nullableEnum(ObservedCondition.values,e)).whereType<ObservedCondition>().toSet(),photoIds:(j['photoIds'] as List? ?? const []).cast<String>(),comments:j['comments'] as String? ?? '');
+  const VisualJointInspection({
+    required this.id,
+    required this.number,
+    this.location = '',
+    this.material = '',
+    this.condition,
+    this.observedConditions = const {},
+    this.photoIds = const [],
+    this.comments = '',
+  });
+  final String id, location, material, comments;
+  final int number;
+  final VisualComponentCondition? condition;
+  final Set<ObservedCondition> observedConditions;
+  final List<String> photoIds;
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'number': number,
+    'location': location,
+    'material': material,
+    'condition': condition?.name,
+    'observedConditions': observedConditions.map((e) => e.name).toList(),
+    'photoIds': photoIds,
+    'comments': comments,
+  };
+  factory VisualJointInspection.fromJson(Map<String, dynamic> j) =>
+      VisualJointInspection(
+        id: j['id'] as String,
+        number: j['number'] as int? ?? 0,
+        location: j['location'] as String? ?? '',
+        material: j['material'] as String? ?? '',
+        condition: _nullableEnum(
+          VisualComponentCondition.values,
+          j['condition'],
+        ),
+        observedConditions: (j['observedConditions'] as List? ?? const [])
+            .map((e) => _nullableEnum(ObservedCondition.values, e))
+            .whereType<ObservedCondition>()
+            .toSet(),
+        photoIds: (j['photoIds'] as List? ?? const []).cast<String>(),
+        comments: j['comments'] as String? ?? '',
+      );
 }
 
 class VisualVictaulicGroupInspection {
-  const VisualVictaulicGroupInspection({required this.componentInspectionId,this.quantity=0,this.material='',this.commonCondition,this.sameConditionForAll=true,this.individualJoints=const [],this.comments=''});
-  final String componentInspectionId,material,comments; final int quantity; final VisualComponentCondition? commonCondition; final bool sameConditionForAll; final List<VisualJointInspection> individualJoints;
-  VisualVictaulicGroupInspection copyWith({int? quantity,String? material,VisualComponentCondition? commonCondition,bool? sameConditionForAll,List<VisualJointInspection>? individualJoints,String? comments})=>VisualVictaulicGroupInspection(componentInspectionId:componentInspectionId,quantity:quantity??this.quantity,material:material??this.material,commonCondition:commonCondition??this.commonCondition,sameConditionForAll:sameConditionForAll??this.sameConditionForAll,individualJoints:individualJoints??this.individualJoints,comments:comments??this.comments);
-  VisualVictaulicGroupInspection withQuantity(int next){
-    final safe=next.clamp(0,50);
-    return copyWith(quantity:safe,individualJoints:[for(var index=0;index<safe;index++) if(index<individualJoints.length) individualJoints[index] else VisualJointInspection(id:const Uuid().v4(),number:index+1)]);
+  const VisualVictaulicGroupInspection({
+    required this.componentInspectionId,
+    this.quantity = 0,
+    this.material = '',
+    this.commonCondition,
+    this.sameConditionForAll = true,
+    this.individualJoints = const [],
+    this.comments = '',
+  });
+  final String componentInspectionId, material, comments;
+  final int quantity;
+  final VisualComponentCondition? commonCondition;
+  final bool sameConditionForAll;
+  final List<VisualJointInspection> individualJoints;
+  VisualVictaulicGroupInspection copyWith({
+    int? quantity,
+    String? material,
+    VisualComponentCondition? commonCondition,
+    bool? sameConditionForAll,
+    List<VisualJointInspection>? individualJoints,
+    String? comments,
+  }) => VisualVictaulicGroupInspection(
+    componentInspectionId: componentInspectionId,
+    quantity: quantity ?? this.quantity,
+    material: material ?? this.material,
+    commonCondition: commonCondition ?? this.commonCondition,
+    sameConditionForAll: sameConditionForAll ?? this.sameConditionForAll,
+    individualJoints: individualJoints ?? this.individualJoints,
+    comments: comments ?? this.comments,
+  );
+  VisualVictaulicGroupInspection withQuantity(int next) {
+    final safe = next.clamp(0, 50);
+    return copyWith(
+      quantity: safe,
+      individualJoints: [
+        for (var index = 0; index < safe; index++)
+          if (index < individualJoints.length)
+            individualJoints[index]
+          else
+            VisualJointInspection(id: const Uuid().v4(), number: index + 1),
+      ],
+    );
   }
-  Map<String,dynamic> toJson()=>{'componentInspectionId':componentInspectionId,'quantity':quantity,'material':material,'commonCondition':commonCondition?.name,'sameConditionForAll':sameConditionForAll,'individualJoints':individualJoints.map((e)=>e.toJson()).toList(),'comments':comments};
-  factory VisualVictaulicGroupInspection.fromJson(Map<String,dynamic> j)=>VisualVictaulicGroupInspection(componentInspectionId:j['componentInspectionId'] as String,quantity:j['quantity'] as int? ?? 0,material:j['material'] as String? ?? '',commonCondition:_nullableEnum(VisualComponentCondition.values,j['commonCondition']),sameConditionForAll:j['sameConditionForAll'] as bool? ?? true,individualJoints:(j['individualJoints'] as List? ?? const []).map((e)=>VisualJointInspection.fromJson(Map<String,dynamic>.from(e as Map))).toList(),comments:j['comments'] as String? ?? '');
+
+  Map<String, dynamic> toJson() => {
+    'componentInspectionId': componentInspectionId,
+    'quantity': quantity,
+    'material': material,
+    'commonCondition': commonCondition?.name,
+    'sameConditionForAll': sameConditionForAll,
+    'individualJoints': individualJoints.map((e) => e.toJson()).toList(),
+    'comments': comments,
+  };
+  factory VisualVictaulicGroupInspection.fromJson(Map<String, dynamic> j) =>
+      VisualVictaulicGroupInspection(
+        componentInspectionId: j['componentInspectionId'] as String,
+        quantity: j['quantity'] as int? ?? 0,
+        material: j['material'] as String? ?? '',
+        commonCondition: _nullableEnum(
+          VisualComponentCondition.values,
+          j['commonCondition'],
+        ),
+        sameConditionForAll: j['sameConditionForAll'] as bool? ?? true,
+        individualJoints: (j['individualJoints'] as List? ?? const [])
+            .map(
+              (e) => VisualJointInspection.fromJson(
+                Map<String, dynamic>.from(e as Map),
+              ),
+            )
+            .toList(),
+        comments: j['comments'] as String? ?? '',
+      );
 }
 
-T _enum<T extends Enum>(List<T> values,Object? raw,T fallback)=>values.where((e)=>e.name==raw).firstOrNull ?? fallback;
-T? _nullableEnum<T extends Enum>(List<T> values,Object? raw)=>values.where((e)=>e.name==raw).firstOrNull;
-DateTime _date(Object? raw)=>DateTime.tryParse(raw as String? ?? '')?.toUtc() ?? DateTime.fromMillisecondsSinceEpoch(0,isUtc:true);
+T _enum<T extends Enum>(List<T> values, Object? raw, T fallback) =>
+    values.where((e) => e.name == raw).firstOrNull ?? fallback;
+T? _nullableEnum<T extends Enum>(List<T> values, Object? raw) =>
+    values.where((e) => e.name == raw).firstOrNull;
+DateTime _date(Object? raw) =>
+    DateTime.tryParse(raw as String? ?? '')?.toUtc() ??
+    DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);

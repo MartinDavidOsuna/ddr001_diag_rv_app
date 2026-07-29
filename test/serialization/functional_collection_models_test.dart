@@ -26,28 +26,31 @@ void main() {
     expect(restored.seriesIds, ['series-a']);
   });
 
-  test('ReducerRun conserva aceptación e invalidación sin borrar historial', () {
-    final source = ReducerRun(
-      reducerRunId: 'uuid-run-1',
-      reducerId: 'reducer-1',
-      inspectionId: 'rf-1',
-      order: 2,
-      conditionKey: '0-1:L/s',
-      flowRangeMin: 0,
-      flowRangeMax: 1,
-      accepted: true,
-      invalidatedAt: now,
-      invalidatedBy: 'supervisor',
-      invalidationReason: 'Lectura inestable',
-      createdAt: now,
-      updatedAt: now,
-    );
-    final restored = ReducerRun.fromJson(source.toJson());
-    expect(restored.reducerRunId, source.reducerRunId);
-    expect(restored.accepted, isTrue);
-    expect(restored.valid, isFalse);
-    expect(restored.invalidationReason, 'Lectura inestable');
-  });
+  test(
+    'ReducerRun conserva aceptación e invalidación sin borrar historial',
+    () {
+      final source = ReducerRun(
+        reducerRunId: 'uuid-run-1',
+        reducerId: 'reducer-1',
+        inspectionId: 'rf-1',
+        order: 2,
+        conditionKey: '0-1:L/s',
+        flowRangeMin: 0,
+        flowRangeMax: 1,
+        accepted: true,
+        invalidatedAt: now,
+        invalidatedBy: 'supervisor',
+        invalidationReason: 'Lectura inestable',
+        createdAt: now,
+        updatedAt: now,
+      );
+      final restored = ReducerRun.fromJson(source.toJson());
+      expect(restored.reducerRunId, source.reducerRunId);
+      expect(restored.accepted, isTrue);
+      expect(restored.valid, isFalse);
+      expect(restored.invalidationReason, 'Lectura inestable');
+    },
+  );
 
   test('AlarmAttemptRecord conserva intento y latencia independiente', () {
     final source = AlarmAttemptRecord(

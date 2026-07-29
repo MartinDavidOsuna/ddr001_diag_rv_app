@@ -2,6 +2,13 @@
 
 Todos los cambios notables de **DIAGNOSTICO HIDRANTES** se documentan aquí.
 
+## 0.2.4+17
+
+- Conserva sesiones y reportes locales cuando falla temporalmente la renovación.
+- Distingue refresh revocado de errores de red, timeout y servidor.
+- Mejora el diagnóstico de actualización de catálogo y zona del mapa.
+- Agrega smoke tests remotos explícitos y exclusivamente de lectura.
+
 ## Unreleased — Etapa 3
 
 - Etapa 5B divide Componentes internos de REPORTE VISUAL en listas independientes de red pública y red privada, elimina el esquema productivo y amplía el flujo de ocho a nueve pasos con adaptación legacy idempotente.

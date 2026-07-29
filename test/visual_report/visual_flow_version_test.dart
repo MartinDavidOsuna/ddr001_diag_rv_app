@@ -27,7 +27,10 @@ void main() {
   const adapter = VisualReportCompatibilityAdapter();
 
   test('REPORTE VISUAL usa nueve pasos para el progreso', () {
-    expect(_inspection(step: 1, flowVersion: 2).progress, closeTo(1 / 9, 0.0001));
+    expect(
+      _inspection(step: 1, flowVersion: 2).progress,
+      closeTo(1 / 9, 0.0001),
+    );
     expect(_inspection(step: 9, flowVersion: 2).progress, 1);
   });
 
@@ -58,8 +61,9 @@ void main() {
   test('medidor canónico no se duplica como inspección de componente', () {
     final projected = adapter.project(_inspection(step: 5));
     expect(
-      projected.componentInspections
-          .where((item) => item.componentType.name == 'flowMeter'),
+      projected.componentInspections.where(
+        (item) => item.componentType.name == 'flowMeter',
+      ),
       isEmpty,
     );
   });
@@ -72,19 +76,23 @@ void main() {
     );
     expect(
       validator.validateStep(projected, 5).errors,
-      everyElement(isA<InspectionValidationError>().having(
-        (error) => error.stepNumber,
-        'paso',
-        5,
-      )),
+      everyElement(
+        isA<InspectionValidationError>().having(
+          (error) => error.stepNumber,
+          'paso',
+          5,
+        ),
+      ),
     );
     expect(
       validator.validateStep(projected, 6).errors,
-      everyElement(isA<InspectionValidationError>().having(
-        (error) => error.stepNumber,
-        'paso',
-        6,
-      )),
+      everyElement(
+        isA<InspectionValidationError>().having(
+          (error) => error.stepNumber,
+          'paso',
+          6,
+        ),
+      ),
     );
   });
 

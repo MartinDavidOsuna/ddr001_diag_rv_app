@@ -7,63 +7,70 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const methodChannel = MethodChannel('test/cellular_probe');
-  final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
 
   tearDown(() async {
     messenger.setMockMethodCallHandler(methodChannel, null);
   });
 
-  test('envía configuración mínima y convierte respuesta celular tipada', () async {
-    MethodCall? received;
-    messenger.setMockMethodCallHandler(methodChannel, (call) async {
-      received = call;
-      return <String, dynamic>{
-        'requestedCellularNetwork': true,
-        'cellularNetworkAcquired': true,
-        'transportCellularConfirmed': true,
-        'internetCapabilityPresent': true,
-        'validatedCapabilityPresent': true,
-        'probeAttempted': true,
-        'probeUrlHost': 'probe.example',
-        'httpMethod': 'HEAD',
-        'httpStatusCode': 204,
-        'responseReceived': true,
-        'latencyMs': 125,
-        'bytesReceived': 0,
-        'startedAt': '2026-07-15T18:00:00.000Z',
-        'completedAt': '2026-07-15T18:00:00.125Z',
-        'timeoutReached': false,
-        'result': 'cellularInternetConfirmed',
-        'platform': 'android',
-        'methodVersion': 'test-v1',
-      };
-    });
-    final adapter = CellularInternetProbeChannel(
-      channel: methodChannel,
-      isAndroid: () => true,
-      platformName: () => 'android',
-    );
-    const configuration = CellularProbeConfiguration(
-      url: 'https://probe.example/connectivity',
-      httpMethod: 'HEAD',
-      methodVersion: 'test-v1',
-    );
+  test(
+    'envía configuración mínima y convierte respuesta celular tipada',
+    () async {
+      MethodCall? received;
+      messenger.setMockMethodCallHandler(methodChannel, (call) async {
+        received = call;
+        return <String, dynamic>{
+          'requestedCellularNetwork': true,
+          'cellularNetworkAcquired': true,
+          'transportCellularConfirmed': true,
+          'internetCapabilityPresent': true,
+          'validatedCapabilityPresent': true,
+          'probeAttempted': true,
+          'probeUrlHost': 'probe.example',
+          'httpMethod': 'HEAD',
+          'httpStatusCode': 204,
+          'responseReceived': true,
+          'latencyMs': 125,
+          'bytesReceived': 0,
+          'startedAt': '2026-07-15T18:00:00.000Z',
+          'completedAt': '2026-07-15T18:00:00.125Z',
+          'timeoutReached': false,
+          'result': 'cellularInternetConfirmed',
+          'platform': 'android',
+          'methodVersion': 'test-v1',
+        };
+      });
+      final adapter = CellularInternetProbeChannel(
+        channel: methodChannel,
+        isAndroid: () => true,
+        platformName: () => 'android',
+      );
+      const configuration = CellularProbeConfiguration(
+        url: 'https://probe.example/connectivity',
+        httpMethod: 'HEAD',
+        methodVersion: 'test-v1',
+      );
 
-    final result = await adapter.start(
-      probeId: 'probe-1',
-      configuration: configuration,
-    );
+      final result = await adapter.start(
+        probeId: 'probe-1',
+        configuration: configuration,
+      );
 
-    expect(received?.method, 'startProbe');
-    final arguments = Map<String, dynamic>.from(received?.arguments as Map);
-    expect(arguments['url'], configuration.url);
-    expect(arguments.keys, isNot(contains('hydrantId')));
-    expect(arguments.keys, isNot(contains('userId')));
-    expect(result.result, CellularInternetProbeOutcome.cellularInternetConfirmed);
-    expect(result.internetCapabilityPresent, isTrue);
-    expect(result.validatedCapabilityPresent, isTrue);
-    expect(result.latencyMs, 125);
-  });
+      expect(received?.method, 'startProbe');
+      final arguments = Map<String, dynamic>.from(received?.arguments as Map);
+      expect(arguments['url'], configuration.url);
+      expect(arguments.keys, isNot(contains('hydrantId')));
+      expect(arguments.keys, isNot(contains('userId')));
+      expect(
+        result.result,
+        CellularInternetProbeOutcome.cellularInternetConfirmed,
+      );
+      expect(result.internetCapabilityPresent, isTrue);
+      expect(result.validatedCapabilityPresent, isTrue);
+      expect(result.latencyMs, 125);
+    },
+  );
 
   test('PlatformException queda indeterminado y no se propaga', () async {
     messenger.setMockMethodCallHandler(methodChannel, (call) async {
@@ -77,34 +84,37 @@ void main() {
 
     final result = await adapter.start(
       probeId: 'probe-2',
-      configuration: CellularProbeConfiguration.demo,
+      configuration: CellularProbeConfiguration.standard,
     );
 
     expect(result.result, CellularInternetProbeOutcome.indeterminate);
     expect(result.errorCode, 'securityRestriction');
   });
 
-  test('plataforma sin aislamiento no invoca el canal ni finge paridad', () async {
-    var invoked = false;
-    messenger.setMockMethodCallHandler(methodChannel, (call) async {
-      invoked = true;
-      return null;
-    });
-    final adapter = CellularInternetProbeChannel(
-      channel: methodChannel,
-      isAndroid: () => false,
-      platformName: () => 'ios',
-    );
+  test(
+    'plataforma sin aislamiento no invoca el canal ni finge paridad',
+    () async {
+      var invoked = false;
+      messenger.setMockMethodCallHandler(methodChannel, (call) async {
+        invoked = true;
+        return null;
+      });
+      final adapter = CellularInternetProbeChannel(
+        channel: methodChannel,
+        isAndroid: () => false,
+        platformName: () => 'ios',
+      );
 
-    final result = await adapter.start(
-      probeId: 'probe-ios',
-      configuration: CellularProbeConfiguration.demo,
-    );
+      final result = await adapter.start(
+        probeId: 'probe-ios',
+        configuration: CellularProbeConfiguration.standard,
+      );
 
-    expect(invoked, isFalse);
-    expect(result.result, CellularInternetProbeOutcome.platformRestricted);
-    expect(result.platform, 'ios');
-  });
+      expect(invoked, isFalse);
+      expect(result.result, CellularInternetProbeOutcome.platformRestricted);
+      expect(result.platform, 'ios');
+    },
+  );
 
   test('cancel solicita liberar la operación nativa identificada', () async {
     MethodCall? received;

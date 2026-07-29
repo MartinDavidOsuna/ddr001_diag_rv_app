@@ -31,7 +31,11 @@ void main() {
     expect(result.resolved, isTrue);
     expect(result.original?.reportId, 'rv-0');
     expect(result.activeRevision?.reportId, 'rv-2');
-    expect(result.chain.map((value) => value.reportId), ['rv-0', 'rv-1', 'rv-2']);
+    expect(result.chain.map((value) => value.reportId), [
+      'rv-0',
+      'rv-1',
+      'rv-2',
+    ]);
   });
 
   test('una bifurcación no elige silenciosamente una revisión', () {
@@ -54,10 +58,10 @@ void main() {
     ]);
 
     expect(result.resolved, isFalse);
-    expect(result.problemCodes.any((value) => value.startsWith('cycle:')), isTrue);
     expect(
-      result.problemCodes,
-      contains('missingPrevious:rv-3:missing'),
+      result.problemCodes.any((value) => value.startsWith('cycle:')),
+      isTrue,
     );
+    expect(result.problemCodes, contains('missingPrevious:rv-3:missing'));
   });
 }

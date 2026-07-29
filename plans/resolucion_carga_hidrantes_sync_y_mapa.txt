@@ -1,0 +1,120 @@
+PLAN — RESOLUCIÓN DE CARGA DE HIDRANTES, SYNC Y MAPA
+Fecha: 2026-07-28
+
+ALCANCE
+- Aplicación Flutter: ddr001_diag_rv_app.
+- API Node.js/TypeScript: ddr001_api_rv (remoto ddr001_api).
+- No desplegar, migrar producción, publicar, hacer push, PR, merge, cambiar
+  identificadores ni cambiar versión.
+- Preservar todos los cambios sin commit y todo el trabajo local/offline.
+
+DIAGNÓSTICO CONFIRMADO
+- La rama productiva diagnostico-produccion-2026-07-28 de la API no contiene
+  GET /api/v1/hydrants/sync.
+- La rama fix/hydrant-query-sync-performance contiene una implementación de
+  /hydrants/sync en el commit 7780f12, registrada antes de
+  /hydrants/:accountNumber.
+- Cuando el build desplegado no contiene la ruta estática, Express resuelve
+  "sync" mediante /hydrants/:accountNumber y el handler de detalle devuelve
+  "Hydrant not found".
+- El código actual no contiene /hydrants/map ni una protección explícita de
+  palabras reservadas en la ruta de detalle.
+- Flutter intenta el snapshot, pero no implementa todavía fallback paginado
+  para la respuesta 404 conocida.
+- El mapa actual renderiza el catálogo completo desde memoria, sin consulta
+  espacial, paginación, clustering ni reconciliación autoritativa por región.
+- El error Dio con statusCode ausente todavía requiere clasificación precisa
+  (timeout, socket, cancelación, parseo o procesamiento local).
+
+VERIFICACIONES
+1. Comparar ramas, commits, rutas, servicios, migraciones y pruebas.
+2. Confirmar montaje /api/v1, orden del router, entrypoint y scripts de build.
+3. Compilar la API y comprobar las rutas dentro de dist.
+4. Probar resolución estática de sync y map contra la ruta de detalle.
+5. Clasificar errores Dio sin registrar tokens, hosts internos ni PII.
+
+CAMBIOS DE API
+- Registrar /hydrants/sync y /hydrants/map antes de /hydrants y
+  /hydrants/:accountNumber.
+- Rechazar palabras reservadas en el parámetro de detalle como defensa adicional.
+- Mantener snapshot compacto, autenticado, con ETag/If-None-Match y 304.
+- Implementar endpoint espacial por radio (2 km por defecto) o bounding box,
+  parámetros mutuamente excluyentes, cursor opaco y límites de página.
+- Excluir inactivos y coordenadas inválidas.
+- Instrumentar duración SQL/API, filas, bytes, paginación y coincidencia ETag.
+- Exponer capacidades sync/map en el endpoint seguro de versión existente.
+- Añadir pruebas unitarias e integración y comprobar el código compilado.
+
+CAMBIOS DE FLUTTER
+- Intentar snapshot; aceptar 200 y 304.
+- Ante el 404 conocido de ruta ausente/conflicto con detalle, usar
+  /hydrants?scope=all paginado sin vaciar la caché previa.
+- No activar fallback para 401, 403, 409, 429, 500, timeout o JSON inválido.
+- Recordar temporalmente la capacidad del endpoint para evitar intentos repetidos.
+- Mantener estados independientes para catálogo, personales, estadísticas y
+  checklist.
+- Clasificar DioExceptionType, socket, timeout, cancelación y respuesta inválida.
+- Mostrar caché espacial antes de red; consultar 2 km inicialmente.
+- Consultar límites visibles únicamente al tocar “Buscar en esta zona” o
+  “Actualizar zona”; aplicar debounce, generación de solicitud y paginación.
+- Reconciliar la región sin borrar borradores, fotos o inspecciones pendientes.
+- Añadir clustering compatible con flutter_map e indicadores no bloqueantes.
+
+MIGRACIONES E ÍNDICES
+- Inspeccionar rv.hydrant_assignments y el script 08 existente.
+- No ejecutar migraciones en producción.
+- Documentar índices candidatos y validación por plan de ejecución; crear scripts
+  idempotentes solo si la consulta medida los necesita.
+- El catálogo general y el mapa no deberán fallar por ausencia de asignaciones.
+
+ESTRATEGIA DE FALLBACK
+- Capacidad null: probar snapshot.
+- 200/304: capacidad true.
+- 404 conocido en /hydrants/sync: capacidad false durante la sesión y paginar
+  scope=all.
+- Nueva ejecución, intervalo o actualización manual: permitir reprobar.
+- Consolidar únicamente al completar; conservar snapshot anterior ante una página
+  fallida.
+
+ESTRATEGIA DE MAPA
+- Índice espacial local en memoria fuera de build.
+- Caché dentro de 2 km al abrir; red en segundo plano.
+- Bounding box para región visible, pageSize 100 y cursor estable.
+- Sin solicitudes durante el movimiento; camera idle/debounce solo habilita el
+  botón.
+- Conservar marcadores durante carga; diferencias por clave estable.
+- Actualización manual autoritativa retira de la vista registros remotos ausentes
+  solo cuando no tienen trabajo local pendiente.
+
+PRUEBAS
+- Flutter: format, analyze, test; snapshot 200/304/404, fallback, errores,
+  independencia de recursos, caché/mapa, región, debounce, cursor,
+  reconciliación, clustering y offline.
+- API: lint, type-check, unitarias, integración y build; orden de rutas, auth,
+  ETag/304, radio, bbox, validación, cursor, inactivos y detalle.
+- Buscar hydrants/sync y hydrants/map dentro de dist.
+- Medir únicamente valores obtenidos de ejecuciones reales; no inventar métricas.
+
+DESPLIEGUE (SOLO DOCUMENTACIÓN)
+respaldo -> migración autorizada -> git/commit verificado -> npm ci -> build ->
+verificación de dist -> reinicio del servicio -> health -> sync -> map -> logs.
+Incluir diagnóstico seguro de proceso, directorio, entrypoint, rama, commit,
+puerto y NSSM, sin ejecutar acciones productivas.
+
+ROLLBACK
+- Conservar el artefacto y commit productivos anteriores.
+- Si el nuevo proceso falla, restaurar el artefacto anterior y reiniciar el
+  servicio; no revertir datos destructivamente.
+- Las migraciones, si se requieren, tendrán rollback separado y explícito.
+- Flutter mantiene fallback paginado, por lo que puede operar temporalmente con
+  una API anterior.
+
+CRITERIOS DE ACEPTACIÓN
+- Sync/map nunca son resueltos por el handler de detalle.
+- Build y pruebas de API/Flutter pasan.
+- Flutter conserva caché y trabajo pendiente ante errores parciales.
+- Snapshot y fallback funcionan con clasificación HTTP correcta.
+- Mapa abre con caché, consulta 2 km/región progresivamente, pagina, agrupa y no
+  solicita durante cada movimiento.
+- Documentación de rendimiento y despliegue queda reproducible.
+- Git queda sin commits nuevos, push, PR ni merge realizados por esta tarea.
