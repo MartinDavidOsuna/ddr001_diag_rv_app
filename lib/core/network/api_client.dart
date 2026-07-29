@@ -83,8 +83,13 @@ class ApiClient {
                 .toList();
             debugPrint(
               '[API] ERROR statusCode=${error.response?.statusCode ?? '-'} '
+              'dioType=${error.type.name} '
+              'errorType=${error.error?.runtimeType ?? '-'} '
               'method=${error.requestOptions.method} '
               'path=${error.requestOptions.path} '
+              'elapsedMs=${_elapsed(error.requestOptions).inMilliseconds} '
+              'attempt=${error.requestOptions.extra['retryAttempt'] ?? 1} '
+              'message=${error.message ?? '-'} '
               'requestId=${problem['requestId'] ?? error.response?.headers.value('x-request-id') ?? '-'} '
               'problem.type=${problem['type'] ?? '-'} '
               'problem.title=${problem['title'] ?? '-'} '

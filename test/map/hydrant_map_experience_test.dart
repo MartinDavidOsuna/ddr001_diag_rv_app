@@ -1,6 +1,7 @@
 import 'package:ddr001diag/domain/models/app_models.dart';
 import 'package:ddr001diag/domain/enums/app_enums.dart';
 import 'package:ddr001diag/features/map/hydrant_map_marker_source.dart';
+import 'package:ddr001diag/features/map/hydrant_spatial_index.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -59,6 +60,36 @@ void main() {
     test('zoom buttons stay inside supported limits', () {
       expect(HydrantMapCameraPolicy.clampZoom(-10), 3);
       expect(HydrantMapCameraPolicy.clampZoom(30), 20);
+    });
+  });
+
+  group('HydrantSpatialIndex and clustering', () {
+    test('returns cached hydrants inside initial 2 km only', () {
+      const source = FlatHydrantMapMarkerSource();
+      final items = source.itemsFor([
+        _hydrant(id: 'near', latitude: 22.0005, longitude: -102),
+        _hydrant(id: 'far', latitude: 22.1, longitude: -102),
+      ]);
+
+      final nearby = HydrantSpatialIndex(
+        items,
+      ).withinRadius(items.first.position, 2);
+
+      expect(nearby.map((item) => item.id), ['near']);
+    });
+
+    test('clusters distant zoom and separates markers at close zoom', () {
+      const source = FlatHydrantMapMarkerSource();
+      final items = source.itemsFor([
+        _hydrant(id: 'one', latitude: 22, longitude: -102),
+        _hydrant(id: 'two', latitude: 22.0001, longitude: -102.0001),
+      ]);
+
+      expect(
+        HydrantMapClusterer.cluster(items, zoom: 10).single.items,
+        hasLength(2),
+      );
+      expect(HydrantMapClusterer.cluster(items, zoom: 17), hasLength(2));
     });
   });
 }

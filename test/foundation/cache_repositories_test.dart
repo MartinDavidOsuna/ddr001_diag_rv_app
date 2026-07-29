@@ -105,6 +105,132 @@ void main() {
     );
   });
 
+  test(
+    'snapshot de catálogo usa una solicitud y reutiliza ETag con 304',
+    () async {
+      var invocation = 0;
+      final adapter = FakeHttpAdapter((options) async {
+        invocation++;
+        if (invocation == 2) return ResponseBody.fromString('', 304);
+        return jsonResponse(
+          '{"items":[{"hydrant_id":"735d3d0e-78a3-4ca8-a34b-6c0513458d29","account_number":"CTA-SNAPSHOT"}],"total":1}',
+          200,
+          headers: {
+            'etag': ['"snapshot-v1"'],
+          },
+        );
+      });
+      final repository = HydrantRepository(
+        client: clientWith(adapter),
+        box: Hive.box<String>('local_hydrants_v1'),
+      );
+      final first = await repository.refreshCatalogSnapshot();
+      final second = await repository.refreshCatalogSnapshot();
+      expect(first.single.accountNumber, 'CTA-SNAPSHOT');
+      expect(second.single.accountNumber, 'CTA-SNAPSHOT');
+      expect(adapter.requests, hasLength(2));
+      expect(adapter.requests.first.path, endsWith('/hydrants/sync'));
+      expect(adapter.requests.last.headers['If-None-Match'], '"snapshot-v1"');
+    },
+  );
+
+  test('snapshot 404 activa fallback paginado una vez por sesión', () async {
+    final adapter = FakeHttpAdapter((options) async {
+      if (options.path.endsWith('/hydrants/sync')) {
+        return jsonResponse(
+          '{"title":"Not found","detail":"Hydrant not found."}',
+          404,
+        );
+      }
+      return jsonResponse(
+        '{"items":[{"hydrant_id":"735d3d0e-78a3-4ca8-a34b-6c0513458d29","account_number":"CTA-FALLBACK"}],"total":1}',
+        200,
+      );
+    });
+    final repository = HydrantRepository(
+      client: clientWith(adapter),
+      box: Hive.box<String>('local_hydrants_v1'),
+    );
+
+    final first = await repository.refreshCatalogSnapshot();
+    final second = await repository.refreshCatalogSnapshot();
+
+    expect(first.single.accountNumber, 'CTA-FALLBACK');
+    expect(second.single.accountNumber, 'CTA-FALLBACK');
+    expect(repository.syncEndpointSupported, isFalse);
+    expect(
+      adapter.requests.where(
+        (request) => request.path.endsWith('/hydrants/sync'),
+      ),
+      hasLength(1),
+    );
+    expect(
+      adapter.requests
+          .where((request) => request.path.endsWith('/hydrants'))
+          .every((request) => request.queryParameters['scope'] == 'all'),
+      isTrue,
+    );
+  });
+
+  for (final status in [401, 403, 500]) {
+    test('snapshot $status no activa fallback y conserva caché', () async {
+      final adapter = FakeHttpAdapter(
+        (_) async => jsonResponse('{"title":"Error"}', status),
+      );
+      final repository = HydrantRepository(
+        client: clientWith(adapter),
+        box: Hive.box<String>('local_hydrants_v1'),
+      );
+      await repository.box.put(
+        'cached',
+        jsonEncode(
+          CachedHydrant(
+            hydrantId: 'cached',
+            accountNumber: 'CTA-CACHE',
+            scope: 'all',
+            updatedAt: DateTime.utc(2026),
+          ).toJson(),
+        ),
+      );
+
+      await expectLater(
+        repository.refreshCatalogSnapshot(),
+        throwsA(isA<Object>()),
+      );
+      expect(repository.cached(scope: 'all').single.accountNumber, 'CTA-CACHE');
+      expect(adapter.requests, hasLength(status >= 500 ? 2 : 1));
+      expect(
+        adapter.requests.every(
+          (request) => request.path.endsWith('/hydrants/sync'),
+        ),
+        isTrue,
+      );
+    });
+  }
+
+  test('mapa envía radio de 2 km y conserva cursor', () async {
+    final adapter = FakeHttpAdapter(
+      (_) async => jsonResponse(
+        '{"items":[{"hydrantId":"735d3d0e-78a3-4ca8-a34b-6c0513458d29","accountNumber":"CTA-MAP","latitude":21.9,"longitude":-102.3}],"nextCursor":"next","hasMore":true,"generatedAt":"2026-07-28T12:00:00Z"}',
+        200,
+      ),
+    );
+    final repository = HydrantRepository(
+      client: clientWith(adapter),
+      box: Hive.box<String>('local_hydrants_v1'),
+    );
+
+    final page = await repository.fetchMapPage(
+      latitude: 21.9,
+      longitude: -102.3,
+    );
+
+    expect(page.items.single.accountNumber, 'CTA-MAP');
+    expect(page.nextCursor, 'next');
+    expect(adapter.requests.single.queryParameters['radiusKm'], 2);
+    expect(repository.cached(scope: 'all').single.accountNumber, 'CTA-MAP');
+  });
+
   test('alta manual conserva UUID, propietario y ámbito local', () async {
     final repository = HydrantRepository(
       client: clientWith(FakeHttpAdapter((_) async => jsonResponse('{}', 500))),

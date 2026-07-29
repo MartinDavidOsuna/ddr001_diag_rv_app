@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:go_router/go_router.dart';
@@ -9,8 +11,10 @@ import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
 import '../../domain/enums/app_enums.dart';
 import '../../domain/models/app_models.dart';
+import '../hydrants/data/hydrant_repository.dart';
 import '../hydrants/new_survey_route.dart';
 import 'hydrant_map_marker_source.dart';
+import 'hydrant_spatial_index.dart';
 import 'map_location_provider.dart';
 
 class MapPage extends StatefulWidget {
@@ -34,7 +38,16 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   final HydrantMapSelection _selection = HydrantMapSelection();
   late final AnimationController _cameraAnimation;
   bool _locating = false;
+  bool _loadingRegion = false;
+  bool _regionDirty = false;
+  bool _mapReady = false;
   LatLng? _currentLocation;
+  Timer? _cameraDebounce;
+  int _requestGeneration = 0;
+  int _catalogSignature = -1;
+  DateTime? _regionUpdatedAt;
+  String? _regionError;
+  final Map<String, HydrantMapItem> _visibleItems = {};
 
   @override
   void initState() {
@@ -43,11 +56,13 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 320),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadInitialRegion());
   }
 
   @override
   void dispose() {
     _cameraAnimation.dispose();
+    _cameraDebounce?.cancel();
     _mapController.dispose();
     super.dispose();
   }
@@ -55,7 +70,14 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final items = widget.markerSource.itemsFor(state.catalogHydrants);
+    _seedCachedItems(state);
+    final items = _visibleItems.values.toList(growable: false);
+    final clusters = HydrantMapClusterer.cluster(
+      items,
+      zoom: _mapReady
+          ? _mapController.camera.zoom
+          : HydrantMapCameraPolicy.initialZoom,
+    );
     final selected = _selection.selectedFrom(items);
     final withoutCoordinates = state.catalogHydrants.length - items.length;
 
@@ -85,108 +107,330 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
             ),
           ),
           Expanded(
-            child: items.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No hay hidrantes con coordenadas WGS84 válidas.',
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: FlutterMap(
+                    mapController: _mapController,
+                    options: MapOptions(
+                      initialCenter: _centerOf(items),
+                      initialZoom: HydrantMapCameraPolicy.initialZoom,
+                      minZoom: HydrantMapCameraPolicy.minimumZoom,
+                      maxZoom: HydrantMapCameraPolicy.maximumZoom,
+                      interactionOptions: const InteractionOptions(
+                        flags:
+                            InteractiveFlag.drag |
+                            InteractiveFlag.pinchZoom |
+                            InteractiveFlag.doubleTapZoom |
+                            InteractiveFlag.scrollWheelZoom,
+                      ),
+                      onTap: (_, _) => _clearSelection(),
+                      onMapReady: () => setState(() => _mapReady = true),
+                      onPositionChanged: (_, hasGesture) {
+                        if (hasGesture) _scheduleRegionSearch();
+                      },
                     ),
-                  )
-                : Stack(
                     children: [
-                      Positioned.fill(
-                        child: FlutterMap(
-                          mapController: _mapController,
-                          options: MapOptions(
-                            initialCenter: _centerOf(items),
-                            initialZoom: HydrantMapCameraPolicy.initialZoom,
-                            minZoom: HydrantMapCameraPolicy.minimumZoom,
-                            maxZoom: HydrantMapCameraPolicy.maximumZoom,
-                            interactionOptions: const InteractionOptions(
-                              flags:
-                                  InteractiveFlag.drag |
-                                  InteractiveFlag.pinchZoom |
-                                  InteractiveFlag.doubleTapZoom |
-                                  InteractiveFlag.scrollWheelZoom,
-                            ),
-                            onTap: (_, _) => _clearSelection(),
-                          ),
-                          children: [
-                            TileLayer(
-                              urlTemplate:
-                                  'https://{s}.basemaps.cartocdn.com/'
-                                  'light_all/{z}/{x}/{y}.png',
-                              subdomains: const ['a', 'b', 'c', 'd'],
-                              userAgentPackageName: 'com.aquafim.ddr001diag',
-                              maxNativeZoom: 20,
-                            ),
-                            MarkerLayer(
-                              markers: [
-                                for (final item in items)
-                                  Marker(
-                                    point: item.position,
-                                    width: 48,
-                                    height: 48,
-                                    child: _HydrantMarker(
-                                      item: item,
-                                      selected: item.id == selected?.id,
-                                      onTap: () => _selectHydrant(item),
+                      TileLayer(
+                        urlTemplate:
+                            'https://{s}.basemaps.cartocdn.com/'
+                            'light_all/{z}/{x}/{y}.png',
+                        subdomains: const ['a', 'b', 'c', 'd'],
+                        userAgentPackageName: 'com.aquafim.ddr001diag',
+                        maxNativeZoom: 20,
+                      ),
+                      MarkerLayer(
+                        markers: [
+                          for (final cluster in clusters)
+                            Marker(
+                              point: cluster.center,
+                              width: cluster.isCluster ? 54 : 48,
+                              height: cluster.isCluster ? 54 : 48,
+                              child: cluster.isCluster
+                                  ? _ClusterMarker(
+                                      count: cluster.items.length,
+                                      onTap: () => _animateCamera(
+                                        cluster.center,
+                                        HydrantMapCameraPolicy.clampZoom(
+                                          _mapController.camera.zoom + 2,
+                                        ),
+                                      ),
+                                    )
+                                  : _HydrantMarker(
+                                      item: cluster.items.single,
+                                      selected:
+                                          cluster.items.single.id ==
+                                          selected?.id,
+                                      onTap: () =>
+                                          _selectHydrant(cluster.items.single),
                                     ),
-                                  ),
-                                if (_currentLocation case final location?)
-                                  Marker(
-                                    point: location,
-                                    width: 34,
-                                    height: 34,
-                                    child: const _CurrentLocationMarker(),
-                                  ),
-                              ],
                             ),
-                            const RichAttributionWidget(
-                              attributions: [
-                                TextSourceAttribution(
-                                  '© OpenStreetMap contributors',
-                                ),
-                                TextSourceAttribution('© CARTO'),
-                              ],
+                          if (_currentLocation case final location?)
+                            Marker(
+                              point: location,
+                              width: 34,
+                              height: 34,
+                              child: const _CurrentLocationMarker(),
                             ),
-                          ],
-                        ),
+                        ],
                       ),
-                      Positioned(
-                        top: 12,
-                        right: 12,
-                        child: _ZoomControls(
-                          onZoomIn: () => _changeZoom(1),
-                          onZoomOut: () => _changeZoom(-1),
-                        ),
+                      const RichAttributionWidget(
+                        attributions: [
+                          TextSourceAttribution('© OpenStreetMap contributors'),
+                          TextSourceAttribution('© CARTO'),
+                        ],
                       ),
-                      Positioned(
-                        left: 12,
-                        bottom: selected == null ? 12 : 198,
-                        child: _MapActions(
-                          locating: _locating,
-                          onShowAll: () => _showAll(items),
-                          onMyLocation: _goToCurrentLocation,
-                        ),
-                      ),
-                      if (selected != null)
-                        Positioned(
-                          left: 12,
-                          right: 12,
-                          bottom: 12,
-                          child: _HydrantSheet(
-                            hydrant: selected.hydrant,
-                            hasMine: state.hydrants.any(
-                              (item) => item.id == selected.id,
-                            ),
-                          ),
-                        ),
                     ],
                   ),
+                ),
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: _ZoomControls(
+                    onZoomIn: () => _changeZoom(1),
+                    onZoomOut: () => _changeZoom(-1),
+                  ),
+                ),
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  right: 78,
+                  child: Column(
+                    children: [
+                      if (_loadingRegion)
+                        const LinearProgressIndicator(
+                          key: ValueKey('map-region-progress'),
+                        ),
+                      if (_regionDirty || _loadingRegion)
+                        FilledButton.icon(
+                          key: const ValueKey('map-search-region'),
+                          onPressed: _loadingRegion
+                              ? null
+                              : () => _loadVisibleRegion(force: false),
+                          icon: _loadingRegion
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.search),
+                          label: Text(
+                            _loadingRegion
+                                ? 'Cargando hidrantes cercanos…'
+                                : 'Buscar en esta zona',
+                          ),
+                        ),
+                      const SizedBox(height: 6),
+                      OutlinedButton.icon(
+                        key: const ValueKey('map-refresh-region'),
+                        onPressed: _loadingRegion
+                            ? null
+                            : () => _loadVisibleRegion(force: true),
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Actualizar zona'),
+                      ),
+                      if (_regionError != null)
+                        Material(
+                          color: Theme.of(context).colorScheme.errorContainer,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Text(_regionError!),
+                          ),
+                        )
+                      else if (_regionUpdatedAt != null)
+                        Text('Actualizado ${_relativeTime(_regionUpdatedAt!)}'),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  left: 12,
+                  bottom: selected == null ? 12 : 198,
+                  child: _MapActions(
+                    locating: _locating,
+                    onShowAll: () => _showAll(items),
+                    onMyLocation: _goToCurrentLocation,
+                  ),
+                ),
+                if (selected != null)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: 12,
+                    child: _HydrantSheet(
+                      hydrant: selected.hydrant,
+                      hasMine: state.hydrants.any(
+                        (item) => item.id == selected.id,
+                      ),
+                    ),
+                  ),
+                if (items.isEmpty && !_loadingRegion)
+                  const Positioned(
+                    left: 24,
+                    right: 24,
+                    bottom: 94,
+                    child: Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text(
+                          'No hay hidrantes guardados en esta zona.',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
     );
+  }
+
+  void _seedCachedItems(AppState state) {
+    final signature = Object.hash(
+      state.catalogHydrants.length,
+      state.hydrantsLastUpdated,
+    );
+    if (_catalogSignature == signature) return;
+    _catalogSignature = signature;
+    final all = widget.markerSource.itemsFor(state.catalogHydrants);
+    if (_currentLocation == null) return;
+    final index = HydrantSpatialIndex(all);
+    final cached = index.withinRadius(_currentLocation!, 2);
+    for (final item in cached) {
+      _visibleItems[item.id] = item;
+    }
+  }
+
+  Future<void> _loadInitialRegion() async {
+    if (_locating || _loadingRegion) return;
+    setState(() => _locating = true);
+    try {
+      final location = await widget.locationProvider.currentLocation();
+      if (!mounted) return;
+      _currentLocation = location;
+      final state = context.read<AppState>();
+      final cached = HydrantSpatialIndex(
+        widget.markerSource.itemsFor(state.catalogHydrants),
+      ).withinRadius(location, 2);
+      setState(() {
+        _visibleItems
+          ..clear()
+          ..addEntries(cached.map((item) => MapEntry(item.id, item)));
+      });
+      if (_mapReady) {
+        await _animateCamera(location, HydrantMapCameraPolicy.initialZoom);
+      }
+      await _loadRadius(location);
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _regionError = error is MapLocationException
+              ? error.message
+              : 'No fue posible actualizar esta zona.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
+  }
+
+  Future<void> _loadRadius(LatLng center) async {
+    await _loadPages(
+      request: (cursor) =>
+          context.read<AppState>().hydrantRepository.fetchMapPage(
+            latitude: center.latitude,
+            longitude: center.longitude,
+            radiusKm: 2,
+            cursor: cursor,
+          ),
+      authoritativeBounds: null,
+    );
+  }
+
+  Future<void> _loadVisibleRegion({required bool force}) async {
+    if (_loadingRegion) return;
+    final bounds = _mapController.camera.visibleBounds;
+    await _loadPages(
+      request: (cursor) =>
+          context.read<AppState>().hydrantRepository.fetchMapPage(
+            bounds: HydrantMapBounds(
+              south: bounds.south,
+              west: bounds.west,
+              north: bounds.north,
+              east: bounds.east,
+            ),
+            cursor: cursor,
+          ),
+      authoritativeBounds: bounds,
+    );
+  }
+
+  Future<void> _loadPages({
+    required Future<HydrantMapPage> Function(String? cursor) request,
+    required LatLngBounds? authoritativeBounds,
+  }) async {
+    final generation = ++_requestGeneration;
+    setState(() {
+      _loadingRegion = true;
+      _regionError = null;
+    });
+    final remoteIds = <String>{};
+    String? cursor;
+    try {
+      do {
+        final page = await request(cursor);
+        if (!mounted || generation != _requestGeneration) return;
+        final incoming = widget.markerSource.itemsFor(
+          page.items.map((item) => item.toAppModel()),
+        );
+        remoteIds.addAll(incoming.map((item) => item.id));
+        setState(() {
+          for (final item in incoming) {
+            _visibleItems[item.id] = item;
+          }
+        });
+        cursor = page.hasMore ? page.nextCursor : null;
+        _regionUpdatedAt = page.generatedAt;
+      } while (cursor != null);
+      if (authoritativeBounds != null) {
+        final state = context.read<AppState>();
+        final pendingIds = {
+          for (final item in state.catalogHydrants)
+            if (item.syncStatus != SyncStatus.synced) item.id,
+        };
+        _visibleItems.removeWhere(
+          (id, item) =>
+              authoritativeBounds.contains(item.position) &&
+              !remoteIds.contains(id) &&
+              !pendingIds.contains(id),
+        );
+      }
+      if (mounted) setState(() => _regionDirty = false);
+    } on Object {
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _regionError = 'No fue posible actualizar esta zona.');
+      }
+    } finally {
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _loadingRegion = false);
+      }
+    }
+  }
+
+  void _scheduleRegionSearch() {
+    _cameraDebounce?.cancel();
+    _cameraDebounce = Timer(const Duration(milliseconds: 550), () {
+      if (mounted) setState(() => _regionDirty = true);
+    });
+  }
+
+  static String _relativeTime(DateTime value) {
+    final elapsed = DateTime.now().difference(value.toLocal());
+    if (elapsed.inMinutes < 1) return 'hace unos segundos';
+    return 'hace ${elapsed.inMinutes} min';
   }
 
   void _clearSelection() {
@@ -224,6 +468,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   }
 
   void _showAll(List<HydrantMapItem> items) {
+    if (items.isEmpty) return;
     if (items.length == 1) {
       _animateCamera(items.single.position, 16);
       return;
@@ -326,6 +571,40 @@ class _HydrantMarker extends StatelessWidget {
           Shadow(color: Colors.white, blurRadius: 3),
           Shadow(color: Colors.black38, blurRadius: 5),
         ],
+      ),
+    ),
+  );
+}
+
+class _ClusterMarker extends StatelessWidget {
+  const _ClusterMarker({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: '$count hidrantes agrupados',
+    button: true,
+    child: InkWell(
+      onTap: onTap,
+      customBorder: const CircleBorder(),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primary,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 3),
+          boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 5)],
+        ),
+        child: Center(
+          child: Text(
+            '$count',
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
       ),
     ),
   );
