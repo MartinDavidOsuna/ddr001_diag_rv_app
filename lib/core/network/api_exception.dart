@@ -4,6 +4,7 @@ enum ApiErrorKind {
   offline,
   timeout,
   sessionExpired,
+  authenticationRequired,
   invalidData,
   serverUnavailable,
   validation,
@@ -59,9 +60,17 @@ class ApiException implements Exception {
       );
     }
     if (status == 401 || status == 403) {
+      final refreshRequest =
+          error.requestOptions.path == '/field-sessions/refresh';
       return ApiException(
-        ApiErrorKind.sessionExpired,
-        status == 401 ? 'Tu sesión expiró.' : 'No tienes permiso.',
+        refreshRequest
+            ? ApiErrorKind.authenticationRequired
+            : ApiErrorKind.sessionExpired,
+        status == 401
+            ? (refreshRequest
+                  ? 'El reporte está guardado de forma segura. Inicia sesión nuevamente para continuar el envío.'
+                  : 'Tu sesión expiró.')
+            : 'No tienes permiso.',
         statusCode: status,
         requestId: requestId,
       );

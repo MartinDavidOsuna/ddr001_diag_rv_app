@@ -431,8 +431,16 @@ class InspectionSyncCoordinator {
     );
     return _save(
       draft.copyWith(
-        localStatus: RvLocalStatus.syncError,
-        lastSyncError: error.message,
+        localStatus:
+            error.kind == ApiErrorKind.authenticationRequired ||
+                error.kind == ApiErrorKind.sessionExpired
+            ? RvLocalStatus.requiresAuthentication
+            : RvLocalStatus.syncError,
+        lastSyncError:
+            error.kind == ApiErrorKind.authenticationRequired ||
+                error.kind == ApiErrorKind.sessionExpired
+            ? 'El reporte está guardado de forma segura. Inicia sesión nuevamente para continuar el envío.'
+            : error.message,
         retryCount: retry,
         lastAttemptAt: failedAt,
         updatedAt: failedAt,

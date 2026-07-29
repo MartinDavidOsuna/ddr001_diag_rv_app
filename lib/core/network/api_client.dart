@@ -199,8 +199,26 @@ class ApiClient {
         ),
       );
       handler.resolve(response);
+    } on DioException catch (refreshError) {
+      // A transport or server failure while rotating credentials is not a
+      // revocation. Keep the persisted session so offline work and a later
+      // retry can continue. Only an explicit authentication rejection is
+      // definitive.
+      if (_isDefinitiveRefreshRejection(refreshError)) {
+        await _storage.clear();
+      }
+      if (kDebugMode) {
+        debugPrint(
+          '[AUTH] refresh finalizado result='
+          '${_isDefinitiveRefreshRejection(refreshError) ? 'revoked' : 'deferred'} '
+          'status=${refreshError.response?.statusCode ?? '-'} '
+          'dioType=${refreshError.type.name}',
+        );
+      }
+      handler.next(refreshError);
     } on Object {
-      await _storage.clear();
+      // An unexpected/invalid refresh response must not erase the last
+      // recoverable session. It can be retried after the service recovers.
       handler.next(error);
     }
   }
@@ -232,6 +250,7 @@ class ApiClient {
     final current = await _storage.read();
     if (current == null) return null;
     try {
+      if (kDebugMode) debugPrint('[AUTH] refresh iniciado');
       final response = await dio.post<Map<String, dynamic>>(
         '/field-sessions/refresh',
         data: {'refreshToken': current.refreshToken},
@@ -248,12 +267,18 @@ class ApiClient {
         refreshToken: refresh,
       );
       await _storage.save(rotated);
+      if (kDebugMode) debugPrint('[AUTH] refresh finalizado result=success');
       return rotated;
-    } on Object {
-      await _storage.clear();
+    } on DioException catch (error) {
+      if (_isDefinitiveRefreshRejection(error)) {
+        await _storage.clear();
+      }
       rethrow;
     }
   }
+
+  static bool _isDefinitiveRefreshRejection(DioException error) =>
+      error.response?.statusCode == 401 || error.response?.statusCode == 403;
 
   Never rethrowAsApi(Object error) {
     if (error is ApiException) throw error;

@@ -9,9 +9,13 @@ class MemorySessionStorage implements SessionStorage {
   FieldSession? value;
   String? installation;
   int saveCount = 0;
+  int clearCalls = 0;
 
   @override
-  Future<void> clear() async => value = null;
+  Future<void> clear() async {
+    clearCalls++;
+    value = null;
+  }
 
   @override
   Future<String> installationId() async => installation ??= const Uuid().v4();

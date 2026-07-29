@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../../core/network/api_exception.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
 import '../../domain/enums/app_enums.dart';
@@ -409,9 +410,22 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
         );
       }
       if (mounted) setState(() => _regionDirty = false);
-    } on Object {
+    } on Object catch (error) {
       if (mounted && generation == _requestGeneration) {
-        setState(() => _regionError = 'No fue posible actualizar esta zona.');
+        setState(
+          () => _regionError = error is ApiException
+              ? switch (error.kind) {
+                  ApiErrorKind.authenticationRequired ||
+                  ApiErrorKind.sessionExpired =>
+                    'El acceso debe restaurarse para actualizar esta zona.',
+                  ApiErrorKind.timeout =>
+                    'El servidor tardó demasiado en actualizar esta zona.',
+                  ApiErrorKind.serverUnavailable || ApiErrorKind.offline =>
+                    'Sin conexión con el servidor. Se conservan los datos guardados.',
+                  _ => 'No fue posible actualizar esta zona.',
+                }
+              : 'No fue posible actualizar esta zona.',
+        );
       }
     } finally {
       if (mounted && generation == _requestGeneration) {

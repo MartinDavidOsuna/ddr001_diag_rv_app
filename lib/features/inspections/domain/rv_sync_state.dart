@@ -11,6 +11,7 @@ enum RvLocalStatus {
   submitPending,
   submitting,
   submitted,
+  requiresAuthentication,
   syncError,
   cancelled,
 }

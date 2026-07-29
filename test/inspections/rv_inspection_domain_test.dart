@@ -131,6 +131,32 @@ void main() {
         isTrue,
       );
     });
+    test('401 conserva reporte y evidencia como requiere autenticación', () {
+      final local =
+          draft(
+            answers: {'q1': answer('q1', true, type: 'boolean')},
+            photos: {
+              'overview': [
+                RvPhotoReference(
+                  photoId: 'photo-local-1',
+                  slotCode: 'overview',
+                  status: RvPhotoUploadStatus.pending,
+                ),
+              ],
+            },
+          ).copyWith(
+            localStatus: RvLocalStatus.requiresAuthentication,
+            lastSyncError:
+                'El reporte está guardado de forma segura. Inicia sesión nuevamente para continuar el envío.',
+          );
+
+      final reopened = RvDraft.fromJson(local.toJson());
+      expect(reopened.clientInspectionId, 'client-1');
+      expect(reopened.localStatus, RvLocalStatus.requiresAuthentication);
+      expect(reopened.answers['q1']?.value, true);
+      expect(reopened.photosFor('overview').single.photoId, 'photo-local-1');
+      expect(reopened.isReadOnly, isFalse);
+    });
   });
 
   group('reglas y validación', () {

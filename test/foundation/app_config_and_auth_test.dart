@@ -16,19 +16,60 @@ void main() {
   test('AppConfig lee entorno y URL explícitos', () {
     final config = AppConfig.fromEnvironment(
       environmentOverride: 'development',
-      apiBaseUrlOverride: 'http://192.168.1.111:3000/api/v1',
+      apiBaseUrlOverride: 'https://example.invalid/api/v1',
     );
     expect(config.isDevelopment, isTrue);
     expect(config.apiBaseUrl.path, '/api/v1');
   });
 
-  test('AppConfig usa el endpoint predeterminado de producción en release', () {
-    final config = AppConfig.fromEnvironment(
-      environmentOverride: 'production',
-      apiBaseUrlOverride: '',
-      debugMode: false,
+  test('AppConfig rechaza URL ausente en cualquier ambiente', () {
+    expect(
+      () => AppConfig.fromEnvironment(
+        environmentOverride: 'production',
+        apiBaseUrlOverride: '',
+        debugMode: false,
+      ),
+      throwsStateError,
     );
-    expect(config.apiBaseUrl.toString(), AppConfig.productionBaseUrl);
+  });
+
+  test('AppConfig rechaza URL inválida', () {
+    expect(
+      () => AppConfig.fromEnvironment(
+        environmentOverride: 'test',
+        apiBaseUrlOverride: 'no-es-url',
+      ),
+      throwsStateError,
+    );
+  });
+
+  test('AppConfig rechaza ambiente desconocido', () {
+    expect(
+      () => AppConfig.fromEnvironment(
+        environmentOverride: 'local',
+        apiBaseUrlOverride: 'https://example.invalid/api/v1',
+      ),
+      throwsStateError,
+    );
+  });
+
+  test('AppConfig rechaza HTTP fuera de la excepción autorizada', () {
+    expect(
+      () => AppConfig.fromEnvironment(
+        environmentOverride: 'development',
+        apiBaseUrlOverride: 'http://example.invalid/api/v1',
+      ),
+      throwsStateError,
+    );
+  });
+
+  test('AppConfig acepta configuración HTTPS inyectada para pruebas', () {
+    final config = AppConfig.fromEnvironment(
+      environmentOverride: 'test',
+      apiBaseUrlOverride: 'https://example.invalid/api/v1',
+    );
+    expect(config.environment, 'test');
+    expect(config.apiBaseUrl.host, 'example.invalid');
   });
 
   test('AppConfig permite únicamente el endpoint HTTP de producción', () {
@@ -361,6 +402,67 @@ void main() {
     expect(refreshCalls, 1);
     expect(results.every((e) => e?.accessToken == 'new-access'), isTrue);
     expect(storage.value?.refreshToken, 'new-refresh');
+  });
+
+  test('fallo de red durante refresh conserva la sesión persistida', () async {
+    final storage = MemorySessionStorage()
+      ..value = const FieldSession(
+        sessionId: 'session',
+        userId: 'user',
+        accessToken: 'expired-access',
+        refreshToken: 'valid-refresh',
+        installationId: 'installation',
+      );
+    final adapter = FakeHttpAdapter(
+      (options) async => throw DioException(
+        requestOptions: options,
+        type: DioExceptionType.connectionError,
+        error: 'offline',
+      ),
+    );
+    final dio = Dio()..httpClientAdapter = adapter;
+    final client = ApiClient(
+      config: AppConfig.fromEnvironment(
+        environmentOverride: 'test',
+        apiBaseUrlOverride: 'https://example.test/api/v1',
+      ),
+      sessionStorage: storage,
+      dio: dio,
+    );
+
+    await expectLater(client.refreshSession(), throwsA(isA<DioException>()));
+    expect(storage.value?.refreshToken, 'valid-refresh');
+    expect(storage.clearCalls, 0);
+  });
+
+  test('rechazo 401 del refresh elimina solo las credenciales', () async {
+    final storage = MemorySessionStorage()
+      ..value = const FieldSession(
+        sessionId: 'session',
+        userId: 'user',
+        accessToken: 'expired-access',
+        refreshToken: 'revoked-refresh',
+        installationId: 'installation',
+      );
+    final adapter = FakeHttpAdapter(
+      (options) async => jsonResponse(
+        '{"title":"Unauthorized","detail":"Session revoked."}',
+        401,
+      ),
+    );
+    final dio = Dio()..httpClientAdapter = adapter;
+    final client = ApiClient(
+      config: AppConfig.fromEnvironment(
+        environmentOverride: 'test',
+        apiBaseUrlOverride: 'https://example.test/api/v1',
+      ),
+      sessionStorage: storage,
+      dio: dio,
+    );
+
+    await expectLater(client.refreshSession(), throwsA(isA<DioException>()));
+    expect(storage.value, isNull);
+    expect(storage.clearCalls, 1);
   });
 
   test(

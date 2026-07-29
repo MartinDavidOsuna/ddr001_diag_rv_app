@@ -222,6 +222,7 @@ class _Status extends StatelessWidget {
     RvLocalStatus.readyToSubmit => 'Lista para enviar',
     RvLocalStatus.submitting => 'Enviando',
     RvLocalStatus.submitted => 'Enviada',
+    RvLocalStatus.requiresAuthentication => 'Requiere autenticación',
     RvLocalStatus.cancelled => 'Cancelada',
     RvLocalStatus.syncError => 'Error de sincronización',
     _ => 'Pendiente de sincronización',

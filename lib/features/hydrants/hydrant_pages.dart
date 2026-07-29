@@ -62,7 +62,8 @@ class _HydrantsPageState extends State<HydrantsPage> {
         result != null &&
         result.newCount + result.updatedCount + result.removedCount > 0;
     final message = failed
-        ? 'No fue posible actualizar asignaciones.'
+        ? 'No se pudieron actualizar las asignaciones. '
+              'Verifica tu conexión e intenta nuevamente.'
         : result?.newCount == 2
         ? '2 asignaciones nuevas.'
         : changed
@@ -192,12 +193,28 @@ class _HydrantsPageState extends State<HydrantsPage> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '${items.length} resultados',
-                style: const TextStyle(color: AppColors.muted, fontSize: 12),
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${items.length} resultados',
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                Text(
+                  state.assignmentSyncing
+                      ? 'Actualizando'
+                      : state.assignmentError != null
+                      ? 'Error de sincronización · datos guardados'
+                      : state.hydrantsLastUpdated == null
+                      ? 'Primera descarga pendiente'
+                      : 'Actualizado ${state.hydrantsLastUpdated!.toLocal()}',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 11),
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -206,7 +223,11 @@ class _HydrantsPageState extends State<HydrantsPage> {
                     child: Padding(
                       padding: const EdgeInsets.all(24),
                       child: Text(
-                        _emptyMessage(state.hydrantListFilter),
+                        state.hydrantListFilter == HydrantListFilter.all &&
+                                state.hydrants.isEmpty
+                            ? 'No tienes hidrantes asignados.\n'
+                                  'Puedes consultar el catálogo general o sincronizar nuevamente.'
+                            : _emptyMessage(state.hydrantListFilter),
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: AppColors.muted),
                       ),

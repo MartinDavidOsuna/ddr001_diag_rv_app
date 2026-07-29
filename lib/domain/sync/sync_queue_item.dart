@@ -3,6 +3,7 @@ enum SyncQueueStatus {
   processing,
   synced,
   failedRetryable,
+  requiresAuthentication,
   failedPermanent,
 }
 
