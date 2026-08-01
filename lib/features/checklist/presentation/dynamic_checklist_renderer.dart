@@ -8,6 +8,7 @@ import '../../inspections/domain/parcel_valve_configuration.dart';
 import '../../inspections/presentation/rv_inspection_controller.dart';
 import '../../inspections/presentation/rv_review_navigation.dart';
 import '../../catalogs/dynamic_catalog_repository.dart';
+import '../../catalogs/pressure_range_selector.dart';
 import '../data/checklist_models.dart';
 
 class DynamicChecklistRenderer extends StatefulWidget {
@@ -840,6 +841,23 @@ class _Question extends StatelessWidget {
             'isPendingSync': value.status != CatalogSyncStatus.synced,
           },
         ),
+      );
+    }
+    const pressureRangeCodes = {
+      'sustaining_gauge_range',
+      'regulating_gauge_range',
+      'filter_gauge_before_range',
+      'filter_gauge_after_range',
+      'parcel_gauge_range',
+    };
+    if (catalogs != null && pressureRangeCodes.contains(item.code)) {
+      return PressureRangeSelector(
+        value: answer?.value is Map
+            ? Map<String, dynamic>.from(answer!.value! as Map)
+            : null,
+        enabled: !readOnly,
+        onChanged: (range) =>
+            unawaited(controller.answer(section, item, value: range)),
       );
     }
     return switch (item.type) {

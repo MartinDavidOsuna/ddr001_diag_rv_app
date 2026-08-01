@@ -314,6 +314,7 @@ class AppState extends ChangeNotifier {
     visualInspectionRepository.setAccessScope(scope);
     hydrantRepository.setAccessScope(scope);
     syncQueueRepository.setAccessScope(scope);
+    dynamicCatalogRepository?.setOwner(session.userId);
     _replaceHydrantsFromCache();
   }
 

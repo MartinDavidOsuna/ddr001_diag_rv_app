@@ -131,10 +131,86 @@ class DiameterOption {
   );
 }
 
+@immutable
+class PressureRangeOption {
+  const PressureRangeOption({
+    required this.localId,
+    required this.minimum,
+    required this.maximum,
+    required this.unit,
+    required this.status,
+    this.remoteId,
+    this.ownerUserId,
+    this.active = true,
+  });
+  final String localId, unit;
+  final String? remoteId, ownerUserId;
+  final double minimum, maximum;
+  final CatalogSyncStatus status;
+  final bool active;
+  String get display =>
+      '${formatPressureNumber(minimum)}–${formatPressureNumber(maximum)} $unit';
+  String get normalizedKey =>
+      '${minimum.toStringAsFixed(4)}|${maximum.toStringAsFixed(4)}|$unit';
+  Map<String, dynamic> toJson() => {
+    'localId': localId,
+    'remoteId': remoteId,
+    'minimum': minimum,
+    'maximum': maximum,
+    'unit': unit,
+    'displayName': display,
+    'status': status.name,
+    'ownerUserId': ownerUserId,
+    'active': active,
+  };
+  factory PressureRangeOption.fromJson(Map<String, dynamic> j) =>
+      PressureRangeOption(
+        localId: '${j['localId'] ?? j['clientId'] ?? j['id']}',
+        remoteId: j['remoteId']?.toString() ?? j['id']?.toString(),
+        minimum: (j['minimum'] as num).toDouble(),
+        maximum: (j['maximum'] as num).toDouble(),
+        unit: '${j['unit']}'.trim().toLowerCase(),
+        status: CatalogSyncStatus.values.byName(
+          j['status'] as String? ?? 'synced',
+        ),
+        ownerUserId: j['ownerUserId'] as String?,
+        active: j['active'] as bool? ?? j['isActive'] as bool? ?? true,
+      );
+}
+
+String formatPressureNumber(double value) => value
+    .toStringAsFixed(4)
+    .replaceFirst(RegExp(r'0+$'), '')
+    .replaceFirst(RegExp(r'\.$'), '')
+    .replaceAll('.', ',');
+
 class DynamicCatalogRepository extends ChangeNotifier {
   DynamicCatalogRepository({required this.client, required this.box});
   final ApiClient client;
   final Box<String> box;
+  String? activeOwnerId;
+  void setOwner(String? value) => activeOwnerId = value;
+  List<PressureRangeOption> get pressureRanges =>
+      box.values
+          .where((raw) => raw.contains('"kind":"pressureRange"'))
+          .map(
+            (raw) => PressureRangeOption.fromJson(
+              Map<String, dynamic>.from(jsonDecode(raw)['value'] as Map),
+            ),
+          )
+          .where(
+            (item) =>
+                item.active &&
+                (item.status == CatalogSyncStatus.synced ||
+                    item.ownerUserId == activeOwnerId),
+          )
+          .toList()
+        ..sort((a, b) {
+          final u = a.unit.compareTo(b.unit);
+          if (u != 0) return u;
+          final m = a.minimum.compareTo(b.minimum);
+          return m != 0 ? m : a.maximum.compareTo(b.maximum);
+        });
 
   List<BrandOption> brands(BrandElementType elementType) =>
       box.values
@@ -156,7 +232,10 @@ class DynamicCatalogRepository extends ChangeNotifier {
   }
 
   String? remoteIdFor(String localId) {
-    final raw = box.get('brand:$localId') ?? box.get('diameter:$localId');
+    final raw =
+        box.get('brand:$localId') ??
+        box.get('diameter:$localId') ??
+        box.get('pressureRange:$localId');
     if (raw == null) return null;
     final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
     final value = Map<String, dynamic>.from(decoded['value'] as Map);
@@ -230,7 +309,93 @@ class DynamicCatalogRepository extends ChangeNotifier {
     return item;
   }
 
+  Future<PressureRangeOption> createPressureRange(
+    double minimum,
+    double maximum,
+    String unit, {
+    required String ownerUserId,
+  }) async {
+    final normalizedUnit = unit.trim().toLowerCase();
+    if (!minimum.isFinite ||
+        !maximum.isFinite ||
+        minimum < 0 ||
+        maximum <= minimum) {
+      throw const FormatException(
+        'El valor máximo debe ser mayor que el mínimo.',
+      );
+    }
+    if (!const {'psi', 'bar'}.contains(normalizedUnit)) {
+      throw const FormatException('Selecciona una unidad.');
+    }
+    final min = double.parse(minimum.toStringAsFixed(4)),
+        max = double.parse(maximum.toStringAsFixed(4));
+    final key =
+        '${min.toStringAsFixed(4)}|${max.toStringAsFixed(4)}|$normalizedUnit';
+    final duplicate = pressureRanges
+        .where((x) => x.normalizedKey == key)
+        .firstOrNull;
+    if (duplicate != null) return duplicate;
+    final item = PressureRangeOption(
+      localId: const Uuid().v4(),
+      minimum: min,
+      maximum: max,
+      unit: normalizedUnit,
+      status: CatalogSyncStatus.pending,
+      ownerUserId: ownerUserId,
+    );
+    await _putPressureRange(item);
+    notifyListeners();
+    return item;
+  }
+
   Future<void> synchronizePending() async {
+    for (final item in pressureRanges.where(
+      (x) =>
+          x.status != CatalogSyncStatus.synced &&
+          x.ownerUserId == activeOwnerId,
+    )) {
+      try {
+        final response = await client.dio.post<Map<String, dynamic>>(
+          '/catalogs/pressure-ranges',
+          data: {
+            'clientId': item.localId,
+            'minimum': item.minimum,
+            'maximum': item.maximum,
+            'unit': item.unit,
+          },
+          options: Options(
+            headers: {'Idempotency-Key': 'pressure-range-${item.localId}'},
+          ),
+        );
+        final data = Map<String, dynamic>.from(
+          response.data?['item'] as Map? ?? const {},
+        );
+        await _putPressureRange(
+          PressureRangeOption(
+            localId: item.localId,
+            remoteId: '${response.data?['canonicalId'] ?? data['id']}',
+            minimum: (data['minimum'] as num?)?.toDouble() ?? item.minimum,
+            maximum: (data['maximum'] as num?)?.toDouble() ?? item.maximum,
+            unit: '${data['unit'] ?? item.unit}',
+            status: CatalogSyncStatus.synced,
+            active: data['isActive'] as bool? ?? true,
+          ),
+        );
+      } on Object {
+        await _putPressureRange(
+          PressureRangeOption(
+            localId: item.localId,
+            remoteId: item.remoteId,
+            minimum: item.minimum,
+            maximum: item.maximum,
+            unit: item.unit,
+            status: CatalogSyncStatus.error,
+            ownerUserId: item.ownerUserId,
+          ),
+        );
+      }
+    }
+    await _refreshPressureRanges();
     final allBrands = box.values
         .where((raw) => raw.contains('"kind":"brand"'))
         .map((raw) => BrandOption.fromJson(jsonDecode(raw)['value']));
@@ -319,6 +484,34 @@ class DynamicCatalogRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _refreshPressureRanges() async {
+    try {
+      final response = await client.dio.get<Map<String, dynamic>>(
+        '/catalogs/pressure-ranges',
+      );
+      for (final raw
+          in (response.data?['items'] as List? ?? const []).whereType<Map>()) {
+        final j = Map<String, dynamic>.from(raw), id = '${j['id']}';
+        final existing = pressureRanges
+            .where((x) => x.remoteId == id)
+            .firstOrNull;
+        await _putPressureRange(
+          PressureRangeOption(
+            localId: existing?.localId ?? '${j['clientId'] ?? id}',
+            remoteId: id,
+            minimum: (j['minimum'] as num).toDouble(),
+            maximum: (j['maximum'] as num).toDouble(),
+            unit: '${j['unit']}',
+            status: CatalogSyncStatus.synced,
+            active: j['isActive'] as bool? ?? true,
+          ),
+        );
+      }
+    } on Object {
+      /* preserve local catalog */
+    }
+  }
+
   Future<void> _refreshAllBrands() async {
     for (final elementType in BrandElementType.values) {
       try {
@@ -361,6 +554,10 @@ class DynamicCatalogRepository extends ChangeNotifier {
   Future<void> _putDiameter(DiameterOption value) => box.put(
     'diameter:${value.localId}',
     jsonEncode({'kind': 'diameter', 'value': value.toJson()}),
+  );
+  Future<void> _putPressureRange(PressureRangeOption value) => box.put(
+    'pressureRange:${value.localId}',
+    jsonEncode({'kind': 'pressureRange', 'value': value.toJson()}),
   );
 }
 
