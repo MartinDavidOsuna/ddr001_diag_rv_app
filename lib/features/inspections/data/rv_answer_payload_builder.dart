@@ -39,12 +39,27 @@ class RvAnswerPayloadBuilder {
             : null;
         final value = notApplicable
             ? null
+            : item.code == 'filter_element' && catalog != null
+            ? catalog['state']
             : _serializedValue(item.type, item.id, answer, catalog);
         final row = <String, dynamic>{
           'itemId': item.id,
           if (!notApplicable) 'value': value,
           'notApplicable': notApplicable,
         };
+        if (!notApplicable &&
+            item.code == 'filter_element' &&
+            catalog != null) {
+          row['value'] = catalog['state'];
+          row['filterElement'] = {
+            'state': catalog['state'],
+            'reason': catalog['state'] == 'undefined'
+                ? catalog['reason']
+                : null,
+          };
+          payload.add(row);
+          continue;
+        }
         if (!notApplicable && catalog != null) {
           if (item.code.contains('brand') && catalog['mode'] == 'illegible') {
             final evidence = draft

@@ -70,6 +70,28 @@ class RvValidator {
             }.contains(item.type))
           continue;
         final answer = draft.answers[item.id];
+        if (item.code == 'filter_element' &&
+            answer != null &&
+            !answer.notApplicable) {
+          final value = answer.value;
+          if (value is Map &&
+              value['state'] == 'undefined' &&
+              (value['reason']?.toString().trim().length ?? 0) < 10) {
+            issues.add(
+              RvValidationIssue(
+                code: 'filter_element_reason_missing',
+                message:
+                    'Explica por qué no puede determinarse si existe elemento filtrante.',
+                sectionId: section.id,
+                questionId: item.id,
+              ),
+            );
+            continue;
+          }
+          if (value is Map &&
+              const {'present', 'absent', 'undefined'}.contains(value['state']))
+            continue;
+        }
         if (item.required &&
             (answer == null || (!answer.notApplicable && _empty(answer)))) {
           issues.add(
@@ -301,6 +323,13 @@ class RvValidator {
   }
 
   bool _compare(Object? actual, String operator, Object? expected) {
+    if (actual is Map && actual['state'] != null) {
+      actual = actual['state'] == 'present'
+          ? true
+          : actual['state'] == 'absent'
+          ? false
+          : null;
+    }
     if (operator == 'in') {
       final list = expected is List ? expected : [expected];
       return actual is List ? actual.any(list.contains) : list.contains(actual);

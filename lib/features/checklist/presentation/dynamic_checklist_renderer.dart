@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../inspections/domain/rv_draft.dart';
 import '../../inspections/domain/parcel_valve_configuration.dart';
+import '../../inspections/domain/filter_element_selection.dart';
 import '../../inspections/presentation/rv_inspection_controller.dart';
 import '../../inspections/presentation/rv_review_navigation.dart';
 import '../../catalogs/dynamic_catalog_repository.dart';
@@ -815,6 +816,70 @@ class _Question extends StatelessWidget {
 
   Widget _field(BuildContext context, RvAnswer? answer, bool readOnly) {
     final catalogs = controller.catalogs;
+    if (item.code == 'filter_element') {
+      final selection = answer?.value == null
+          ? null
+          : FilterElementSelection.fromValue(answer!.value);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SegmentedButton<FilterElementState>(
+            segments: const [
+              ButtonSegment(
+                value: FilterElementState.present,
+                label: Text('Sí'),
+              ),
+              ButtonSegment(
+                value: FilterElementState.absent,
+                label: Text('No'),
+              ),
+              ButtonSegment(
+                value: FilterElementState.undetermined,
+                label: Text('Indefinido'),
+              ),
+            ],
+            selected: selection == null
+                ? <FilterElementState>{}
+                : {selection.state},
+            emptySelectionAllowed: true,
+            onSelectionChanged: readOnly
+                ? null
+                : (states) => unawaited(
+                    controller.answer(
+                      section,
+                      item,
+                      value: FilterElementSelection(states.first).toJson(),
+                    ),
+                  ),
+          ),
+          if (selection?.state == FilterElementState.undetermined)
+            TextFormField(
+              initialValue: selection?.undefinedReason,
+              enabled: !readOnly,
+              minLines: 2,
+              maxLines: 4,
+              maxLength: 500,
+              decoration: const InputDecoration(
+                labelText: 'Explica por qué no puede determinarse *',
+                helperText: 'Mínimo 10 caracteres',
+              ),
+              validator: (value) => (value?.trim().length ?? 0) < 10
+                  ? 'Escribe al menos 10 caracteres.'
+                  : null,
+              onChanged: (reason) => unawaited(
+                controller.answer(
+                  section,
+                  item,
+                  value: FilterElementSelection(
+                    FilterElementState.undetermined,
+                    undefinedReason: reason,
+                  ).toJson(),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
     if (catalogs != null && item.code.contains('brand')) {
       return _BrandField(
         repository: catalogs,
