@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -270,6 +272,14 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
       busy = false;
       message = result.lastSyncError;
     });
+    if (result.localStatus == RvLocalStatus.submitted ||
+        result.localStatus == RvLocalStatus.conflict) {
+      unawaited(state.synchronizeAssignments());
+    }
+    if (result.localStatus == RvLocalStatus.conflict) {
+      await RvReviewNavigation.showConflictAndReturnHome(context);
+      return;
+    }
     if (_submissionGate.consumeIfComplete(result)) {
       await RvReviewNavigation.showSubmissionSuccessAndReturnHome(context);
     }

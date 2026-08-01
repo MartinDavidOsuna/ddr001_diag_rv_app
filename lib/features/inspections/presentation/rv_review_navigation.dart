@@ -175,4 +175,30 @@ class RvReviewNavigation {
     hydrantsNavigatorKey.currentState?.popUntil((route) => route.isFirst);
     if (context.mounted) context.go('/home');
   }
+
+  static Future<void> showConflictAndReturnHome(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: const Text('Conflicto de revisión'),
+          content: const Text(
+            'Otro reporte se confirmó primero. Tu revisión, respuestas y '
+            'fotografías quedaron guardadas para su resolución.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Aceptar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted) return;
+    hydrantsNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+    if (context.mounted) context.go('/home');
+  }
 }
