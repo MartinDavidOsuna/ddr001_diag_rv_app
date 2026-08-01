@@ -153,6 +153,7 @@ class VisualComponentSpecificData {
     this.needleVisible,
     this.visibleRange,
     this.visibleUnit,
+    this.pressureRange,
     this.orientation,
     this.observedReading,
     this.readingUnit,
@@ -192,6 +193,7 @@ class VisualComponentSpecificData {
       protectionCondition,
       connectionThreadCondition,
       otherDescription;
+  final Map<String, dynamic>? pressureRange;
   final bool? identificationLegible,
       solenoidPresent,
       faceLegible,
@@ -206,6 +208,7 @@ class VisualComponentSpecificData {
     bool? faceLegible,
     String? visibleRange,
     String? visibleUnit,
+    Map<String, dynamic>? pressureRange,
     String? internalVisibility,
   }) => VisualComponentSpecificData(
     visibleType: visibleType,
@@ -228,6 +231,7 @@ class VisualComponentSpecificData {
     needleVisible: needleVisible,
     visibleRange: visibleRange ?? this.visibleRange,
     visibleUnit: visibleUnit ?? this.visibleUnit,
+    pressureRange: pressureRange ?? this.pressureRange,
     orientation: orientation,
     observedReading: observedReading,
     readingUnit: readingUnit,
@@ -264,6 +268,7 @@ class VisualComponentSpecificData {
     'needleVisible': needleVisible,
     'visibleRange': visibleRange,
     'visibleUnit': visibleUnit,
+    'pressureRange': pressureRange,
     'orientation': orientation,
     'observedReading': observedReading,
     'readingUnit': readingUnit,
@@ -301,6 +306,9 @@ class VisualComponentSpecificData {
         needleVisible: j['needleVisible'] as bool?,
         visibleRange: j['visibleRange'] as String?,
         visibleUnit: j['visibleUnit'] as String?,
+        pressureRange: j['pressureRange'] is Map
+            ? Map<String, dynamic>.from(j['pressureRange'] as Map)
+            : null,
         orientation: j['orientation'] as String?,
         observedReading: j['observedReading'] as String?,
         readingUnit: j['readingUnit'] as String?,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../catalogs/pressure_range_selector.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../domain/visual_component_models.dart';
@@ -424,24 +425,16 @@ class _VisualComponentsListStepPageState
                     );
                   },
           ),
-          TextFormField(
-            initialValue: value.specificData.visibleRange,
+          PressureRangeSelector(
+            value: value.specificData.pressureRange,
             enabled: !widget.readOnly,
-            decoration: const InputDecoration(labelText: 'Rango visible'),
-            onChanged: (text) => _updateDraft(
+            onChanged: (range) => _updateDraft(
               value.copyWith(
-                specificData: value.specificData.copyWith(visibleRange: text),
-                explicitlyConfirmed: false,
-              ),
-            ),
-          ),
-          TextFormField(
-            initialValue: value.specificData.visibleUnit,
-            enabled: !widget.readOnly,
-            decoration: const InputDecoration(labelText: 'Unidad visible'),
-            onChanged: (text) => _updateDraft(
-              value.copyWith(
-                specificData: value.specificData.copyWith(visibleUnit: text),
+                specificData: value.specificData.copyWith(
+                  pressureRange: range,
+                  visibleRange: range['displayName']?.toString(),
+                  visibleUnit: range['unit']?.toString(),
+                ),
                 explicitlyConfirmed: false,
               ),
             ),

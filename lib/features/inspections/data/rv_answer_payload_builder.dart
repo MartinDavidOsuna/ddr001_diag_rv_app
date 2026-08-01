@@ -57,6 +57,13 @@ class RvAnswerPayloadBuilder {
           }
           if (item.code.contains('brand')) row['brandId'] = remoteId;
           if (item.code.contains('diameter')) row['diameterId'] = remoteId;
+          if (item.code.contains('gauge_range')) {
+            row['pressureRangeId'] = remoteId;
+            row['pressureRangeMinimum'] = catalog['minimum'];
+            row['pressureRangeMaximum'] = catalog['maximum'];
+            row['pressureRangeUnit'] = catalog['unit'];
+            row['pressureRangeDisplay'] = catalog['displayValue'];
+          }
           row['catalogDisplayValue'] = catalog['displayValue']?.toString();
         }
         payload.add(row);
