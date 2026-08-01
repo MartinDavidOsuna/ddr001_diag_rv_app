@@ -7,6 +7,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../domain/media/inspection_photo.dart';
 import '../domain/rv_draft.dart';
 import '../domain/parcel_valve_configuration.dart';
+import '../domain/rv_versioning.dart';
 
 class RemoteInspection {
   const RemoteInspection({
@@ -37,6 +38,41 @@ class RemotePhoto {
 class InspectionRemoteRepository {
   InspectionRemoteRepository(this.client);
   final ApiClient client;
+
+  Future<RvVersionResult> createVersion(RvDraft draft) async {
+    final reportId = draft.visualReportId;
+    final baseVersionId = draft.baseVersionId ?? draft.currentVersionId;
+    final clientVersionId = draft.pendingVersionClientId;
+    if (reportId == null || baseVersionId == null || clientVersionId == null) {
+      throw const ApiException(
+        ApiErrorKind.invalidData,
+        'Faltan los identificadores de la versión base.',
+      );
+    }
+    try {
+      final response = await client.dio.post<Map<String, dynamic>>(
+        '/visual-reports/$reportId/versions',
+        data: {
+          'baseVersionId': baseVersionId,
+          'clientVersionId': clientVersionId,
+          'changeReason': 'Edición móvil sincronizada',
+          'snapshot': draft.toJson(),
+          'technicalContentChanged': draft.canEditTechnical,
+        },
+        options: Options(
+          headers: {'Idempotency-Key': 'version-$clientVersionId'},
+        ),
+      );
+      return RvVersionResult.fromJson(response.data ?? const {});
+    } on DioException catch (error) {
+      throw ApiException.fromDio(error);
+    } on FormatException {
+      throw const ApiException(
+        ApiErrorKind.invalidData,
+        'Respuesta de versión inválida.',
+      );
+    }
+  }
 
   Future<RemoteInspection> create(RvDraft draft) async {
     try {

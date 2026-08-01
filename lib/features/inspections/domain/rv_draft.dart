@@ -281,6 +281,16 @@ class RvDraft {
     this.serverInspectionId,
     this.officialInspectionId,
     this.conflictId,
+    this.visualReportId,
+    this.currentVersionId,
+    this.baseVersionId,
+    this.baseVersionNumber,
+    this.pendingVersionClientId,
+    this.editingMode = RvEditingMode.capture,
+    this.serverValidationStatus = 'not_validated',
+    this.hasPendingChanges = false,
+    this.versionConflictId,
+    this.proposedVersionId,
     this.lastStatusChangedAt,
     this.localStatus = RvLocalStatus.pendingCreate,
     this.remoteStatus = 'not_created',
@@ -313,8 +323,18 @@ class RvDraft {
   final String? serverInspectionId,
       officialInspectionId,
       conflictId,
+      visualReportId,
+      currentVersionId,
+      baseVersionId,
+      pendingVersionClientId,
+      serverValidationStatus,
+      versionConflictId,
+      proposedVersionId,
       lastSyncError;
   final int checklistVersion, retryCount, activeFormStep;
+  final int? baseVersionNumber;
+  final RvEditingMode editingMode;
+  final bool hasPendingChanges;
   final Map<String, dynamic> checklistSnapshot;
   final DateTime createdAt, updatedAt;
   final DateTime? lastAttemptAt, nextRetryAt, lastStatusChangedAt;
@@ -339,7 +359,15 @@ class RvDraft {
   bool get isReadOnly =>
       localStatus == RvLocalStatus.submitted ||
       localStatus == RvLocalStatus.conflict ||
+      localStatus == RvLocalStatus.versionConflict ||
+      editingMode == RvEditingMode.readOnly ||
       localStatus == RvLocalStatus.cancelled;
+  bool get canEditTechnical =>
+      !isReadOnly &&
+      editingMode != RvEditingMode.validatedComplements &&
+      serverValidationStatus != 'validated';
+  bool get canAddComplements =>
+      !isReadOnly && editingMode != RvEditingMode.readOnly;
   int get photoCount =>
       photos.values.fold(0, (sum, values) => sum + values.length);
   List<RvPhotoReference> photosFor(String slot) =>
@@ -356,6 +384,16 @@ class RvDraft {
     String? serverInspectionId,
     String? officialInspectionId,
     String? conflictId,
+    String? visualReportId,
+    String? currentVersionId,
+    String? baseVersionId,
+    int? baseVersionNumber,
+    String? pendingVersionClientId,
+    RvEditingMode? editingMode,
+    String? serverValidationStatus,
+    bool? hasPendingChanges,
+    String? versionConflictId,
+    String? proposedVersionId,
     DateTime? lastStatusChangedAt,
     RvLocalStatus? localStatus,
     String? remoteStatus,
@@ -389,6 +427,18 @@ class RvDraft {
     serverInspectionId: serverInspectionId ?? this.serverInspectionId,
     officialInspectionId: officialInspectionId ?? this.officialInspectionId,
     conflictId: conflictId ?? this.conflictId,
+    visualReportId: visualReportId ?? this.visualReportId,
+    currentVersionId: currentVersionId ?? this.currentVersionId,
+    baseVersionId: baseVersionId ?? this.baseVersionId,
+    baseVersionNumber: baseVersionNumber ?? this.baseVersionNumber,
+    pendingVersionClientId:
+        pendingVersionClientId ?? this.pendingVersionClientId,
+    editingMode: editingMode ?? this.editingMode,
+    serverValidationStatus:
+        serverValidationStatus ?? this.serverValidationStatus,
+    hasPendingChanges: hasPendingChanges ?? this.hasPendingChanges,
+    versionConflictId: versionConflictId ?? this.versionConflictId,
+    proposedVersionId: proposedVersionId ?? this.proposedVersionId,
     lastStatusChangedAt: lastStatusChangedAt ?? this.lastStatusChangedAt,
     hydrantId: hydrantId,
     accountNumber: accountNumber,
@@ -435,6 +485,16 @@ class RvDraft {
     'serverInspectionId': serverInspectionId,
     'officialInspectionId': officialInspectionId,
     'conflictId': conflictId,
+    'visualReportId': visualReportId,
+    'currentVersionId': currentVersionId,
+    'baseVersionId': baseVersionId,
+    'baseVersionNumber': baseVersionNumber,
+    'pendingVersionClientId': pendingVersionClientId,
+    'editingMode': editingMode.name,
+    'serverValidationStatus': serverValidationStatus,
+    'hasPendingChanges': hasPendingChanges,
+    'versionConflictId': versionConflictId,
+    'proposedVersionId': proposedVersionId,
     'lastStatusChangedAt': lastStatusChangedAt?.toUtc().toIso8601String(),
     'hydrantId': hydrantId,
     'accountNumber': accountNumber,
@@ -476,6 +536,21 @@ class RvDraft {
     serverInspectionId: json['serverInspectionId'] as String?,
     officialInspectionId: json['officialInspectionId'] as String?,
     conflictId: json['conflictId'] as String?,
+    visualReportId: json['visualReportId'] as String?,
+    currentVersionId: json['currentVersionId'] as String?,
+    baseVersionId: json['baseVersionId'] as String?,
+    baseVersionNumber: json['baseVersionNumber'] as int?,
+    pendingVersionClientId: json['pendingVersionClientId'] as String?,
+    editingMode: _enum(
+      RvEditingMode.values,
+      json['editingMode'],
+      RvEditingMode.capture,
+    ),
+    serverValidationStatus:
+        json['serverValidationStatus'] as String? ?? 'not_validated',
+    hasPendingChanges: json['hasPendingChanges'] as bool? ?? false,
+    versionConflictId: json['versionConflictId'] as String?,
+    proposedVersionId: json['proposedVersionId'] as String?,
     lastStatusChangedAt: DateTime.tryParse(
       json['lastStatusChangedAt'] as String? ?? '',
     )?.toUtc(),

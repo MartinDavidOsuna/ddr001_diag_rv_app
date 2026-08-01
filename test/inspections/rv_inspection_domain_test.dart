@@ -102,6 +102,44 @@ void main() {
     test('conserva clientInspectionId en serialización', () {
       expect(RvDraft.fromJson(draft().toJson()).clientInspectionId, 'client-1');
     });
+    test('migra borrador legacy con defaults seguros de versión', () {
+      final json = draft().toJson()
+        ..remove('editingMode')
+        ..remove('hasPendingChanges')
+        ..remove('serverValidationStatus');
+      final restored = RvDraft.fromJson(json);
+      expect(restored.editingMode, RvEditingMode.capture);
+      expect(restored.hasPendingChanges, isFalse);
+      expect(restored.canEditTechnical, isTrue);
+    });
+    test('persiste base y conflicto de edición sin perder evidencia', () {
+      final value = draft(answers: {'q1': answer('q1', true, type: 'boolean')})
+          .copyWith(
+            visualReportId: 'report-1',
+            currentVersionId: 'version-2',
+            baseVersionId: 'version-1',
+            baseVersionNumber: 1,
+            pendingVersionClientId: 'client-version-1',
+            hasPendingChanges: true,
+            localStatus: RvLocalStatus.versionConflict,
+            versionConflictId: 'conflict-1',
+            proposedVersionId: 'version-3',
+          );
+      final restored = RvDraft.fromJson(value.toJson());
+      expect(restored.baseVersionId, 'version-1');
+      expect(restored.versionConflictId, 'conflict-1');
+      expect(restored.answers['q1']?.value, true);
+      expect(restored.hasPendingChanges, isTrue);
+      expect(restored.isReadOnly, isTrue);
+    });
+    test('validación bloquea técnica y permite complementos', () {
+      final validated = draft().copyWith(
+        editingMode: RvEditingMode.validatedComplements,
+        serverValidationStatus: 'validated',
+      );
+      expect(validated.canEditTechnical, isFalse);
+      expect(validated.canAddComplements, isTrue);
+    });
     test('conserva snapshot y versión de checklist', () {
       final restored = RvDraft.fromJson(draft().toJson());
       expect(restored.checklistVersion, 3);

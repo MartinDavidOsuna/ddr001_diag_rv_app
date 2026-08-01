@@ -12,10 +12,15 @@ enum RvLocalStatus {
   submitting,
   submitted,
   conflict,
+  pendingVersion,
+  syncingVersion,
+  versionConflict,
   requiresAuthentication,
   syncError,
   cancelled,
 }
+
+enum RvEditingMode { capture, technical, validatedComplements, readOnly }
 
 enum RvPartStatus { notCaptured, pending, syncing, synced, error }
 
