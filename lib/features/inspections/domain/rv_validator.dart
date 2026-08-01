@@ -96,8 +96,12 @@ class RvValidator {
             (answer == null || (!answer.notApplicable && _empty(answer)))) {
           issues.add(
             RvValidationIssue(
-              code: 'required_answer_missing',
-              message: 'Falta responder ${item.label}.',
+              code: item.code.endsWith('_pilot_connected')
+                  ? 'pilot_connection_missing'
+                  : 'required_answer_missing',
+              message: item.code.endsWith('_pilot_connected')
+                  ? 'Falta indicar si el piloto está conectado.'
+                  : 'Falta responder ${item.label}.',
               sectionId: section.id,
               questionId: item.id,
             ),
@@ -251,6 +255,18 @@ class RvValidator {
       }
       if (valve.hasPilot && !_catalogSelectionValid(valve.pilotBrand)) {
         missing('pilotBrand', 'marca del piloto');
+      }
+      if (valve.hasPilot && valve.pilotConnected == null) {
+        issues.add(
+          RvValidationIssue(
+            code: 'pilot_connection_missing',
+            message:
+                'Falta indicar si el piloto de la válvula ${valve.index} está conectado.',
+            sectionId: section.id,
+            subItemId: subItem,
+            fieldId: 'pilotConnected',
+          ),
+        );
       }
       if (valve.hasPressureGauge &&
           !_catalogSelectionValid(valve.pressureGaugeBrand)) {

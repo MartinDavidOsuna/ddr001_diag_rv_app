@@ -531,6 +531,27 @@ class _ParcelValveCard extends StatelessWidget {
           onIllegible: (reason) =>
               onChanged(valve.copyWith(pilotBrand: illegibleBrandMap(reason))),
         ),
+        if (valve.hasPilot) ...[
+          const SizedBox(height: 8),
+          Semantics(
+            label: '¿El piloto está conectado?',
+            child: SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: true, label: Text('Sí')),
+                ButtonSegment(value: false, label: Text('No')),
+              ],
+              selected: valve.pilotConnected == null
+                  ? const <bool>{}
+                  : {valve.pilotConnected!},
+              emptySelectionAllowed: true,
+              onSelectionChanged: readOnly
+                  ? null
+                  : (selection) => onChanged(
+                      valve.copyWith(pilotConnected: selection.first),
+                    ),
+            ),
+          ),
+        ],
         _ComponentField(
           key: targetFieldId == 'pressureGaugeBrand' ? targetKey : null,
           label: 'Manómetro',
