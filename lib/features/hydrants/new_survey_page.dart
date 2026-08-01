@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
+import '../../domain/enums/app_enums.dart';
 import '../../domain/models/app_models.dart';
 import 'new_survey_route.dart';
 
@@ -25,13 +26,17 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final normalized = query.trim().toLowerCase();
+    final localIds = state.hydrants
+        .where((hydrant) => hydrant.syncStatus != SyncStatus.synced)
+        .map((hydrant) => hydrant.id)
+        .toSet();
     final filtered = state.catalogHydrants
         .where(
-          (hydrant) =>
-              normalized.isEmpty ||
-              hydrant.code.toLowerCase().contains(normalized) ||
-              hydrant.locality.toLowerCase().contains(normalized) ||
-              hydrant.parcel.toLowerCase().contains(normalized),
+          (hydrant) => hydrantVisibleForNewRv(
+            hydrant,
+            normalizedQuery: normalized,
+            hasLocalWork: localIds.contains(hydrant.id),
+          ),
         )
         .toList();
     final matches = prioritizeSelectedHydrant(
@@ -280,4 +285,23 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
       if (mounted) setState(() => startingId = null);
     }
   }
+}
+
+@visibleForTesting
+bool hydrantVisibleForNewRv(
+  Hydrant hydrant, {
+  required String normalizedQuery,
+  required bool hasLocalWork,
+}) {
+  final code = hydrant.code.trim().toLowerCase();
+  final exactAccountMatch =
+      normalizedQuery.isNotEmpty && code == normalizedQuery;
+  final matchesQuery =
+      normalizedQuery.isEmpty ||
+      code.contains(normalizedQuery) ||
+      hydrant.locality.toLowerCase().contains(normalizedQuery) ||
+      hydrant.parcel.toLowerCase().contains(normalizedQuery);
+  if (!matchesQuery) return false;
+  if (exactAccountMatch) return true;
+  return hasLocalWork || (hydrant.isActive && hydrant.availableForRv);
 }

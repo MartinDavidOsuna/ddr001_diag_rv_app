@@ -9,8 +9,18 @@ import '../domain/rv_draft.dart';
 import '../domain/parcel_valve_configuration.dart';
 
 class RemoteInspection {
-  const RemoteInspection({required this.id, required this.status});
+  const RemoteInspection({
+    required this.id,
+    required this.status,
+    this.result,
+    this.officialInspectionId,
+    this.conflictId,
+    this.rvStatus,
+    this.lastStatusChangedAt,
+  });
   final String id, status;
+  final String? result, officialInspectionId, conflictId, rvStatus;
+  final DateTime? lastStatusChangedAt;
 }
 
 class RemotePhoto {
@@ -299,7 +309,17 @@ class InspectionRemoteRepository {
         ApiErrorKind.invalidData,
         'Respuesta de inspección inválida.',
       );
-    return RemoteInspection(id: id, status: '${data['status'] ?? 'draft'}');
+    return RemoteInspection(
+      id: id,
+      status: '${data['status'] ?? 'draft'}',
+      result: data['result']?.toString(),
+      officialInspectionId: data['officialInspectionId']?.toString(),
+      conflictId: data['conflictId']?.toString(),
+      rvStatus: data['rvStatus']?.toString(),
+      lastStatusChangedAt: DateTime.tryParse(
+        data['lastStatusChangedAt']?.toString() ?? '',
+      )?.toUtc(),
+    );
   }
 
   bool _retryableDio(DioException error) =>

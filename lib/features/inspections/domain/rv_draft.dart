@@ -279,6 +279,9 @@ class RvDraft {
     required this.createdAt,
     required this.updatedAt,
     this.serverInspectionId,
+    this.officialInspectionId,
+    this.conflictId,
+    this.lastStatusChangedAt,
     this.localStatus = RvLocalStatus.pendingCreate,
     this.remoteStatus = 'not_created',
     this.answersStatus = RvPartStatus.pending,
@@ -307,11 +310,14 @@ class RvDraft {
       accountNumber,
       fieldSessionId,
       checklistId;
-  final String? serverInspectionId, lastSyncError;
+  final String? serverInspectionId,
+      officialInspectionId,
+      conflictId,
+      lastSyncError;
   final int checklistVersion, retryCount, activeFormStep;
   final Map<String, dynamic> checklistSnapshot;
   final DateTime createdAt, updatedAt;
-  final DateTime? lastAttemptAt, nextRetryAt;
+  final DateTime? lastAttemptAt, nextRetryAt, lastStatusChangedAt;
   final RvLocalStatus localStatus;
   final String remoteStatus;
   final RvPartStatus answersStatus,
@@ -332,6 +338,7 @@ class RvDraft {
       DynamicChecklist.fromJson(checklistSnapshot);
   bool get isReadOnly =>
       localStatus == RvLocalStatus.submitted ||
+      localStatus == RvLocalStatus.conflict ||
       localStatus == RvLocalStatus.cancelled;
   int get photoCount =>
       photos.values.fold(0, (sum, values) => sum + values.length);
@@ -347,6 +354,9 @@ class RvDraft {
 
   RvDraft copyWith({
     String? serverInspectionId,
+    String? officialInspectionId,
+    String? conflictId,
+    DateTime? lastStatusChangedAt,
     RvLocalStatus? localStatus,
     String? remoteStatus,
     RvPartStatus? answersStatus,
@@ -372,10 +382,14 @@ class RvDraft {
     RvSyncStep? currentStep,
     DateTime? lastAttemptAt,
     DateTime? nextRetryAt,
+    bool clearNextRetryAt = false,
     DateTime? updatedAt,
   }) => RvDraft(
     clientInspectionId: clientInspectionId,
     serverInspectionId: serverInspectionId ?? this.serverInspectionId,
+    officialInspectionId: officialInspectionId ?? this.officialInspectionId,
+    conflictId: conflictId ?? this.conflictId,
+    lastStatusChangedAt: lastStatusChangedAt ?? this.lastStatusChangedAt,
     hydrantId: hydrantId,
     accountNumber: accountNumber,
     fieldSessionId: fieldSessionId,
@@ -413,12 +427,15 @@ class RvDraft {
     returnToSummary: returnToSummary ?? this.returnToSummary,
     currentStep: currentStep ?? this.currentStep,
     lastAttemptAt: lastAttemptAt ?? this.lastAttemptAt,
-    nextRetryAt: nextRetryAt ?? this.nextRetryAt,
+    nextRetryAt: clearNextRetryAt ? null : (nextRetryAt ?? this.nextRetryAt),
   );
 
   Map<String, dynamic> toJson() => {
     'clientInspectionId': clientInspectionId,
     'serverInspectionId': serverInspectionId,
+    'officialInspectionId': officialInspectionId,
+    'conflictId': conflictId,
+    'lastStatusChangedAt': lastStatusChangedAt?.toUtc().toIso8601String(),
     'hydrantId': hydrantId,
     'accountNumber': accountNumber,
     'fieldSessionId': fieldSessionId,
@@ -457,6 +474,11 @@ class RvDraft {
   factory RvDraft.fromJson(Map<String, dynamic> json) => RvDraft(
     clientInspectionId: json['clientInspectionId'] as String,
     serverInspectionId: json['serverInspectionId'] as String?,
+    officialInspectionId: json['officialInspectionId'] as String?,
+    conflictId: json['conflictId'] as String?,
+    lastStatusChangedAt: DateTime.tryParse(
+      json['lastStatusChangedAt'] as String? ?? '',
+    )?.toUtc(),
     hydrantId: json['hydrantId'] as String,
     accountNumber: json['accountNumber'] as String,
     fieldSessionId: json['fieldSessionId'] as String,

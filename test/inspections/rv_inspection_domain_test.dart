@@ -84,6 +84,21 @@ void main() {
   );
 
   group('borrador RV persistente', () {
+    test('conflicto es terminal y conserva referencias al serializar', () {
+      final conflicted = draft().copyWith(
+        localStatus: RvLocalStatus.conflict,
+        remoteStatus: 'conflict',
+        officialInspectionId: 'official-id',
+        conflictId: 'conflict-id',
+        lastStatusChangedAt: DateTime.utc(2026, 8, 1),
+      );
+      final restored = RvDraft.fromJson(conflicted.toJson());
+      expect(restored.isReadOnly, isTrue);
+      expect(restored.officialInspectionId, 'official-id');
+      expect(restored.conflictId, 'conflict-id');
+      expect(restored.photos.keys, conflicted.photos.keys);
+      expect(restored.answers.keys, conflicted.answers.keys);
+    });
     test('conserva clientInspectionId en serialización', () {
       expect(RvDraft.fromJson(draft().toJson()).clientInspectionId, 'client-1');
     });

@@ -579,9 +579,7 @@ class _HydrantMarker extends StatelessWidget {
       child: Icon(
         Icons.location_on,
         size: selected ? 42 : 32,
-        color: _MapPageState._completed(item.hydrant)
-            ? AppColors.green
-            : AppColors.brightBlue,
+        color: hydrantMarkerColor(item.hydrant),
         shadows: const [
           Shadow(color: Colors.white, blurRadius: 3),
           Shadow(color: Colors.black38, blurRadius: 5),
@@ -589,6 +587,30 @@ class _HydrantMarker extends StatelessWidget {
       ),
     ),
   );
+}
+
+@visibleForTesting
+Color hydrantMarkerColor(Hydrant hydrant) {
+  final hasLocalWork = hydrant.f02a.status == InspectionStatus.inProgress;
+  if (hasLocalWork) return Colors.amber.shade700;
+  if (!hydrant.isActive ||
+      !hydrant.availableForRv &&
+          !const {
+            'completed',
+            'validated',
+            'conflict',
+            'returned',
+          }.contains(hydrant.rvStatus)) {
+    return Colors.grey;
+  }
+  if (hydrant.rvStatus == 'conflict' || hydrant.rvStatus == 'returned') {
+    return AppColors.red;
+  }
+  if ((hydrant.rvStatus == 'completed' || hydrant.rvStatus == 'validated') &&
+      hydrant.requiredPhotosVerified) {
+    return AppColors.green;
+  }
+  return AppColors.brightBlue;
 }
 
 class _ClusterMarker extends StatelessWidget {

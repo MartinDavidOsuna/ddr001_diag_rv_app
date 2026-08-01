@@ -36,6 +36,11 @@ class InspectionSyncCoordinator {
   bool isRunning(String id) => _running.contains(id);
 
   Future<RvDraft> synchronize(RvDraft initial, {bool submit = false}) async {
+    if (initial.localStatus == RvLocalStatus.conflict ||
+        initial.localStatus == RvLocalStatus.submitted ||
+        initial.localStatus == RvLocalStatus.cancelled) {
+      return initial;
+    }
     if (initial.localStatus == RvLocalStatus.syncError &&
         initial.nextRetryAt == null &&
         initial.lastAttemptAt != null &&
@@ -385,7 +390,28 @@ class InspectionSyncCoordinator {
       ),
     );
     final result = await remote.submit(draft.serverInspectionId!);
-    if (result.status != 'submitted') {
+    if (result.result == 'conflict') {
+      _debug(draft, 'submit', 'conflicto persistido por servidor');
+      return _save(
+        draft.copyWith(
+          localStatus: RvLocalStatus.conflict,
+          remoteStatus: 'conflict',
+          submitStatus: RvPartStatus.synced,
+          officialInspectionId: result.officialInspectionId,
+          conflictId: result.conflictId,
+          lastStatusChangedAt: result.lastStatusChangedAt,
+          currentStep: RvSyncStep.verify,
+          retryCount: 0,
+          clearNextRetryAt: true,
+          clearError: true,
+        ),
+      );
+    }
+    final accepted =
+        result.result == 'official' ||
+        result.result == 'already_official' ||
+        result.status == 'submitted';
+    if (!accepted) {
       throw const ApiException(
         ApiErrorKind.serverUnavailable,
         'No fue posible confirmar el envío.',
@@ -396,9 +422,13 @@ class InspectionSyncCoordinator {
       draft.copyWith(
         localStatus: RvLocalStatus.submitted,
         remoteStatus: result.status,
+        officialInspectionId: result.officialInspectionId ?? result.id,
+        lastStatusChangedAt: result.lastStatusChangedAt,
         submitStatus: RvPartStatus.synced,
         currentStep: RvSyncStep.verify,
         clearError: true,
+        retryCount: 0,
+        clearNextRetryAt: true,
       ),
     );
   }
