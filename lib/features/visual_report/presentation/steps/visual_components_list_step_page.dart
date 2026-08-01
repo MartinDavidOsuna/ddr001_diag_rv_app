@@ -640,6 +640,44 @@ class _VisualComponentsListStepPageState
       _ => const <String, String>{},
     };
     return [
+      if (type == VisualComponentType.pilotValve) ...[
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            '¿El piloto está conectado?',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Semantics(
+          label: '¿El piloto está conectado?',
+          child: SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: true, label: Text('Sí')),
+              ButtonSegment(value: false, label: Text('No')),
+            ],
+            selected: value.specificData.pilotConnected == null
+                ? const <bool>{}
+                : {value.specificData.pilotConnected!},
+            emptySelectionAllowed: true,
+            onSelectionChanged: widget.readOnly
+                ? null
+                : (selection) {
+                    final json = value.specificData.toJson()
+                      ..['pilotConnected'] = selection.first;
+                    _updateDraft(
+                      value.copyWith(
+                        specificData: VisualComponentSpecificData.fromJson(
+                          json,
+                        ),
+                        explicitlyConfirmed: false,
+                      ),
+                    );
+                  },
+          ),
+        ),
+        const SizedBox(height: 12),
+      ],
       for (final entry in labels.entries)
         SwitchListTile(
           title: Text(entry.value),

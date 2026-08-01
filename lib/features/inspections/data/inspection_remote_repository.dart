@@ -179,6 +179,7 @@ class InspectionRemoteRepository {
                     ? valve.solenoidBrand!['reason']
                     : null,
                 'hasPilot': valve.hasPilot,
+                'pilotConnected': valve.hasPilot ? valve.pilotConnected : null,
                 'pilotBrandId': valve.hasPilot
                     ? brandId(valve.pilotBrand, 'La marca del piloto')
                     : null,

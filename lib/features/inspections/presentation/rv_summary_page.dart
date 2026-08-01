@@ -167,6 +167,15 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
                           ? 'Sí · ${valve.pilotBrand?['displayValue'] ?? 'Pendiente'}'
                           : 'No',
                     ),
+                    if (valve.hasPilot)
+                      _row(
+                        'Piloto conectado',
+                        valve.pilotConnected == null
+                            ? 'No capturado'
+                            : valve.pilotConnected!
+                            ? 'Sí'
+                            : 'No',
+                      ),
                     _row(
                       'Manómetro',
                       valve.hasPressureGauge
