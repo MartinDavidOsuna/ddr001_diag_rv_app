@@ -145,6 +145,35 @@ void main() {
       expect(restored.checklistVersion, 3);
       expect(restored.checklist.sections.single.items, hasLength(3));
     });
+    test('migra el paso general legacy con defaults opcionales seguros', () {
+      final json = draft().toJson()..remove('generalObservations');
+      final restored = RvDraft.fromJson(json);
+      expect(restored.generalObservations, isNull);
+      expect(restored.generalPhotos, isEmpty);
+    });
+    test(
+      'persiste orden, descripción y observaciones de fotografías generales',
+      () {
+        final value = draft(
+          photos: {
+            'general:00000000-0000-4000-8000-000000000001': const [
+              RvPhotoReference(
+                photoId: '00000000-0000-4000-8000-000000000001',
+                slotCode: 'general:00000000-0000-4000-8000-000000000001',
+                status: RvPhotoUploadStatus.pending,
+                order: 1,
+                description: 'Vista lateral',
+              ),
+            ],
+          },
+        ).copyWith(generalObservations: 'Corrosión superficial.');
+        final restored = RvDraft.fromJson(value.toJson());
+        expect(restored.generalPhotos, hasLength(1));
+        expect(restored.generalPhotos.single.order, 1);
+        expect(restored.generalPhotos.single.description, 'Vista lateral');
+        expect(restored.generalObservations, 'Corrosión superficial.');
+      },
+    );
     test('conserva respuesta y fecha', () {
       final restored = RvDraft.fromJson(
         draft(answers: {'q1': answer('q1', true, type: 'boolean')}).toJson(),

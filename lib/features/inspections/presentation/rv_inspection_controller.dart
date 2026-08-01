@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/location/location_service.dart';
 import '../../../core/media/reliable_photo_service.dart';
@@ -87,7 +88,7 @@ class RvInspectionController extends ChangeNotifier {
   Future<void> setActiveFormStep(int value) async {
     final current = draft;
     if (current == null) return;
-    final next = value.clamp(0, current.checklist.sections.length - 1);
+    final next = value.clamp(0, current.checklist.sections.length);
     if (next == current.activeFormStep) return;
     draft = current.copyWith(activeFormStep: next);
     await drafts.save(draft!);
@@ -97,7 +98,7 @@ class RvInspectionController extends ChangeNotifier {
   Future<bool> goToNextStep() async {
     final current = draft;
     if (current == null || busy || current.isReadOnly) return false;
-    final last = current.checklist.sections.length - 1;
+    final last = current.checklist.sections.length;
     if (current.activeFormStep >= last) return true;
     await setActiveFormStep(current.activeFormStep + 1);
     return false;
@@ -261,6 +262,99 @@ class RvInspectionController extends ChangeNotifier {
     _externalActionLog(stepBefore, slot);
     message = 'Fotografía capturada y guardada localmente.';
   });
+
+  Future<void> addGeneralPhoto(ImageSource source) async {
+    final current = draft;
+    if (current == null ||
+        current.generalPhotos.length >= 5 ||
+        !current.canAddComplements) {
+      return;
+    }
+    final photoId = const Uuid().v4();
+    await addPhoto('general:$photoId', source);
+    final updated = draft;
+    if (updated == null) return;
+    var order = 0;
+    final photos = <String, List<RvPhotoReference>>{};
+    for (final entry in updated.photos.entries) {
+      photos[entry.key] = entry.value.map((photo) {
+        if (!photo.isGeneral) return photo;
+        order++;
+        return photo.copyWith(order: order);
+      }).toList();
+    }
+    draft = updated.copyWith(photos: photos);
+    await drafts.save(draft!);
+    notifyListeners();
+  }
+
+  Future<void> updateGeneralPhotoDescription(
+    String photoId,
+    String value,
+  ) async {
+    final current = draft;
+    if (current == null || value.length > 300) {
+      return;
+    }
+    final photos = <String, List<RvPhotoReference>>{
+      for (final entry in current.photos.entries)
+        entry.key: entry.value
+            .map(
+              (photo) => photo.photoId == photoId
+                  ? photo.copyWith(
+                      description: value.trim(),
+                      clearDescription: value.trim().isEmpty,
+                    )
+                  : photo,
+            )
+            .toList(),
+    };
+    draft = current.copyWith(photos: photos, hasPendingChanges: true);
+    await drafts.save(draft!);
+    notifyListeners();
+  }
+
+  Future<void> saveGeneralObservations(String value) async {
+    final current = draft;
+    if (current == null || value.length > 2000 || !current.canAddComplements) {
+      return;
+    }
+    draft = current.copyWith(
+      generalObservations: value.trim().isEmpty ? null : value,
+      clearGeneralObservations: value.trim().isEmpty,
+      hasPendingChanges: true,
+    );
+    await drafts.save(draft!);
+    notifyListeners();
+  }
+
+  Future<void> removeGeneralPhoto(RvPhotoReference photo) async {
+    if (draft?.editingMode == RvEditingMode.validatedComplements &&
+        photo.status == RvPhotoUploadStatus.verified) {
+      return;
+    }
+    final current = draft;
+    if (current == null) return;
+    final photos = <String, List<RvPhotoReference>>{...current.photos}
+      ..remove(photo.slotCode);
+    var order = 0;
+    for (final entry in photos.entries.toList()) {
+      photos[entry.key] = entry.value.map((item) {
+        if (!item.isGeneral) return item;
+        order++;
+        return item.copyWith(order: order);
+      }).toList();
+    }
+    // A confirmed file is deliberately retained: only the next immutable
+    // version drops its association, so historical versions remain viewable.
+    draft = current.copyWith(
+      photos: photos,
+      photosStatus: RvPartStatus.pending,
+      hasPendingChanges: true,
+    );
+    await drafts.save(draft!);
+    notifyListeners();
+  }
 
   void _externalActionLog(int stepBefore, String slot) {
     if (!kDebugMode) return;

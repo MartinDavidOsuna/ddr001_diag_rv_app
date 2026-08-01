@@ -63,6 +63,7 @@ class InspectionSyncCoordinator {
       draft = await _create(draft);
       draft = await _photos(draft);
       draft = await _reconcilePhotos(draft);
+      await remote.saveGeneralContent(draft);
       draft = await _answers(draft);
       if (draft.parcelValveConfiguration != null) {
         await remote.saveParcelValves(
@@ -103,6 +104,21 @@ class InspectionSyncCoordinator {
         clearError: true,
       ),
     );
+    draft = await _photos(draft);
+    draft = await _reconcilePhotos(draft);
+    final generalReady = draft.generalPhotos.every(
+      (photo) => photo.status == RvPhotoUploadStatus.verified,
+    );
+    if (!generalReady) {
+      return _save(
+        draft.copyWith(
+          localStatus: RvLocalStatus.pendingVersion,
+          lastSyncError:
+              'Las fotografías generales seleccionadas siguen pendientes de sincronización.',
+        ),
+      );
+    }
+    await remote.saveGeneralContent(draft);
     final result = await remote.createVersion(draft);
     switch (result.kind) {
       case RvVersionResultKind.created:
@@ -330,6 +346,8 @@ class InspectionSyncCoordinator {
             status: RvPhotoUploadStatus.missingLocal,
             retryCount: ref.retryCount,
             lastError: 'El archivo local no existe.',
+            order: ref.order,
+            description: ref.description,
           );
           refs[slot] = slotRefs;
           continue;
@@ -339,6 +357,8 @@ class InspectionSyncCoordinator {
           slotCode: slot,
           status: RvPhotoUploadStatus.uploading,
           retryCount: ref.retryCount,
+          order: ref.order,
+          description: ref.description,
         );
         refs[slot] = slotRefs;
         draft = await _save(
@@ -362,6 +382,8 @@ class InspectionSyncCoordinator {
             slotCode: slot,
             status: RvPhotoUploadStatus.verified,
             retryCount: ref.retryCount,
+            order: ref.order,
+            description: ref.description,
           );
           await _markPhotoVerified(photo, uploaded.sha256);
           _debug(draft, 'fotografía', 'verificada slot=$slot');
@@ -372,6 +394,8 @@ class InspectionSyncCoordinator {
             status: RvPhotoUploadStatus.error,
             retryCount: ref.retryCount + 1,
             lastError: error.message,
+            order: ref.order,
+            description: ref.description,
           );
           if (!_retryable(error)) rethrow;
         }
@@ -410,6 +434,8 @@ class InspectionSyncCoordinator {
           slotCode: local.slotCode,
           status: RvPhotoUploadStatus.verified,
           retryCount: local.retryCount,
+          order: local.order,
+          description: local.description,
         );
         refs[remotePhoto.slotCode] = slotRefs;
         final photo = _photo(local.photoId);
