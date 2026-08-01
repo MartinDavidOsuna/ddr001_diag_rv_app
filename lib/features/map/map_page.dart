@@ -417,7 +417,8 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
               ? switch (error.kind) {
                   ApiErrorKind.authenticationRequired ||
                   ApiErrorKind.sessionExpired =>
-                    'El acceso debe restaurarse para actualizar esta zona.',
+                    'Sin conexión. Puedes continuar trabajando; los cambios se sincronizarán después.',
+                  ApiErrorKind.sessionRevoked => error.message,
                   ApiErrorKind.timeout =>
                     'El servidor tardó demasiado en actualizar esta zona.',
                   ApiErrorKind.serverUnavailable || ApiErrorKind.offline =>

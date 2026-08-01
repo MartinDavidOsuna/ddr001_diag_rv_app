@@ -5,6 +5,7 @@ enum ApiErrorKind {
   timeout,
   sessionExpired,
   authenticationRequired,
+  sessionRevoked,
   invalidData,
   serverUnavailable,
   validation,
@@ -19,13 +20,14 @@ class ApiException implements Exception {
     this.requestId,
     this.problemType,
     this.problemTitle,
+    this.domainCode,
     this.field,
     this.errors = const [],
   });
   final ApiErrorKind kind;
   final String message;
   final int? statusCode;
-  final String? requestId, problemType, problemTitle, field;
+  final String? requestId, problemType, problemTitle, domainCode, field;
   final List<Map<String, dynamic>> errors;
 
   factory ApiException.fromDio(DioException error) {
@@ -39,6 +41,7 @@ class ApiException implements Exception {
         .whereType<Map>()
         .map((value) => Map<String, dynamic>.from(value))
         .toList();
+    final domainCode = problem['code']?.toString();
     final firstError = problemErrors.firstOrNull;
     final field = firstError?['path'] is List
         ? (firstError!['path'] as List).join('.')
@@ -60,31 +63,59 @@ class ApiException implements Exception {
       );
     }
     if (status == 401 || status == 403) {
-      final refreshRequest =
-          error.requestOptions.path == '/field-sessions/refresh';
+      const definitiveMessages = <String, String>{
+        'SESSION_REVOKED': 'Tu sesión fue revocada por un administrador.',
+        'USER_INACTIVE': 'Tu usuario fue desactivado.',
+        'DEVICE_BLOCKED': 'Este dispositivo fue bloqueado.',
+        'DEVICE_BINDING_REVOKED': 'El acceso de este dispositivo fue revocado.',
+        'REFRESH_TOKEN_REUSE':
+            'La seguridad de la sesión requiere iniciar nuevamente.',
+      };
+      if (definitiveMessages.containsKey(domainCode)) {
+        return ApiException(
+          ApiErrorKind.sessionRevoked,
+          definitiveMessages[domainCode]!,
+          statusCode: status,
+          requestId: requestId,
+          domainCode: domainCode,
+        );
+      }
       return ApiException(
-        refreshRequest
-            ? ApiErrorKind.authenticationRequired
-            : ApiErrorKind.sessionExpired,
-        status == 401
-            ? (refreshRequest
-                  ? 'El reporte está guardado de forma segura. Inicia sesión nuevamente para continuar el envío.'
-                  : 'Tu sesión expiró.')
-            : 'No tienes permiso.',
+        ApiErrorKind.authenticationRequired,
+        'Sin conexión. Puedes continuar trabajando; los cambios se sincronizarán después.',
         statusCode: status,
         requestId: requestId,
+        domainCode: domainCode,
       );
     }
     if (status == 409) {
       final type = problem['type']?.toString() ?? '';
       final title = problem['title']?.toString().toLowerCase() ?? '';
       final detail = problem['detail']?.toString() ?? '';
+      const conflictMessages = <String, String>{
+        'PHONE_EMAIL_MISMATCH':
+            'El correo y el teléfono deben pertenecer al mismo usuario.',
+        'USER_ACTIVE_ON_ANOTHER_DEVICE':
+            'Tu usuario ya está activo en otro dispositivo.',
+        'DEVICE_ASSIGNED_TO_ANOTHER_USER':
+            'Este dispositivo está asignado a otro usuario. Debe cerrar sesión primero.',
+      };
+      if (conflictMessages.containsKey(domainCode)) {
+        return ApiException(
+          ApiErrorKind.invalidData,
+          conflictMessages[domainCode]!,
+          statusCode: status,
+          requestId: requestId,
+          domainCode: domainCode,
+        );
+      }
       if (type.endsWith('/phone-conflict') || title == 'phone conflict') {
         return ApiException(
           ApiErrorKind.invalidData,
           'El teléfono ya está registrado con otro correo. Usa el correo asociado o un teléfono diferente.',
           statusCode: status,
           requestId: requestId,
+          domainCode: domainCode,
         );
       }
       if (type.endsWith('/open-session-conflict') ||
@@ -95,6 +126,7 @@ class ApiException implements Exception {
           'No fue posible reemplazar la sesión del dispositivo. Intenta nuevamente.',
           statusCode: status,
           requestId: requestId,
+          domainCode: domainCode,
         );
       }
       return ApiException(
@@ -102,6 +134,7 @@ class ApiException implements Exception {
         detail.isEmpty ? 'Existe un conflicto con los datos enviados.' : detail,
         statusCode: status,
         requestId: requestId,
+        domainCode: domainCode,
       );
     }
     if (status == 422 || status == 400) {

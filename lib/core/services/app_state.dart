@@ -207,6 +207,7 @@ class AppState extends ChangeNotifier {
     }
     initialized = true;
     notifyListeners();
+    unawaited(_completePendingLogout());
     unawaited(_initializeRemoteServices());
   }
 
@@ -220,6 +221,13 @@ class AppState extends ChangeNotifier {
         sessionOffline = sessionRepository.lastRestoreOffline;
         _applySession(restored);
       }
+    } on ApiException catch (error) {
+      if (error.kind == ApiErrorKind.sessionRevoked) {
+        _resetActiveSessionState();
+        assignmentError = error.message;
+      } else {
+        sessionOffline = true;
+      }
     } on Object {
       sessionOffline = true;
     }
@@ -232,8 +240,23 @@ class AppState extends ChangeNotifier {
 
   void _onConnectivityChanged() {
     online = connectivityMonitor?.apiAvailable ?? online;
-    if (online) sessionOffline = false;
+    if (online) {
+      sessionOffline = false;
+      unawaited(_completePendingLogout());
+    }
     notifyListeners();
+  }
+
+  Future<void> _completePendingLogout() async {
+    final completed = await sessionRepository.completePendingLogout();
+    if (completed) {
+      await preferences.setBool('pending_field_session_end', false);
+      if (assignmentError ==
+          'Sin conexión. El cierre de sesión quedó pendiente.') {
+        assignmentError = null;
+      }
+      notifyListeners();
+    }
   }
 
   Future<void> recheckConnectivity() async {
