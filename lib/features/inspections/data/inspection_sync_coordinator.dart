@@ -61,6 +61,8 @@ class InspectionSyncCoordinator {
       }
       draft = await _synchronizeCatalogs(draft);
       draft = await _create(draft);
+      draft = await _photos(draft);
+      draft = await _reconcilePhotos(draft);
       draft = await _answers(draft);
       if (draft.parcelValveConfiguration != null) {
         await remote.saveParcelValves(
@@ -70,8 +72,6 @@ class InspectionSyncCoordinator {
       }
       if (draft.location != null) draft = await _location(draft);
       if (draft.signal != null) draft = await _signal(draft);
-      draft = await _photos(draft);
-      draft = await _reconcilePhotos(draft);
       final localValidation = validator.validate(draft);
       if (localValidation.isValid && draft.photosVerified) {
         draft = await _save(
@@ -317,7 +317,7 @@ class InspectionSyncCoordinator {
 
   Future<RvDraft> _photos(RvDraft draft) async {
     var refs = <String, List<RvPhotoReference>>{...draft.photos};
-    for (final slot in requiredRvPhotoSlots) {
+    for (final slot in refs.keys.toList()) {
       final slotRefs = [...draft.photosFor(slot)];
       for (var index = 0; index < slotRefs.length; index++) {
         final ref = slotRefs[index];

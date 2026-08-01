@@ -265,6 +265,10 @@ class RvValidator {
   bool _validType(ChecklistItemDefinition item, RvAnswer answer) {
     final value = answer.value;
     if (value is Map && item.code.contains('brand')) {
+      if (value['mode'] == 'illegible') {
+        return value['brandId'] == null &&
+            (value['reason']?.toString().trim().length ?? 0) >= 10;
+      }
       final display = value['displayValue']?.toString().trim() ?? '';
       final remote = value['catalogId']?.toString().trim() ?? '';
       final local = value['localCatalogId']?.toString().trim() ?? '';
