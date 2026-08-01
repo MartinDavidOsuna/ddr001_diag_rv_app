@@ -442,7 +442,7 @@ class HydrantDetailPage extends StatelessWidget {
       id,
     );
     return Scaffold(
-      appBar: AppPageHeader(title: h.code, subtitle: h.locality),
+      appBar: AppPageHeader(title: h.code, subtitle: 'Reporte técnico'),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -488,13 +488,23 @@ class HydrantDetailPage extends StatelessWidget {
                   ],
                 ),
                 Text(
-                  '${h.locality} · ${h.parcel} · Hidrante inteligente',
+                  h.lastStatusChangedAt == null
+                      ? 'Hidrante inteligente'
+                      : 'Último cambio: ${h.lastStatusChangedAt!.toLocal()}',
                   style: const TextStyle(color: AppColors.muted),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 16),
+          if (!h.availableForRv)
+            FilledButton.icon(
+              onPressed: () =>
+                  context.push('/visual-report/${Uri.encodeComponent(h.code)}'),
+              icon: const Icon(Icons.description_outlined),
+              label: const Text('Ver reporte RV vigente'),
+            ),
+          if (!h.availableForRv) const SizedBox(height: 12),
           DiagnosticCard(
             type: ReportTypeLabels.visualFull,
             summary: h.f02a,
@@ -550,6 +560,9 @@ class HydrantDetailPage extends StatelessWidget {
                 children: [
                   for (final report in visualHistory)
                     ListTile(
+                      onTap: () => context.push(
+                        '/visual-report/${Uri.encodeComponent(h.code)}',
+                      ),
                       title: Text(
                         'RV · ${report.revisionNumber == 0 ? 'Original' : 'Revisión ${report.revisionNumber}'}',
                       ),

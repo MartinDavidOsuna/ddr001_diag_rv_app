@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../core/network/api_exception.dart';
@@ -750,17 +751,32 @@ class _HydrantSheet extends StatelessWidget {
           'Cuenta ${hydrant.code}',
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
-        Text('${hydrant.locality} · ${hydrant.parcel}'),
+        if (hydrant.lastStatusChangedAt != null)
+          Text(
+            DateFormat(
+              "d MMM yyyy · HH:mm",
+              'es',
+            ).format(hydrant.lastStatusChangedAt!.toLocal()),
+          ),
         Text(
           hydrant.f02a.status == InspectionStatus.completed
               ? 'RV terminada'
               : 'RV pendiente',
         ),
         const SizedBox(height: 8),
-        FilledButton(
-          onPressed: () => context.push(newSurveyRouteForHydrant(hydrant.id)),
-          child: const Text('Iniciar nueva revisión'),
-        ),
+        if (hydrant.availableForRv)
+          FilledButton(
+            onPressed: () => context.push(newSurveyRouteForHydrant(hydrant.id)),
+            child: const Text('Iniciar nueva revisión'),
+          )
+        else
+          FilledButton.icon(
+            onPressed: () => context.push(
+              '/visual-report/${Uri.encodeComponent(hydrant.code)}',
+            ),
+            icon: const Icon(Icons.description_outlined),
+            label: const Text('Ver reporte RV'),
+          ),
         if (hasMine)
           TextButton(
             onPressed: () => context.push('/hydrants/${hydrant.id}'),

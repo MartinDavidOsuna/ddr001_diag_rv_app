@@ -28,6 +28,7 @@ import '../features/inspections/data/inspection_remote_repository.dart';
 import '../features/inspections/data/inspection_sync_coordinator.dart';
 import '../features/inspections/data/rv_draft_repository.dart';
 import '../features/catalogs/dynamic_catalog_repository.dart';
+import '../features/visual_reports/data/visual_report_repository.dart';
 
 typedef BootstrapStatusCallback = void Function(String status);
 
@@ -56,6 +57,9 @@ Future<AppState> bootstrap({BootstrapStatusCallback? onStatus}) async {
   final checklistBox = await Hive.openBox<String>('rv_checklist_cache_v1');
   final dynamicCatalogBox = await Hive.openBox<String>(
     'rv_dynamic_catalogs_v1',
+  );
+  final visualReportCache = await Hive.openBox<String>(
+    'visual_report_cache_v1',
   );
   await Hive.openBox<String>('media_work_queue_v1');
   final functionalEligibilityBox = await Hive.openBox<String>(
@@ -148,6 +152,10 @@ Future<AppState> bootstrap({BootstrapStatusCallback? onStatus}) async {
     ),
     rvDraftRepository: rvDraftRepository,
     inspectionSyncCoordinator: inspectionSyncCoordinator,
+    visualReportRepository: VisualReportRepository(
+      client: apiClient,
+      cache: visualReportCache,
+    ),
     dynamicCatalogRepository: dynamicCatalogRepository,
     connectivityMonitor: ConnectivityMonitor(apiClient.dio),
   );

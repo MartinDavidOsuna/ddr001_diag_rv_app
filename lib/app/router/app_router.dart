@@ -14,6 +14,7 @@ import '../../features/profile/profile_pages.dart';
 import '../../features/shell/main_shell.dart';
 import '../../features/sync/sync_page.dart';
 import '../../features/diagnostics/local_integrity_page.dart';
+import '../../features/visual_reports/presentation/rv_visual_report_page.dart';
 import 'branch_root_pop_scope.dart';
 import 'navigation_keys.dart';
 
@@ -40,6 +41,11 @@ GoRouter createRouter(AppState state) => GoRouter(
   routes: [
     GoRoute(path: '/', builder: (_, _) => const SplashPage()),
     GoRoute(path: '/login', builder: (_, _) => const LoginPage()),
+    GoRoute(
+      path: '/visual-report/:account',
+      builder: (_, route) =>
+          RvVisualReportPage(accountNumber: route.pathParameters['account']!),
+    ),
     StatefulShellRoute.indexedStack(
       builder: (_, _, shell) => MainShell(navigationShell: shell),
       branches: [
