@@ -10,6 +10,7 @@ import '../../../domain/media/media_sync_status.dart';
 import '../../catalogs/dynamic_catalog_repository.dart';
 import '../domain/rv_draft.dart';
 import '../domain/rv_sync_state.dart';
+import '../domain/rv_versioning.dart';
 import '../domain/rv_validator.dart';
 import 'inspection_remote_repository.dart';
 import 'rv_answer_payload_builder.dart';
@@ -37,7 +38,9 @@ class InspectionSyncCoordinator {
 
   Future<RvDraft> synchronize(RvDraft initial, {bool submit = false}) async {
     if (initial.localStatus == RvLocalStatus.conflict ||
-        initial.localStatus == RvLocalStatus.submitted ||
+        initial.localStatus == RvLocalStatus.versionConflict ||
+        (initial.localStatus == RvLocalStatus.submitted &&
+            !initial.hasPendingChanges) ||
         initial.localStatus == RvLocalStatus.cancelled) {
       return initial;
     }
@@ -53,6 +56,9 @@ class InspectionSyncCoordinator {
     var draft = drafts.find(initial.clientInspectionId) ?? initial;
     _debug(draft, 'inicio', submit ? 'submit solicitado' : 'sincronización');
     try {
+      if (draft.visualReportId != null && draft.hasPendingChanges) {
+        return await _synchronizeVersion(draft);
+      }
       draft = await _synchronizeCatalogs(draft);
       draft = await _create(draft);
       draft = await _answers(draft);
@@ -87,6 +93,56 @@ class InspectionSyncCoordinator {
       );
     } finally {
       _running.remove(initial.clientInspectionId);
+    }
+  }
+
+  Future<RvDraft> _synchronizeVersion(RvDraft draft) async {
+    draft = await _save(
+      draft.copyWith(
+        localStatus: RvLocalStatus.syncingVersion,
+        clearError: true,
+      ),
+    );
+    final result = await remote.createVersion(draft);
+    switch (result.kind) {
+      case RvVersionResultKind.created:
+      case RvVersionResultKind.alreadyCreated:
+        return _save(
+          draft.copyWith(
+            localStatus: RvLocalStatus.submitted,
+            currentVersionId: result.currentVersionId ?? result.versionId,
+            baseVersionId: result.currentVersionId ?? result.versionId,
+            baseVersionNumber: result.versionNumber,
+            hasPendingChanges: false,
+            clearError: true,
+            retryCount: 0,
+            clearNextRetryAt: true,
+          ),
+        );
+      case RvVersionResultKind.conflict:
+        return _save(
+          draft.copyWith(
+            localStatus: RvLocalStatus.versionConflict,
+            versionConflictId: result.conflictId,
+            proposedVersionId: result.proposedVersionId,
+            currentVersionId: result.currentVersionId,
+            hasPendingChanges: true,
+            clearError: true,
+            clearNextRetryAt: true,
+          ),
+        );
+      case RvVersionResultKind.forbiddenAfterValidation:
+        return _save(
+          draft.copyWith(
+            localStatus: RvLocalStatus.pendingVersion,
+            editingMode: RvEditingMode.validatedComplements,
+            serverValidationStatus: 'validated',
+            hasPendingChanges: true,
+            lastSyncError:
+                'El diagnóstico fue validado; conserva solo observaciones y fotos generales.',
+            clearNextRetryAt: true,
+          ),
+        );
     }
   }
 
