@@ -9,6 +9,7 @@ import '../../inspections/domain/parcel_valve_configuration.dart';
 import '../../inspections/domain/filter_element_selection.dart';
 import '../../inspections/presentation/rv_inspection_controller.dart';
 import '../../inspections/presentation/rv_review_navigation.dart';
+import '../../inspections/presentation/rv_general_photos_observations_step.dart';
 import '../../catalogs/dynamic_catalog_repository.dart';
 import '../../catalogs/pressure_range_selector.dart';
 import '../../catalogs/brand_selection.dart';
@@ -93,7 +94,7 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
     final draft = widget.controller.draft!;
     final sections = draft.checklist.sections;
     if (sections.isEmpty) return const Text('El checklist no contiene pasos.');
-    final currentStep = draft.activeFormStep.clamp(0, sections.length - 1);
+    final currentStep = draft.activeFormStep.clamp(0, sections.length);
     _scheduleStepFocus(currentStep);
     if ((draft.navigationQuestionId != null ||
             draft.navigationFieldId != null) &&
@@ -120,12 +121,14 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
       child: RvStepLayout(
         headingKey: _headingKey,
         currentStep: currentStep,
-        totalFormSteps: sections.length,
+        totalFormSteps: sections.length + 1,
         onPrevious: _previous,
         onNext: _next,
         content: KeyedSubtree(
           key: ValueKey('rv-step-${currentStep + 1}'),
           child: switch (currentStep) {
+            int step when step == sections.length =>
+              RvGeneralPhotosAndObservationsStep(controller: widget.controller),
             0 => widget.stepOne,
             1 => Column(
               children: [

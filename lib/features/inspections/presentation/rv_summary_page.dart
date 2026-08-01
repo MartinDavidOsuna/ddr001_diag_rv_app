@@ -80,6 +80,13 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
                 _row('GPS', draft.location == null ? 'Pendiente' : 'Capturado'),
                 _row('Señal', draft.signal == null ? 'Pendiente' : 'Capturada'),
                 _row('Fotografías', '${draft.photoCount} capturadas'),
+                _row('Fotografías generales', '${draft.generalPhotos.length}'),
+                _row(
+                  'Observaciones generales',
+                  draft.generalObservations?.trim().isNotEmpty == true
+                      ? 'Capturadas'
+                      : 'No agregadas',
+                ),
                 _row('Sincronización', draft.localStatus.name),
               ],
             ),

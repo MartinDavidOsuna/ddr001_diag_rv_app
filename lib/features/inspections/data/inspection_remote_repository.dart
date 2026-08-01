@@ -58,6 +58,15 @@ class InspectionRemoteRepository {
           'changeReason': 'Edición móvil sincronizada',
           'snapshot': draft.toJson(),
           'technicalContentChanged': draft.canEditTechnical,
+          'generalObservation': draft.generalObservations,
+          'generalPhotos': [
+            for (final photo in draft.generalPhotos)
+              {
+                'photoId': photo.serverPhotoId ?? photo.photoId,
+                'order': photo.order ?? draft.generalPhotos.indexOf(photo) + 1,
+                'description': photo.description,
+              },
+          ],
         },
         options: Options(
           headers: {'Idempotency-Key': 'version-$clientVersionId'},
@@ -71,6 +80,29 @@ class InspectionRemoteRepository {
         ApiErrorKind.invalidData,
         'Respuesta de versión inválida.',
       );
+    }
+  }
+
+  Future<void> saveGeneralContent(RvDraft draft) async {
+    final id = draft.serverInspectionId;
+    if (id == null) return;
+    try {
+      await client.dio.put<Map<String, dynamic>>(
+        '/inspections/$id/general-content',
+        data: {
+          'generalObservations': draft.generalObservations,
+          'generalPhotos': [
+            for (final photo in draft.generalPhotos)
+              {
+                'photoId': photo.serverPhotoId ?? photo.photoId,
+                'order': photo.order ?? draft.generalPhotos.indexOf(photo) + 1,
+                'description': photo.description,
+              },
+          ],
+        },
+      );
+    } on DioException catch (error) {
+      throw ApiException.fromDio(error);
     }
   }
 

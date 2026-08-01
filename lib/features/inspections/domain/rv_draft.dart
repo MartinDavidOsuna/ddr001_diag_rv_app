@@ -240,11 +240,30 @@ class RvPhotoReference {
     this.serverPhotoId,
     this.retryCount = 0,
     this.lastError,
+    this.order,
+    this.description,
   });
   final String photoId, slotCode;
   final RvPhotoUploadStatus status;
   final String? serverPhotoId, lastError;
   final int retryCount;
+  final int? order;
+  final String? description;
+  bool get isGeneral => slotCode.startsWith('general:');
+  RvPhotoReference copyWith({
+    int? order,
+    String? description,
+    bool clearDescription = false,
+  }) => RvPhotoReference(
+    photoId: photoId,
+    slotCode: slotCode,
+    status: status,
+    serverPhotoId: serverPhotoId,
+    retryCount: retryCount,
+    lastError: lastError,
+    order: order ?? this.order,
+    description: clearDescription ? null : (description ?? this.description),
+  );
   Map<String, dynamic> toJson() => {
     'photoId': photoId,
     'slotCode': slotCode,
@@ -252,6 +271,8 @@ class RvPhotoReference {
     'serverPhotoId': serverPhotoId,
     'retryCount': retryCount,
     'lastError': lastError,
+    'order': order,
+    'description': description,
   };
   factory RvPhotoReference.fromJson(Map<String, dynamic> json) =>
       RvPhotoReference(
@@ -264,6 +285,8 @@ class RvPhotoReference {
         serverPhotoId: json['serverPhotoId'] as String?,
         retryCount: json['retryCount'] as int? ?? 0,
         lastError: json['lastError'] as String?,
+        order: json['order'] as int?,
+        description: json['description'] as String?,
       );
 }
 
@@ -314,6 +337,7 @@ class RvDraft {
     this.currentStep = RvSyncStep.create,
     this.lastAttemptAt,
     this.nextRetryAt,
+    this.generalObservations,
   });
   final String clientInspectionId,
       hydrantId,
@@ -331,6 +355,7 @@ class RvDraft {
       versionConflictId,
       proposedVersionId,
       lastSyncError;
+  final String? generalObservations;
   final int checklistVersion, retryCount, activeFormStep;
   final int? baseVersionNumber;
   final RvEditingMode editingMode;
@@ -370,6 +395,15 @@ class RvDraft {
       !isReadOnly && editingMode != RvEditingMode.readOnly;
   int get photoCount =>
       photos.values.fold(0, (sum, values) => sum + values.length);
+  List<RvPhotoReference> get generalPhotos {
+    final values = photos.values
+        .expand((items) => items)
+        .where((photo) => photo.isGeneral)
+        .toList();
+    values.sort((a, b) => (a.order ?? 99).compareTo(b.order ?? 99));
+    return List.unmodifiable(values);
+  }
+
   List<RvPhotoReference> photosFor(String slot) =>
       List.unmodifiable(photos[slot] ?? const []);
   bool get hasAllPhotoSlots =>
@@ -422,6 +456,8 @@ class RvDraft {
     DateTime? nextRetryAt,
     bool clearNextRetryAt = false,
     DateTime? updatedAt,
+    String? generalObservations,
+    bool clearGeneralObservations = false,
   }) => RvDraft(
     clientInspectionId: clientInspectionId,
     serverInspectionId: serverInspectionId ?? this.serverInspectionId,
@@ -478,6 +514,9 @@ class RvDraft {
     currentStep: currentStep ?? this.currentStep,
     lastAttemptAt: lastAttemptAt ?? this.lastAttemptAt,
     nextRetryAt: clearNextRetryAt ? null : (nextRetryAt ?? this.nextRetryAt),
+    generalObservations: clearGeneralObservations
+        ? null
+        : (generalObservations ?? this.generalObservations),
   );
 
   Map<String, dynamic> toJson() => {
@@ -529,6 +568,7 @@ class RvDraft {
     'currentStep': currentStep.name,
     'lastAttemptAt': lastAttemptAt?.toUtc().toIso8601String(),
     'nextRetryAt': nextRetryAt?.toUtc().toIso8601String(),
+    'generalObservations': generalObservations,
   };
 
   factory RvDraft.fromJson(Map<String, dynamic> json) => RvDraft(
@@ -654,6 +694,7 @@ class RvDraft {
     nextRetryAt: DateTime.tryParse(
       json['nextRetryAt'] as String? ?? '',
     )?.toUtc(),
+    generalObservations: json['generalObservations'] as String?,
   );
 }
 
