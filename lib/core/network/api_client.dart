@@ -278,7 +278,17 @@ class ApiClient {
   }
 
   static bool _isDefinitiveRefreshRejection(DioException error) =>
-      error.response?.statusCode == 401 || error.response?.statusCode == 403;
+      const {
+        'SESSION_REVOKED',
+        'USER_INACTIVE',
+        'DEVICE_BLOCKED',
+        'DEVICE_BINDING_REVOKED',
+        'REFRESH_TOKEN_REUSE',
+      }.contains(
+        error.response?.data is Map
+            ? (error.response!.data as Map)['code']?.toString()
+            : null,
+      );
 
   Never rethrowAsApi(Object error) {
     if (error is ApiException) throw error;

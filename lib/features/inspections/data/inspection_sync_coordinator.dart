@@ -431,16 +431,12 @@ class InspectionSyncCoordinator {
     );
     return _save(
       draft.copyWith(
-        localStatus:
-            error.kind == ApiErrorKind.authenticationRequired ||
-                error.kind == ApiErrorKind.sessionExpired
+        localStatus: error.kind == ApiErrorKind.sessionRevoked
             ? RvLocalStatus.requiresAuthentication
             : RvLocalStatus.syncError,
-        lastSyncError:
-            error.kind == ApiErrorKind.authenticationRequired ||
-                error.kind == ApiErrorKind.sessionExpired
-            ? 'El reporte está guardado de forma segura. Inicia sesión nuevamente para continuar el envío.'
-            : error.message,
+        lastSyncError: error.kind == ApiErrorKind.sessionRevoked
+            ? error.message
+            : 'Sin conexión. Puedes continuar trabajando; los cambios se sincronizarán después.',
         retryCount: retry,
         lastAttemptAt: failedAt,
         updatedAt: failedAt,

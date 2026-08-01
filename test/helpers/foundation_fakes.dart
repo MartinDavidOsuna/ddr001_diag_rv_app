@@ -5,8 +5,9 @@ import 'package:ddr001diag/features/auth/data/session_secure_storage.dart';
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 
-class MemorySessionStorage implements SessionStorage {
+class MemorySessionStorage implements SessionStorage, PendingLogoutStorage {
   FieldSession? value;
+  FieldSession? pendingLogout;
   String? installation;
   int saveCount = 0;
   int clearCalls = 0;
@@ -28,6 +29,17 @@ class MemorySessionStorage implements SessionStorage {
     value = session;
     installation = session.installationId;
     saveCount++;
+  }
+
+  @override
+  Future<void> clearPendingLogout() async => pendingLogout = null;
+
+  @override
+  Future<FieldSession?> readPendingLogout() async => pendingLogout;
+
+  @override
+  Future<void> savePendingLogout(FieldSession session) async {
+    pendingLogout = session;
   }
 }
 

@@ -10,7 +10,13 @@ abstract interface class SessionStorage {
   Future<String> installationId();
 }
 
-class SessionSecureStorage implements SessionStorage {
+abstract interface class PendingLogoutStorage {
+  Future<FieldSession?> readPendingLogout();
+  Future<void> savePendingLogout(FieldSession session);
+  Future<void> clearPendingLogout();
+}
+
+class SessionSecureStorage implements SessionStorage, PendingLogoutStorage {
   SessionSecureStorage([FlutterSecureStorage? storage])
     : _storage = storage ?? const FlutterSecureStorage();
 
@@ -27,6 +33,9 @@ class SessionSecureStorage implements SessionStorage {
   static const _crewId = 'field_crew_id';
   static const _role = 'field_role';
   static const _started = 'field_started_at';
+  static const _persistent = 'field_persistent_session_id';
+  static const _binding = 'field_device_binding_id';
+  static const _pendingPrefix = 'pending_logout_';
 
   @override
   Future<String> installationId() async {
@@ -65,6 +74,8 @@ class SessionSecureStorage implements SessionStorage {
       crewId: values[_crewId] ?? '',
       role: values[_role] ?? 'field',
       startedAt: DateTime.tryParse(values[_started] ?? ''),
+      persistentSessionId: values[_persistent] ?? '',
+      bindingId: values[_binding] ?? '',
     );
   }
 
@@ -83,6 +94,8 @@ class SessionSecureStorage implements SessionStorage {
       _crewId: session.crewId,
       _role: session.role,
       _started: (session.startedAt ?? DateTime.now().toUtc()).toIso8601String(),
+      _persistent: session.persistentSessionId,
+      _binding: session.bindingId,
     };
     await Future.wait(
       values.entries.map(
@@ -105,8 +118,50 @@ class SessionSecureStorage implements SessionStorage {
       _crewId,
       _role,
       _started,
+      _persistent,
+      _binding,
     ]) {
       await _storage.delete(key: key);
     }
+  }
+
+  @override
+  Future<void> savePendingLogout(FieldSession session) async {
+    await _storage.write(
+      key: '${_pendingPrefix}refresh',
+      value: session.refreshToken,
+    );
+    await _storage.write(
+      key: '${_pendingPrefix}session',
+      value: session.sessionId,
+    );
+    await _storage.write(
+      key: '${_pendingPrefix}installation',
+      value: session.installationId,
+    );
+  }
+
+  @override
+  Future<FieldSession?> readPendingLogout() async {
+    final refresh = await _storage.read(key: '${_pendingPrefix}refresh');
+    final session = await _storage.read(key: '${_pendingPrefix}session');
+    final installation = await _storage.read(
+      key: '${_pendingPrefix}installation',
+    );
+    if (refresh == null || session == null || installation == null) return null;
+    return FieldSession(
+      sessionId: session,
+      userId: '',
+      accessToken: '',
+      refreshToken: refresh,
+      installationId: installation,
+    );
+  }
+
+  @override
+  Future<void> clearPendingLogout() async {
+    await _storage.delete(key: '${_pendingPrefix}refresh');
+    await _storage.delete(key: '${_pendingPrefix}session');
+    await _storage.delete(key: '${_pendingPrefix}installation');
   }
 }
