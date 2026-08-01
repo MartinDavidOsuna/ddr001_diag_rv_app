@@ -127,6 +127,7 @@ class InspectionRemoteRepository {
     ParcelValveConfiguration configuration,
   ) async {
     String remoteId(Map<String, dynamic>? value, String field) {
+      if (value?['mode'] == 'illegible') return '';
       final id = value?['catalogId']?.toString();
       if (id == null || id.isEmpty) {
         throw ApiException(
@@ -136,6 +137,9 @@ class InspectionRemoteRepository {
       }
       return id;
     }
+
+    String? brandId(Map<String, dynamic>? value, String field) =>
+        value?['mode'] == 'illegible' ? null : remoteId(value, field);
 
     try {
       await client.dio.put<Map<String, dynamic>>(
@@ -150,34 +154,58 @@ class InspectionRemoteRepository {
                 'index': valve.index,
                 'diameterId': remoteId(valve.diameter, 'El diámetro'),
                 'diameterDisplayValue': valve.diameter!['displayValue'],
-                'valveBrandId': remoteId(
+                'valveBrandId': brandId(
                   valve.valveBrand,
                   'La marca de válvula',
                 ),
                 'valveBrandDisplayValue': valve.valveBrand!['displayValue'],
+                'valveBrandReadability': valve.valveBrand == null
+                    ? 'readable'
+                    : (valve.valveBrand!['mode'] ?? 'readable'),
+                'valveBrandIllegibleReason': valve.valveBrand == null
+                    ? null
+                    : valve.valveBrand!['reason'],
                 'hasSolenoid': valve.hasSolenoid,
                 'solenoidBrandId': valve.hasSolenoid
-                    ? remoteId(valve.solenoidBrand, 'La marca del solenoide')
+                    ? brandId(valve.solenoidBrand, 'La marca del solenoide')
                     : null,
                 'solenoidBrandDisplayValue': valve.hasSolenoid
                     ? valve.solenoidBrand!['displayValue']
                     : null,
+                'solenoidBrandReadability': valve.hasSolenoid
+                    ? (valve.solenoidBrand!['mode'] ?? 'readable')
+                    : null,
+                'solenoidBrandIllegibleReason': valve.hasSolenoid
+                    ? valve.solenoidBrand!['reason']
+                    : null,
                 'hasPilot': valve.hasPilot,
                 'pilotBrandId': valve.hasPilot
-                    ? remoteId(valve.pilotBrand, 'La marca del piloto')
+                    ? brandId(valve.pilotBrand, 'La marca del piloto')
                     : null,
                 'pilotBrandDisplayValue': valve.hasPilot
                     ? valve.pilotBrand!['displayValue']
                     : null,
+                'pilotBrandReadability': valve.hasPilot
+                    ? (valve.pilotBrand!['mode'] ?? 'readable')
+                    : null,
+                'pilotBrandIllegibleReason': valve.hasPilot
+                    ? valve.pilotBrand!['reason']
+                    : null,
                 'hasPressureGauge': valve.hasPressureGauge,
                 'pressureGaugeBrandId': valve.hasPressureGauge
-                    ? remoteId(
+                    ? brandId(
                         valve.pressureGaugeBrand,
                         'La marca del manómetro',
                       )
                     : null,
                 'pressureGaugeBrandDisplayValue': valve.hasPressureGauge
                     ? valve.pressureGaugeBrand!['displayValue']
+                    : null,
+                'pressureGaugeBrandReadability': valve.hasPressureGauge
+                    ? (valve.pressureGaugeBrand!['mode'] ?? 'readable')
+                    : null,
+                'pressureGaugeBrandIllegibleReason': valve.hasPressureGauge
+                    ? valve.pressureGaugeBrand!['reason']
                     : null,
               },
           ],

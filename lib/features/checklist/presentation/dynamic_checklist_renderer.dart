@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../inspections/domain/rv_draft.dart';
 import '../../inspections/domain/parcel_valve_configuration.dart';
@@ -9,6 +10,7 @@ import '../../inspections/presentation/rv_inspection_controller.dart';
 import '../../inspections/presentation/rv_review_navigation.dart';
 import '../../catalogs/dynamic_catalog_repository.dart';
 import '../../catalogs/pressure_range_selector.dart';
+import '../../catalogs/brand_selection.dart';
 import '../data/checklist_models.dart';
 
 class DynamicChecklistRenderer extends StatefulWidget {
@@ -168,6 +170,8 @@ class _ParcelValveSection extends StatelessWidget {
   final GlobalKey? targetKey;
 
   Map<String, dynamic> _brand(BrandOption option) => {
+    'mode': 'readable',
+    'brandId': option.remoteId,
     'catalogId': option.remoteId,
     'localCatalogId': option.localId,
     'displayValue': option.name,
@@ -474,6 +478,8 @@ class _ParcelValveCard extends StatelessWidget {
           readOnly: readOnly,
           onSelected: (value) =>
               onChanged(valve.copyWith(valveBrand: brandValue(value))),
+          onIllegible: (reason) =>
+              onChanged(valve.copyWith(valveBrand: illegibleBrandMap(reason))),
         ),
         const SizedBox(height: 12),
         if (fixedDiameter != null)
@@ -504,6 +510,9 @@ class _ParcelValveCard extends StatelessWidget {
           onPresence: (value) => onChanged(valve.copyWith(hasSolenoid: value)),
           onBrand: (value) =>
               onChanged(valve.copyWith(solenoidBrand: brandValue(value))),
+          onIllegible: (reason) => onChanged(
+            valve.copyWith(solenoidBrand: illegibleBrandMap(reason)),
+          ),
         ),
         _ComponentField(
           key: targetFieldId == 'pilotBrand' ? targetKey : null,
@@ -518,6 +527,8 @@ class _ParcelValveCard extends StatelessWidget {
           onPresence: (value) => onChanged(valve.copyWith(hasPilot: value)),
           onBrand: (value) =>
               onChanged(valve.copyWith(pilotBrand: brandValue(value))),
+          onIllegible: (reason) =>
+              onChanged(valve.copyWith(pilotBrand: illegibleBrandMap(reason))),
         ),
         _ComponentField(
           key: targetFieldId == 'pressureGaugeBrand' ? targetKey : null,
@@ -533,6 +544,9 @@ class _ParcelValveCard extends StatelessWidget {
               onChanged(valve.copyWith(hasPressureGauge: value)),
           onBrand: (value) =>
               onChanged(valve.copyWith(pressureGaugeBrand: brandValue(value))),
+          onIllegible: (reason) => onChanged(
+            valve.copyWith(pressureGaugeBrand: illegibleBrandMap(reason)),
+          ),
         ),
       ],
     ),
@@ -551,6 +565,7 @@ class _ComponentField extends StatelessWidget {
     required this.brandValue,
     required this.onPresence,
     required this.onBrand,
+    required this.onIllegible,
     super.key,
   });
   final String label;
@@ -562,6 +577,7 @@ class _ComponentField extends StatelessWidget {
   final Map<String, dynamic> Function(BrandOption) brandValue;
   final ValueChanged<bool> onPresence;
   final ValueChanged<BrandOption> onBrand;
+  final ValueChanged<String> onIllegible;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -589,6 +605,7 @@ class _ComponentField extends StatelessWidget {
             answer: answer(brand),
             readOnly: readOnly,
             onSelected: onBrand,
+            onIllegible: onIllegible,
           ),
         ],
       ],
@@ -808,6 +825,8 @@ class _Question extends StatelessWidget {
           section,
           item,
           value: {
+            'mode': 'readable',
+            'brandId': value.remoteId,
             'catalogId': value.remoteId,
             'localCatalogId': value.localId,
             'displayValue': value.name,
@@ -817,6 +836,12 @@ class _Question extends StatelessWidget {
             'isPendingSync': value.status != CatalogSyncStatus.synced,
             'userCreated': value.userCreated,
           },
+        ),
+        onIllegible: (reason) =>
+            controller.answer(section, item, value: illegibleBrandMap(reason)),
+        onEvidence: () => controller.addPhoto(
+          'brand_illegible:${item.id}',
+          ImageSource.camera,
         ),
       );
     }
@@ -965,6 +990,8 @@ class _BrandField extends StatelessWidget {
     required this.answer,
     required this.readOnly,
     required this.onSelected,
+    this.onIllegible,
+    this.onEvidence,
     super.key,
   });
   final DynamicCatalogRepository repository;
@@ -972,6 +999,8 @@ class _BrandField extends StatelessWidget {
   final RvAnswer? answer;
   final bool readOnly;
   final ValueChanged<BrandOption> onSelected;
+  final ValueChanged<String>? onIllegible;
+  final Future<void> Function()? onEvidence;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -981,9 +1010,51 @@ class _BrandField extends StatelessWidget {
       final selected = answer?.value is Map
           ? (answer!.value as Map)['localCatalogId']?.toString()
           : null;
+      final raw = answer?.value is Map
+          ? Map<String, dynamic>.from(answer!.value! as Map)
+          : const <String, dynamic>{};
+      final illegible = raw['mode'] == 'illegible';
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          ChoiceChip(
+            avatar: const Icon(Icons.visibility_off_outlined),
+            label: const Text('Ilegible · condición especial'),
+            selected: illegible,
+            onSelected: readOnly || onIllegible == null
+                ? null
+                : (_) => onIllegible!(raw['reason']?.toString() ?? ''),
+          ),
+          if (illegible) ...[
+            const SizedBox(height: 8),
+            TextFormField(
+              initialValue: raw['reason']?.toString(),
+              enabled: !readOnly,
+              minLines: 2,
+              maxLines: 4,
+              maxLength: 500,
+              decoration: const InputDecoration(
+                labelText: 'Explica por qué la marca es ilegible *',
+                helperText: 'Mínimo 10 caracteres',
+              ),
+              validator: (value) => (value?.trim().length ?? 0) < 10
+                  ? 'Escribe al menos 10 caracteres.'
+                  : null,
+              onChanged: onIllegible,
+            ),
+            Text(
+              raw['evidencePhotoId'] == null
+                  ? 'Evidencia: No agregada (opcional)'
+                  : 'Evidencia: 1 fotografía',
+            ),
+            if (!readOnly && onEvidence != null)
+              OutlinedButton.icon(
+                onPressed: onEvidence,
+                icon: const Icon(Icons.camera_alt_outlined),
+                label: const Text('Agregar fotografía de evidencia'),
+              ),
+          ],
+          const SizedBox(height: 8),
           if (options.length < 6)
             Wrap(
               spacing: 8,

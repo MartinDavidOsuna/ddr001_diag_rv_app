@@ -46,6 +46,22 @@ class RvAnswerPayloadBuilder {
           'notApplicable': notApplicable,
         };
         if (!notApplicable && catalog != null) {
+          if (item.code.contains('brand') && catalog['mode'] == 'illegible') {
+            final evidence = draft
+                .photosFor('brand_illegible:${item.id}')
+                .where((photo) => photo.serverPhotoId != null)
+                .firstOrNull;
+            row['brandSelection'] = {
+              'mode': 'illegible',
+              'brandId': null,
+              'displayName': 'Ilegible',
+              'reason': catalog['reason'],
+              'evidencePhotoId': evidence?.serverPhotoId,
+            };
+            row['catalogDisplayValue'] = 'Ilegible';
+            payload.add(row);
+            continue;
+          }
           final remoteId = catalog['catalogId']?.toString().trim() ?? '';
           if (remoteId.isEmpty) {
             throw RvPayloadException(
@@ -55,7 +71,16 @@ class RvAnswerPayloadBuilder {
                   'La revisión permanece guardada.',
             );
           }
-          if (item.code.contains('brand')) row['brandId'] = remoteId;
+          if (item.code.contains('brand')) {
+            row['brandId'] = remoteId;
+            row['brandSelection'] = {
+              'mode': 'readable',
+              'brandId': remoteId,
+              'displayName': catalog['displayValue'],
+              'reason': null,
+              'evidencePhotoId': null,
+            };
+          }
           if (item.code.contains('diameter')) row['diameterId'] = remoteId;
           if (item.code.contains('gauge_range')) {
             row['pressureRangeId'] = remoteId;
