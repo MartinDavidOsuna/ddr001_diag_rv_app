@@ -29,6 +29,7 @@ import '../../features/checklist/data/checklist_repository.dart';
 import '../../features/inspections/data/inspection_sync_coordinator.dart';
 import '../../features/inspections/data/rv_draft_repository.dart';
 import '../../features/catalogs/dynamic_catalog_repository.dart';
+import '../../features/visual_reports/data/visual_report_repository.dart';
 import '../config/app_config.dart';
 import '../network/api_exception.dart';
 import '../network/connectivity_monitor.dart';
@@ -65,6 +66,7 @@ class AppState extends ChangeNotifier {
     required this.checklistRepository,
     required this.rvDraftRepository,
     required this.inspectionSyncCoordinator,
+    this.visualReportRepository,
     this.dynamicCatalogRepository,
     this.connectivityMonitor,
   });
@@ -79,6 +81,7 @@ class AppState extends ChangeNotifier {
   final ChecklistRepository checklistRepository;
   final RvDraftRepository rvDraftRepository;
   final InspectionSyncCoordinator inspectionSyncCoordinator;
+  final VisualReportRepository? visualReportRepository;
   final DynamicCatalogRepository? dynamicCatalogRepository;
   final ConnectivityMonitor? connectivityMonitor;
   late final SyncQueueRepository syncQueueRepository = SyncQueueRepository(

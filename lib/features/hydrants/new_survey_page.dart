@@ -126,7 +126,11 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
             Card(
               child: ListTile(
                 title: Text('Cuenta ${hydrant.code}'),
-                subtitle: Text('${hydrant.locality} · ${hydrant.parcel}'),
+                subtitle: Text(
+                  hydrant.availableForRv
+                      ? 'Disponible para revisión'
+                      : '${hydrant.rvStatus == 'validated' ? 'Validado' : 'Ya revisado'}${hydrant.lastStatusChangedAt == null ? '' : ' · ${hydrant.lastStatusChangedAt!.toLocal()}'}',
+                ),
                 trailing: startingId == hydrant.id
                     ? const SizedBox.square(
                         dimension: 24,
@@ -134,7 +138,11 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
                       )
                     : const Icon(Icons.chevron_right),
                 onTap: startingId == null
-                    ? () => _confirmAndStart(state, hydrant)
+                    ? () => hydrant.availableForRv
+                          ? _confirmAndStart(state, hydrant)
+                          : context.push(
+                              '/visual-report/${Uri.encodeComponent(hydrant.code)}',
+                            )
                     : null,
               ),
             ),
