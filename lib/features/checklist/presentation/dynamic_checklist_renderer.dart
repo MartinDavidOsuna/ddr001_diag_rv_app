@@ -742,6 +742,9 @@ class _Section extends StatelessWidget {
             section: section,
             item: item,
             controller: controller,
+            highlighted:
+                item.id == targetQuestionId &&
+                controller.highlightedFocusKey != null,
           ),
         ),
     ];
@@ -795,46 +798,71 @@ class _Question extends StatelessWidget {
     required this.section,
     required this.item,
     required this.controller,
+    this.highlighted = false,
     super.key,
   });
   final ChecklistSectionDefinition section;
   final ChecklistItemDefinition item;
   final RvInspectionController controller;
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
     final answer = controller.draft!.answers[item.id];
     final readOnly = controller.draft!.isReadOnly;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '${item.label}${item.required ? ' *' : ''}',
-          style: const TextStyle(fontWeight: FontWeight.w700),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: highlighted
+            ? Theme.of(context).colorScheme.primaryContainer
+            : Colors.transparent,
+        border: Border.all(
+          color: highlighted
+              ? Theme.of(context).colorScheme.primary
+              : Colors.transparent,
+          width: 2,
         ),
-        if (item.helpText != null)
-          Text(item.helpText!, style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 8),
-        _field(context, answer, readOnly),
-        if (!item.required)
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            value: answer?.notApplicable ?? false,
-            onChanged: readOnly
-                ? null
-                : (value) => unawaited(
-                    controller.answer(
-                      section,
-                      item,
-                      value: answer?.value,
-                      selected: answer?.selectedOptions ?? const [],
-                      notApplicable: value ?? false,
-                      comment: answer?.comment ?? '',
-                    ),
-                  ),
-            title: const Text('No aplica'),
-          ),
-      ],
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Semantics(
+        liveRegion: highlighted,
+        label: highlighted ? 'Campo pendiente resaltado: ${item.label}' : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${item.label}${item.required ? ' *' : ''}',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            if (item.helpText != null)
+              Text(
+                item.helpText!,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            const SizedBox(height: 8),
+            _field(context, answer, readOnly),
+            if (!item.required)
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: answer?.notApplicable ?? false,
+                onChanged: readOnly
+                    ? null
+                    : (value) => unawaited(
+                        controller.answer(
+                          section,
+                          item,
+                          value: answer?.value,
+                          selected: answer?.selectedOptions ?? const [],
+                          notApplicable: value ?? false,
+                          comment: answer?.comment ?? '',
+                        ),
+                      ),
+                title: const Text('No aplica'),
+              ),
+          ],
+        ),
+      ),
     );
   }
 

@@ -40,6 +40,17 @@ class _RvInspectionPageState extends State<RvInspectionPage> {
       await activeController.goToPreviousStep();
       return;
     }
+    final hasRelevantChanges =
+        draft.answers.isNotEmpty ||
+        draft.location != null ||
+        draft.signal != null ||
+        draft.photos.values.any((items) => items.isNotEmpty) ||
+        draft.parcelValveConfiguration != null ||
+        (draft.generalObservations?.trim().isNotEmpty ?? false);
+    if (!hasRelevantChanges) {
+      await _leaveFlow();
+      return;
+    }
     final exit = await RvReviewNavigation.requestExitReview(context);
     if (!exit || !mounted) return;
     await _leaveFlow();

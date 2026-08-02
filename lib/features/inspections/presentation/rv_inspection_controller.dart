@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -43,6 +45,8 @@ class RvInspectionController extends ChangeNotifier {
   RvDraft? draft;
   bool busy = false;
   String? message;
+  String? highlightedFocusKey;
+  Timer? _highlightTimer;
 
   Future<void> initialize() async {
     draft = await drafts.openOrCreate(
@@ -50,7 +54,18 @@ class RvInspectionController extends ChangeNotifier {
       user: user,
       checklist: checklist,
     );
+    final target = draft?.navigationQuestionId ?? draft?.navigationFieldId;
+    if (target != null) _startHighlight(target);
     notifyListeners();
+  }
+
+  void _startHighlight(String key) {
+    _highlightTimer?.cancel();
+    highlightedFocusKey = key;
+    _highlightTimer = Timer(const Duration(seconds: 3), () {
+      highlightedFocusKey = null;
+      notifyListeners();
+    });
   }
 
   Future<void> answer(
@@ -132,6 +147,7 @@ class RvInspectionController extends ChangeNotifier {
     String? questionId,
     String? subItemId,
     String? fieldId,
+    String? focusKey,
   }) async {
     final current = draft;
     if (current == null) return;
@@ -143,7 +159,25 @@ class RvInspectionController extends ChangeNotifier {
       returnToSummary: true,
     );
     await drafts.save(draft!);
+    _startHighlight(focusKey ?? questionId ?? fieldId ?? 'pending');
     notifyListeners();
+  }
+
+  Future<void> navigateToPending(RvPendingIssue issue) async {
+    final current = draft;
+    if (current == null) return;
+    final inferred = issue.sectionId == null
+        ? (issue.stepIndex ?? 0)
+        : current.checklist.sections.indexWhere(
+            (section) => section.id == issue.sectionId,
+          );
+    await navigateToIssue(
+      step: inferred < 0 ? (issue.stepIndex ?? 0) : inferred,
+      questionId: issue.questionId,
+      subItemId: issue.subItemId,
+      fieldId: issue.fieldId,
+      focusKey: issue.focusKey,
+    );
   }
 
   Future<void> clearNavigationTarget() async {
@@ -356,6 +390,12 @@ class RvInspectionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
+  void dispose() {
+    _highlightTimer?.cancel();
+    super.dispose();
+  }
+
   void _externalActionLog(int stepBefore, String slot) {
     if (!kDebugMode) return;
     final rawId = draft!.clientInspectionId;
@@ -466,11 +506,6 @@ class RvInspectionController extends ChangeNotifier {
     );
     await drafts.save(draft!);
   }
-
-  Future<void> cancel(String reason) => _run(() async {
-    draft = await coordinator.cancel(draft!, reason);
-    message = 'Inspección cancelada.';
-  });
 
   Future<void> _run(
     Future<void> Function() action, {

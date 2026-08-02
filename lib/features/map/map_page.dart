@@ -97,14 +97,24 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
       ),
       body: Column(
         children: [
-          const Padding(
+          Padding(
             padding: EdgeInsets.all(10),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 14,
+              runSpacing: 6,
               children: [
-                _Legend(color: AppColors.brightBlue, label: 'RV pendiente'),
-                SizedBox(width: 20),
-                _Legend(color: AppColors.green, label: 'RV terminada'),
+                const _Legend(color: AppColors.brightBlue, label: 'Disponible'),
+                _Legend(color: Colors.amber.shade700, label: 'Trabajo local'),
+                const _Legend(color: AppColors.green, label: 'Revisado'),
+                const _Legend(
+                  color: AppColors.red,
+                  label: 'Conflicto o devuelto',
+                ),
+                const _Legend(
+                  color: Colors.grey,
+                  label: 'Inactivo o no disponible',
+                ),
               ],
             ),
           ),
@@ -593,7 +603,9 @@ class _HydrantMarker extends StatelessWidget {
 @visibleForTesting
 Color hydrantMarkerColor(Hydrant hydrant) {
   final hasLocalWork = hydrant.f02a.status == InspectionStatus.inProgress;
-  if (hasLocalWork) return Colors.amber.shade700;
+  if (hydrant.rvStatus == 'conflict' || hydrant.rvStatus == 'returned') {
+    return AppColors.red;
+  }
   if (!hydrant.isActive ||
       !hydrant.availableForRv &&
           !const {
@@ -604,9 +616,7 @@ Color hydrantMarkerColor(Hydrant hydrant) {
           }.contains(hydrant.rvStatus)) {
     return Colors.grey;
   }
-  if (hydrant.rvStatus == 'conflict' || hydrant.rvStatus == 'returned') {
-    return AppColors.red;
-  }
+  if (hasLocalWork) return Colors.amber.shade700;
   if ((hydrant.rvStatus == 'completed' || hydrant.rvStatus == 'validated') &&
       hydrant.requiredPhotosVerified) {
     return AppColors.green;

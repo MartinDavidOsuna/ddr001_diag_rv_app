@@ -91,6 +91,26 @@ void main() {
       hydrantMarkerColor(hydrant(localStatus: InspectionStatus.inProgress)),
       Colors.amber.shade700,
     );
+    expect(
+      hydrantMarkerColor(
+        hydrant(
+          rvStatus: 'conflict',
+          availableForRv: false,
+          localStatus: InspectionStatus.inProgress,
+        ),
+      ),
+      AppColors.red,
+    );
+    expect(
+      hydrantMarkerColor(
+        hydrant(
+          isActive: false,
+          availableForRv: false,
+          localStatus: InspectionStatus.inProgress,
+        ),
+      ),
+      Colors.grey,
+    );
   });
 }
 
