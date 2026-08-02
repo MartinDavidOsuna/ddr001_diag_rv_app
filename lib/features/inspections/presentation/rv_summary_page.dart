@@ -113,18 +113,19 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
                       ),
                       title: Text(issue.message),
                       onTap: () async {
-                        final section = issue.sectionId;
-                        final index = section == null
-                            ? 1
+                        final inferred = issue.sectionId == null
+                            ? (issue.stepIndex ?? 0)
                             : draft.checklist.sections.indexWhere(
-                                (item) => item.id == section,
+                                (section) => section.id == issue.sectionId,
                               );
                         await state.rvDraftRepository.save(
                           draft.copyWith(
-                            activeFormStep: index < 0 ? 0 : index,
+                            activeFormStep: inferred < 0
+                                ? (issue.stepIndex ?? 0)
+                                : inferred,
                             navigationQuestionId: issue.questionId,
                             navigationSubItemId: issue.subItemId,
-                            navigationFieldId: issue.fieldId,
+                            navigationFieldId: issue.fieldId ?? issue.focusKey,
                             returnToSummary: true,
                           ),
                         );
@@ -218,14 +219,6 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
                   : 'Sincronizar y enviar',
             ),
           ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: busy || draft.isReadOnly
-                ? null
-                : () => _cancel(context, state),
-            icon: const Icon(Icons.cancel_outlined),
-            label: const Text('Cancelar inspección'),
-          ),
         ],
       ),
     );
@@ -299,42 +292,6 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
     if (_submissionGate.consumeIfComplete(result)) {
       await RvReviewNavigation.showSubmissionSuccessAndReturnHome(context);
     }
-  }
-
-  Future<void> _cancel(BuildContext context, AppState state) async {
-    final reason = TextEditingController();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancelar inspección'),
-        content: TextField(
-          controller: reason,
-          minLines: 2,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            labelText: 'Motivo',
-            hintText: 'Mínimo 3 caracteres',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Volver'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Cancelar inspección'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || reason.text.trim().length < 3) return;
-    setState(() => busy = true);
-    await state.inspectionSyncCoordinator.cancel(
-      state.rvDraftRepository.find(widget.clientInspectionId)!,
-      reason.text,
-    );
-    if (mounted) setState(() => busy = false);
   }
 }
 

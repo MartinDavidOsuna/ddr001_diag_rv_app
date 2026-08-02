@@ -515,18 +515,6 @@ class InspectionSyncCoordinator {
     );
   }
 
-  Future<RvDraft> cancel(RvDraft draft, String reason) async {
-    if (draft.serverInspectionId != null)
-      await remote.cancel(draft.serverInspectionId!, reason);
-    return _save(
-      draft.copyWith(
-        localStatus: RvLocalStatus.cancelled,
-        remoteStatus: 'cancelled',
-        clearError: true,
-      ),
-    );
-  }
-
   Future<RvDraft> _failure(RvDraft draft, ApiException error) {
     final retry = draft.retryCount + 1;
     final failedAt = DateTime.now().toUtc();

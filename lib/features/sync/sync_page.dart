@@ -201,7 +201,7 @@ class _SyncPageState extends State<SyncPage> {
               LinearProgressIndicator(value: state.syncProgress),
               const SizedBox(height: 7),
               Text(
-                '${(state.syncProgress * 100).round()}% · procesando diagnósticos, fotografías y trazabilidad',
+                '${state.syncCompleted} de ${state.syncTotal} · ${_stageLabel(state.syncStage)}${state.syncingReport == null ? '' : ' · hidrante ${state.syncingReport}'}',
                 textAlign: TextAlign.center,
               ),
             ],
@@ -212,9 +212,7 @@ class _SyncPageState extends State<SyncPage> {
                   : state.synchronize,
               icon: const Icon(Icons.sync),
               label: Text(
-                state.syncing
-                    ? 'Sincronizando...'
-                    : 'Sincronizar ${state.pendingCount} elementos',
+                state.syncing ? 'Sincronizando...' : 'Sincronizar todo',
               ),
             ),
             const SizedBox(height: 12),
@@ -228,6 +226,17 @@ class _SyncPageState extends State<SyncPage> {
       ),
     );
   }
+
+  String _stageLabel(GlobalSyncStage stage) => switch (stage) {
+    GlobalSyncStage.idle => 'En espera',
+    GlobalSyncStage.waitingConnection => 'Esperando conexión',
+    GlobalSyncStage.preparing => 'Preparando',
+    GlobalSyncStage.catalogs => 'Sincronizando catálogos',
+    GlobalSyncStage.reports => 'Enviando revisiones y fotografías',
+    GlobalSyncStage.projections => 'Actualizando hidrantes',
+    GlobalSyncStage.completed => 'Completado',
+    GlobalSyncStage.completedWithWarnings => 'Completado con advertencias',
+  };
 }
 
 class SyncCount extends StatelessWidget {

@@ -6,6 +6,7 @@ import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
 import '../../domain/enums/app_enums.dart';
+import 'rv_work_dashboard.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -14,12 +15,19 @@ class HomePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final drafts = state.rvDraftRepository.pending();
-    final submitted = state.hydrants
-        .where((item) => item.f02a.status == InspectionStatus.completed)
-        .length;
-    final inProgress = state.hydrants
-        .where((item) => item.f02a.status == InspectionStatus.inProgress)
-        .length;
+    final counts = {for (final group in RvWorkGroup.values) group: 0};
+    for (final draft in drafts) {
+      final group = RvWorkDashboardProjection.forDraft(draft);
+      counts[group] = counts[group]! + 1;
+    }
+    for (final hydrant in state.hydrants.where(
+      (item) =>
+          item.f02a.status == InspectionStatus.validated ||
+          item.f02a.status == InspectionStatus.returned,
+    )) {
+      final group = RvWorkDashboardProjection.forRemote(hydrant.f02a.status);
+      counts[group] = counts[group]! + 1;
+    }
     return Scaffold(
       appBar: AppPageHeader(
         title: 'DIAGNOSTICO HIDRANTES',
@@ -67,26 +75,19 @@ class HomePage extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _Count(
-                label: 'Borradores',
-                value: drafts.length,
-                color: AppColors.blue,
-              ),
-              _Count(
-                label: 'En proceso',
-                value: inProgress,
-                color: AppColors.teal,
-              ),
-              _Count(
-                label: 'Enviadas',
-                value: submitted,
-                color: AppColors.green,
-              ),
-              _Count(
-                label: 'Con error',
-                value: state.syncErrors,
-                color: AppColors.red,
-              ),
+              for (final group in RvWorkGroup.values)
+                _Count(
+                  label: group.label,
+                  value: counts[group]!,
+                  color: switch (group) {
+                    RvWorkGroup.inProgress => AppColors.blue,
+                    RvWorkGroup.pendingSync => AppColors.orange,
+                    RvWorkGroup.submitted => AppColors.teal,
+                    RvWorkGroup.validated => AppColors.green,
+                    RvWorkGroup.returned ||
+                    RvWorkGroup.conflicts => AppColors.red,
+                  },
+                ),
             ],
           ),
           const SizedBox(height: 18),
@@ -129,7 +130,7 @@ class HomePage extends StatelessWidget {
                 leading: const Icon(Icons.assignment_outlined),
                 title: Text('Cuenta ${hydrant.code}'),
                 subtitle: Text(
-                  '${hydrant.locality} · ${_status(hydrant.f02a.status)}',
+                  '${_status(hydrant.f02a.status)} · ${hydrant.lastStatusChangedAt?.toLocal().toString().substring(0, 16) ?? 'Sin fecha remota'}',
                 ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => context.push('/hydrants/${hydrant.id}'),

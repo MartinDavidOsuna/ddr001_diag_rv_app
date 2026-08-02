@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/services/app_state.dart';
+import '../inspections/presentation/rv_review_navigation.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({required this.navigationShell, super.key});
@@ -14,10 +17,28 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   bool navigating = false;
   double? dragStartX;
-  void navigate(int index) {
+  Future<void> navigate(int index) async {
     if (navigating || index == widget.navigationShell.currentIndex) return;
     navigating = true;
-    widget.navigationShell.goBranch(index, initialLocation: false);
+    final path = GoRouterState.of(context).uri.path;
+    if (path.contains('/inspection/')) {
+      final state = context.read<AppState>();
+      final segments = path.split('/');
+      final hydrantId = segments.length > 2 ? segments[2] : null;
+      final hasChanges = state.rvDraftRepository.pending().any(
+        (draft) =>
+            draft.hydrantId == hydrantId &&
+            (draft.answers.isNotEmpty ||
+                draft.photoCount > 0 ||
+                draft.location != null ||
+                draft.signal != null),
+      );
+      if (hasChanges && !await RvReviewNavigation.requestExitReview(context)) {
+        navigating = false;
+        return;
+      }
+    }
+    widget.navigationShell.goBranch(index, initialLocation: true);
     WidgetsBinding.instance.addPostFrameCallback((_) => navigating = false);
   }
 
@@ -28,8 +49,8 @@ class _MainShellState extends State<MainShell> {
     if (start == null || start < 24 || start > width - 24) return;
     final velocity = details.primaryVelocity ?? 0;
     final current = widget.navigationShell.currentIndex;
-    if (velocity < -350 && current < 3) navigate(current + 1);
-    if (velocity > 350 && current > 0) navigate(current - 1);
+    if (velocity < -350 && current < 3) unawaited(navigate(current + 1));
+    if (velocity > 350 && current > 0) unawaited(navigate(current - 1));
   }
 
   @override
@@ -78,7 +99,7 @@ class _MainShellState extends State<MainShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: widget.navigationShell.currentIndex,
-        onDestinationSelected: navigate,
+        onDestinationSelected: (index) => unawaited(navigate(index)),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),

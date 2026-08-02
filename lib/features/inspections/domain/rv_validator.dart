@@ -2,8 +2,10 @@ import '../../checklist/data/checklist_models.dart';
 import 'rv_draft.dart';
 import 'rv_sync_state.dart';
 
-class RvValidationIssue {
-  const RvValidationIssue({
+enum PendingIssueSeverity { warning, blocking }
+
+class RvPendingIssue {
+  const RvPendingIssue({
     required this.code,
     required this.message,
     this.sectionId,
@@ -11,10 +13,21 @@ class RvValidationIssue {
     this.subItemId,
     this.fieldId,
     this.slotCode,
+    this.stepIndex,
+    this.componentType,
+    this.instanceId,
+    this.instanceIndex,
+    this.focusKey,
+    this.severity = PendingIssueSeverity.blocking,
   });
   final String code, message;
   final String? sectionId, questionId, subItemId, fieldId, slotCode;
+  final int? stepIndex, instanceIndex;
+  final String? componentType, instanceId, focusKey;
+  final PendingIssueSeverity severity;
 }
+
+typedef RvValidationIssue = RvPendingIssue;
 
 class RvValidationResult {
   const RvValidationResult(this.issues);
@@ -127,6 +140,8 @@ class RvValidator {
         const RvValidationIssue(
           code: 'location_missing',
           message: 'Falta capturar la ubicación.',
+          stepIndex: 1,
+          focusKey: 'location',
         ),
       );
     if (draft.signal == null)
@@ -134,6 +149,8 @@ class RvValidator {
         const RvValidationIssue(
           code: 'signal_missing',
           message: 'Falta capturar la conectividad.',
+          stepIndex: 1,
+          focusKey: 'signal',
         ),
       );
     for (final slot in requiredRvPhotoSlots) {
@@ -144,6 +161,8 @@ class RvValidator {
             code: 'required_photo_missing',
             message: 'Falta ${rvPhotoSlotLabels[slot]}.',
             slotCode: slot,
+            stepIndex: 1,
+            focusKey: 'photo:$slot',
           ),
         );
       } else if (requireSynced &&
@@ -155,6 +174,8 @@ class RvValidator {
             code: 'photo_pending',
             message: '${rvPhotoSlotLabels[slot]} no está subida.',
             slotCode: slot,
+            stepIndex: 1,
+            focusKey: 'photo:$slot',
           ),
         );
       }
@@ -205,6 +226,8 @@ class RvValidator {
           message: 'Falta seleccionar la configuración de válvulas.',
           sectionId: section.id,
           fieldId: 'configuration',
+          componentType: 'parcel_valves',
+          focusKey: 'parcel:configuration',
         ),
       );
       return;
@@ -217,6 +240,8 @@ class RvValidator {
           message: 'Falta especificar la configuración de válvulas.',
           sectionId: section.id,
           fieldId: 'customDescription',
+          componentType: 'parcel_valves',
+          focusKey: 'parcel:customDescription',
         ),
       );
     }
@@ -229,6 +254,8 @@ class RvValidator {
           message: 'La cantidad de válvulas no coincide con la configuración.',
           sectionId: section.id,
           fieldId: 'valveCount',
+          componentType: 'parcel_valves',
+          focusKey: 'parcel:valveCount',
         ),
       );
       return;
@@ -242,6 +269,9 @@ class RvValidator {
           sectionId: section.id,
           subItemId: subItem,
           fieldId: field,
+          componentType: 'parcel_valve',
+          instanceIndex: valve.index,
+          focusKey: 'parcel:$subItem:$field',
         ),
       );
       if (!_catalogSelectionValid(valve.valveBrand)) {
@@ -265,6 +295,9 @@ class RvValidator {
             sectionId: section.id,
             subItemId: subItem,
             fieldId: 'pilotConnected',
+            componentType: 'parcel_valve',
+            instanceIndex: valve.index,
+            focusKey: 'parcel:$subItem:pilotConnected',
           ),
         );
       }

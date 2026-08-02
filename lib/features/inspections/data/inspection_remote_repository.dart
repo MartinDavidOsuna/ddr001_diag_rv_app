@@ -373,18 +373,6 @@ class InspectionRemoteRepository {
     }
   }
 
-  Future<void> cancel(String id, String reason) async {
-    try {
-      await client.dio.post<void>(
-        '/inspections/$id/cancel',
-        data: {'reason': reason.trim()},
-        options: Options(headers: {'Idempotency-Key': 'cancel-$id'}),
-      );
-    } on DioException catch (error) {
-      throw ApiException.fromDio(error);
-    }
-  }
-
   Future<Response<List<int>>> photoContent(
     String inspectionId,
     String photoId, {

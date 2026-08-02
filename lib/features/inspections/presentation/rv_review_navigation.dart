@@ -133,7 +133,7 @@ class RvReviewNavigation {
         builder: (dialogContext) => AlertDialog(
           title: const Text('¿Salir de la revisión?'),
           content: const Text(
-            'Tus avances guardados se conservarán y podrás continuar después.',
+            'Tus avances están guardados en el dispositivo. Podrás continuar después.',
           ),
           actions: [
             TextButton(

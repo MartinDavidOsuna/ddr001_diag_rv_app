@@ -28,6 +28,7 @@ import '../../features/checklist/data/checklist_models.dart';
 import '../../features/checklist/data/checklist_repository.dart';
 import '../../features/inspections/data/inspection_sync_coordinator.dart';
 import '../../features/inspections/data/rv_draft_repository.dart';
+import '../../features/inspections/domain/rv_sync_state.dart';
 import '../../features/catalogs/dynamic_catalog_repository.dart';
 import '../../features/visual_reports/data/visual_report_repository.dart';
 import '../config/app_config.dart';
@@ -35,6 +36,17 @@ import '../network/api_exception.dart';
 import '../network/connectivity_monitor.dart';
 import '../security/local_data_scope.dart';
 import 'update_service.dart';
+
+enum GlobalSyncStage {
+  idle,
+  waitingConnection,
+  preparing,
+  catalogs,
+  reports,
+  projections,
+  completed,
+  completedWithWarnings,
+}
 
 class ProfileTodayStats {
   const ProfileTodayStats({
@@ -108,6 +120,10 @@ class AppState extends ChangeNotifier {
       assignmentSyncing = false;
   bool sessionOffline = false;
   double syncProgress = 0;
+  GlobalSyncStage syncStage = GlobalSyncStage.idle;
+  int syncTotal = 0, syncCompleted = 0, syncWarnings = 0, syncConflicts = 0;
+  String? syncingReport;
+  Future<void>? _activeSync;
   UpdateInfo? updateInfo;
   AssignmentSyncScenario assignmentScenario = AssignmentSyncScenario.noChanges;
   AssignmentSyncResult? lastAssignmentResult;
@@ -246,6 +262,7 @@ class AppState extends ChangeNotifier {
     if (online) {
       sessionOffline = false;
       unawaited(_completePendingLogout());
+      if (pendingCount > 0) unawaited(synchronize());
     }
     notifyListeners();
   }
@@ -278,6 +295,7 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       unawaited(synchronizeAssignments());
       unawaited(refreshChecklist());
+      unawaited(synchronize());
       final monitor = connectivityMonitor;
       if (monitor != null) unawaited(monitor.check());
       debugPrint('[PERF] login_session_ms=${stopwatch.elapsedMilliseconds}');
@@ -816,30 +834,82 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> synchronize() async {
-    if (!online || syncing || allSynchronized) return;
+  Future<void> synchronize() {
+    final active = _activeSync;
+    if (active != null) return active;
+    final run = _runUnifiedSynchronization();
+    _activeSync = run;
+    return run.whenComplete(() => _activeSync = null);
+  }
+
+  Future<void> _runUnifiedSynchronization() async {
+    if (!online) {
+      syncStage = GlobalSyncStage.waitingConnection;
+      notifyListeners();
+      return;
+    }
+    if (allSynchronized) {
+      syncStage = GlobalSyncStage.completed;
+      notifyListeners();
+      return;
+    }
     syncing = true;
+    syncStage = GlobalSyncStage.preparing;
     syncProgress = 0;
+    syncCompleted = 0;
+    syncWarnings = 0;
+    syncConflicts = 0;
     notifyListeners();
     await trace('sync_execute', 'Ejecución de sincronización iniciada');
     try {
+      await _completePendingLogout();
+      syncStage = GlobalSyncStage.catalogs;
+      await dynamicCatalogRepository?.synchronizePending();
+      final manual = syncQueueRepository
+          .ready()
+          .where((value) => value.entityType == 'manualHydrant')
+          .toList();
+      final drafts = rvDraftRepository.pending();
+      syncTotal = manual.length + drafts.length;
       for (final item in syncQueueRepository.ready().where(
         (value) => value.entityType == 'manualHydrant',
       )) {
-        await hydrantRepository.synchronizeManual(
-          item.entityId,
-          idempotencyKey: item.idempotencyKey,
-        );
-        await syncQueueRepository.markSynced(item.id);
+        try {
+          await hydrantRepository.synchronizeManual(
+            item.entityId,
+            idempotencyKey: item.idempotencyKey,
+          );
+          await syncQueueRepository.markSynced(item.id);
+        } on Object {
+          syncWarnings++;
+        }
+        syncCompleted++;
       }
-      final drafts = rvDraftRepository.pending();
+      syncStage = GlobalSyncStage.reports;
       for (var index = 0; index < drafts.length; index++) {
-        await inspectionSyncCoordinator.synchronize(drafts[index]);
-        syncProgress = drafts.isEmpty ? 1 : (index + 1) / drafts.length;
+        syncingReport = drafts[index].accountNumber;
+        final result = await inspectionSyncCoordinator.synchronize(
+          drafts[index],
+        );
+        if (result.localStatus == RvLocalStatus.conflict ||
+            result.localStatus == RvLocalStatus.versionConflict) {
+          syncConflicts++;
+        } else if (result.lastSyncError != null) {
+          syncWarnings++;
+        }
+        syncCompleted++;
+        syncProgress = syncTotal == 0 ? 1 : syncCompleted / syncTotal;
         notifyListeners();
       }
+      syncStage = GlobalSyncStage.projections;
+      await synchronizeAssignments();
+      syncStage = syncWarnings > 0 || syncConflicts > 0
+          ? GlobalSyncStage.completedWithWarnings
+          : GlobalSyncStage.completed;
+      syncProgress = 1;
     } finally {
       syncing = false;
+      syncingReport = null;
       notifyListeners();
     }
   }
