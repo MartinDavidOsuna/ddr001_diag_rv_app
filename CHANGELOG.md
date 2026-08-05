@@ -2,6 +2,27 @@
 
 Todos los cambios notables de **DIAGNOSTICO HIDRANTES** se documentan aquí.
 
+## 0.2.26+39 — 2026-08-03
+
+- Consolida las últimas verificaciones operativas, de sesión persistente y sincronización RV.
+- Configura la compilación de producción para `cifra.aquafim.com:3002`.
+- Renueva los recursos adaptativos del icono de Android.
+
+## 0.2.7+20 — 2026-08-03
+
+- Permite conectar builds de desarrollo a una API HTTP en una IPv4 privada.
+- Mantiene la excepción HTTP de producción limitada a `cifra.aquafim.com:3002`.
+- Agrega diagnósticos automatizados de DNS, TCP, salud y sesión de campo.
+
+## 0.2.6+19 — 2026-08-02
+
+- Unifica la navegación pendiente y los flujos operativos de REPORTE VISUAL.
+- Agrega fotografías generales, observaciones y la pregunta de conexión piloto.
+- Amplía el registro de componentes con marca ilegible y elemento de filtro no definido.
+- Consume el catálogo global de rangos de presión y el estado global de inspección de hidrantes.
+- Incorpora consulta móvil de reportes visuales y edición offline mediante versiones.
+- Restablece sesiones permanentes para el trabajo de campo.
+
 ## 0.2.4+17
 
 - Conserva sesiones y reportes locales cuando falla temporalmente la renovación.

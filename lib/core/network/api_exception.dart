@@ -68,8 +68,6 @@ class ApiException implements Exception {
         'USER_INACTIVE': 'Tu usuario fue desactivado.',
         'DEVICE_BLOCKED': 'Este dispositivo fue bloqueado.',
         'DEVICE_BINDING_REVOKED': 'El acceso de este dispositivo fue revocado.',
-        'REFRESH_TOKEN_REUSE':
-            'La seguridad de la sesión requiere iniciar nuevamente.',
       };
       if (definitiveMessages.containsKey(domainCode)) {
         return ApiException(
@@ -82,7 +80,9 @@ class ApiException implements Exception {
       }
       return ApiException(
         ApiErrorKind.authenticationRequired,
-        'Sin conexión. Puedes continuar trabajando; los cambios se sincronizarán después.',
+        domainCode == 'REFRESH_TOKEN_REUSE'
+            ? 'La sesión se está recuperando automáticamente.'
+            : 'La sesión no pudo verificarse temporalmente. Se reintentará automáticamente.',
         statusCode: status,
         requestId: requestId,
         domainCode: domainCode,

@@ -718,6 +718,13 @@ class HydrantDetailPage extends StatelessWidget {
     InspectionSummary summary,
     String type,
   ) {
+    if (type == 'a' &&
+        (summary.status == InspectionStatus.completed ||
+            summary.status == InspectionStatus.validated)) {
+      final account = state.hydrant(id).code;
+      context.push('/visual-report/${Uri.encodeComponent(account)}');
+      return;
+    }
     if (state.editingRestricted &&
         summary.status != InspectionStatus.completed &&
         summary.status != InspectionStatus.inProgress &&

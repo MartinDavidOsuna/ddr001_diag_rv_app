@@ -29,6 +29,25 @@ token en archivos, consola compartida ni documentación.
 
 La suite no contiene métodos POST, PUT, PATCH o DELETE y no ejecuta logout.
 
+## Diagnóstico de conectividad de producción
+
+La suite de diagnóstico separa resolución DNS, apertura TCP, salud HTTP,
+estabilidad de probes y disponibilidad de la ruta de sesión. El único POST usa
+un objeto vacío que el contrato rechaza con 422 antes de crear datos:
+
+```text
+flutter test test/network/production_endpoint_connectivity_test.dart \
+  --dart-define=API_BASE_URL=http://cifra.aquafim.com:3002/api/v1 \
+  --dart-define=ALLOW_PRODUCTION_CONNECTIVITY_TESTS=true
+```
+
+La configuración Android y todas las ramas que pueden producir el mensaje
+`Servidor no disponible` se verifican sin red mediante:
+
+```text
+flutter test test/foundation/production_android_network_test.dart
+```
+
 ## HTTP temporal
 
 Android permite cleartext únicamente para `cifra.aquafim.com` mediante

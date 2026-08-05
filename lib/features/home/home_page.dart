@@ -14,16 +14,20 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final drafts = state.rvDraftRepository.pending();
+    final drafts = state.rvDraftRepository.all();
     final counts = {for (final group in RvWorkGroup.values) group: 0};
+    final locallyRepresentedHydrants = <String>{};
     for (final draft in drafts) {
+      locallyRepresentedHydrants.add(draft.hydrantId);
       final group = RvWorkDashboardProjection.forDraft(draft);
       counts[group] = counts[group]! + 1;
     }
     for (final hydrant in state.hydrants.where(
       (item) =>
+          !locallyRepresentedHydrants.contains(item.id) &&
+          (item.f02a.status == InspectionStatus.completed ||
           item.f02a.status == InspectionStatus.validated ||
-          item.f02a.status == InspectionStatus.returned,
+          item.f02a.status == InspectionStatus.returned),
     )) {
       final group = RvWorkDashboardProjection.forRemote(hydrant.f02a.status);
       counts[group] = counts[group]! + 1;

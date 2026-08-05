@@ -16,6 +16,22 @@ void main() {
     ]);
   });
 
+  test('dashboard includes submitted read-only drafts and completed remotes', () {
+    final home = File('lib/features/home/home_page.dart').readAsStringSync();
+    expect(home, contains('rvDraftRepository.all()'));
+    expect(home, contains('InspectionStatus.completed'));
+    expect(home, contains('locallyRepresentedHydrants'));
+  });
+
+  test('completed RV opens the read-only visual report instead of the form', () {
+    final source = File(
+      'lib/features/hydrants/hydrant_pages.dart',
+    ).readAsStringSync();
+    expect(source, contains("type == 'a'"));
+    expect(source, contains("context.push('/visual-report/"));
+    expect(source, contains('summary.status == InspectionStatus.completed'));
+  });
+
   test('pending issue carries navigation, instance, focus and severity', () {
     const issue = RvPendingIssue(
       code: 'pilot_connection_missing',

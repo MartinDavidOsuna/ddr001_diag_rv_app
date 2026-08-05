@@ -46,7 +46,7 @@ class VisualReportRepository {
   Future<List<int>> photo(String path) async {
     try {
       final r = await client.dio.get<List<int>>(
-        path,
+        _apiRelativePath(path),
         options: Options(responseType: ResponseType.bytes),
       );
       return r.data ?? const [];
@@ -58,4 +58,12 @@ class VisualReportRepository {
   void clearSessionCache() => _sessionCache.clear();
   Future<void> invalidateOwn(String account, String userId) =>
       cache.delete('$userId|${account.trim().toUpperCase()}');
+
+  static String _apiRelativePath(String path) {
+    final trimmed = path.trim();
+    if (trimmed.startsWith('/api/v1/')) {
+      return trimmed.substring('/api/v1'.length);
+    }
+    return trimmed;
+  }
 }

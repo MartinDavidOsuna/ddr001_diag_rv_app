@@ -19,6 +19,7 @@ import '../../domain/filters/hydrant_query_projection.dart';
 import '../../domain/models/app_models.dart';
 import '../../domain/models/assignment_sync_models.dart';
 import '../../domain/functional/functional_models.dart';
+import '../../domain/inspections/visual_inspection.dart';
 import '../../domain/sync/sync_queue_item.dart';
 import '../../features/auth/data/field_session_models.dart';
 import '../../features/auth/data/field_session_repository.dart';
@@ -382,22 +383,55 @@ class AppState extends ChangeNotifier {
   }
 
   void _replaceHydrantsFromCache() {
+    final latestLocalByHydrant = <String, VisualInspection>{};
+    for (final report in visualInspectionRepository.accessible()) {
+      final current = latestLocalByHydrant[report.hydrantId];
+      if (current == null || report.updatedAt.isAfter(current.updatedAt)) {
+        latestLocalByHydrant[report.hydrantId] = report;
+      }
+    }
+    Hydrant project(Hydrant item) {
+      final report = latestLocalByHydrant[item.id];
+      if (report == null || report.status != InspectionStatus.completed) {
+        return item;
+      }
+      final draft = rvDraftRepository.fromInspection(report);
+      final validated = draft?.remoteStatus == 'validated';
+      return item.copyWith(
+        syncStatus: validated ? SyncStatus.validated : SyncStatus.synced,
+        f02a: InspectionSummary(
+          type: item.f02a.type,
+          status: validated
+              ? InspectionStatus.validated
+              : InspectionStatus.completed,
+          progress: 1,
+        ),
+        lastStatusChangedAt:
+            draft?.lastStatusChangedAt ?? report.completedAt ?? report.updatedAt,
+        photoCount: draft?.photoCount ?? report.photoIds.length,
+      );
+    }
     final catalog = hydrantRepository
         .cached(scope: 'all')
-        .map((e) => e.toAppModel())
+        .map((e) => project(e.toAppModel()))
         .toList();
     catalogHydrants
       ..clear()
       ..addAll(catalog);
     final cached = hydrantRepository
         .cached(scope: 'mine')
-        .map((e) => e.toAppModel())
+        .map((e) => project(e.toAppModel()))
         .toList();
     final ids = cached.map((item) => item.id).toSet();
     for (final item in catalog) {
       if (!ids.contains(item.id) &&
           visualInspectionRepository.hasLocalInspection(item.id)) {
-        cached.add(item.copyWith(syncStatus: SyncStatus.local));
+        cached.add(
+          item.f02a.status == InspectionStatus.completed ||
+                  item.f02a.status == InspectionStatus.validated
+              ? item
+              : item.copyWith(syncStatus: SyncStatus.local),
+        );
       }
     }
     hydrants

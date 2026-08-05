@@ -106,7 +106,8 @@ class RvValidator {
             continue;
         }
         if (item.required &&
-            (answer == null || (!answer.notApplicable && _empty(answer)))) {
+            (answer == null ||
+                (!answer.notApplicable && _empty(item, answer)))) {
           issues.add(
             RvValidationIssue(
               code: item.code.endsWith('_pilot_connected')
@@ -313,6 +314,10 @@ class RvValidator {
     bool diameter = false,
   }) {
     if (value == null) return false;
+    if (!diameter && value['mode'] == 'illegible') {
+      return value['brandId'] == null &&
+          (value['reason']?.toString().trim().length ?? 0) >= 10;
+    }
     final display = value['displayValue']?.toString().trim() ?? '';
     final remote = value['catalogId']?.toString().trim() ?? '';
     final local = value['localCatalogId']?.toString().trim() ?? '';
@@ -322,9 +327,12 @@ class RvValidator {
     return numeric is num && numeric > 0 && value['unit'] == 'in';
   }
 
-  bool _empty(RvAnswer answer) {
+  bool _empty(ChecklistItemDefinition item, RvAnswer answer) {
     final value = answer.value;
     if (value is Map) {
+      if (item.code.contains('brand') && value['mode'] == 'illegible') {
+        return (value['reason']?.toString().trim().length ?? 0) < 10;
+      }
       final display = value['displayValue']?.toString().trim() ?? '';
       final remote = value['catalogId']?.toString().trim() ?? '';
       final local = value['localCatalogId']?.toString().trim() ?? '';
@@ -335,6 +343,23 @@ class RvValidator {
 
   bool _validType(ChecklistItemDefinition item, RvAnswer answer) {
     final value = answer.value;
+    if (value is Map && _isPressureGaugeRange(item.code)) {
+      final display = value['displayValue']?.toString().trim() ?? '';
+      final remote = value['catalogId']?.toString().trim() ?? '';
+      final local = value['localCatalogId']?.toString().trim() ?? '';
+      final minimum = value['minimum'];
+      final maximum = value['maximum'];
+      final unit = value['unit']?.toString().trim().toLowerCase();
+      return display.isNotEmpty &&
+          (remote.isNotEmpty || local.isNotEmpty) &&
+          minimum is num &&
+          maximum is num &&
+          minimum.isFinite &&
+          maximum.isFinite &&
+          minimum >= 0 &&
+          maximum > minimum &&
+          const {'psi', 'bar'}.contains(unit);
+    }
     if (value is Map && item.code.contains('brand')) {
       if (value['mode'] == 'illegible') {
         return value['brandId'] == null &&
@@ -395,6 +420,14 @@ class RvValidator {
       _ => false,
     };
   }
+
+  bool _isPressureGaugeRange(String code) => const {
+    'sustaining_gauge_range',
+    'regulating_gauge_range',
+    'filter_gauge_before_range',
+    'filter_gauge_after_range',
+    'parcel_gauge_range',
+  }.contains(code);
 }
 
 extension _FirstOrNull<T> on Iterable<T> {

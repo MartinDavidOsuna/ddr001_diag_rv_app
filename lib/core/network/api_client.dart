@@ -29,6 +29,8 @@ class ApiClient {
                headers: const {'Accept': 'application/json'},
              ),
            ) {
+    _refreshDio = Dio(this.dio.options)
+      ..httpClientAdapter = this.dio.httpClientAdapter;
     this.dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
@@ -104,6 +106,7 @@ class ApiClient {
   }
 
   final Dio dio;
+  late final Dio _refreshDio;
   final SessionStorage _storage;
   Future<FieldSession?>? _refreshing;
   final Set<CancelToken> _authenticatedRequests = {};
@@ -251,9 +254,15 @@ class ApiClient {
     if (current == null) return null;
     try {
       if (kDebugMode) debugPrint('[AUTH] refresh iniciado');
-      final response = await dio.post<Map<String, dynamic>>(
+      // Refresh must bypass the authenticated interceptor chain. Re-entering
+      // the same Dio instance from onError can complete its handler twice and
+      // can send the same rotating refresh token concurrently.
+      final response = await _refreshDio.post<Map<String, dynamic>>(
         '/field-sessions/refresh',
-        data: {'refreshToken': current.refreshToken},
+        data: {
+          'refreshToken': current.refreshToken,
+          'installationId': current.installationId,
+        },
         options: Options(extra: {'skipAuth': true}),
       );
       final data = response.data ?? const {};
@@ -283,7 +292,6 @@ class ApiClient {
         'USER_INACTIVE',
         'DEVICE_BLOCKED',
         'DEVICE_BINDING_REVOKED',
-        'REFRESH_TOKEN_REUSE',
       }.contains(
         error.response?.data is Map
             ? (error.response!.data as Map)['code']?.toString()

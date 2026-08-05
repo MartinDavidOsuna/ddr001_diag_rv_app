@@ -4,4 +4,8 @@
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">cifra.aquafim.com</domain>
     </domain-config>
+    <!-- API de desarrollo accesible únicamente desde la LAN de diagnóstico. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">192.168.0.166</domain>
+    </domain-config>
 </network-security-config>

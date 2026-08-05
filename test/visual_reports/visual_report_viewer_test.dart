@@ -53,6 +53,7 @@ void main() {
     expect(report.signal?.connected, 'Sí');
     expect(report.conflict?.type, 'concurrent_edit');
     expect(report.isOwn, isTrue);
+    expect(report.syncStatus, 'synchronized');
   });
   test('legacy missing values become No capturado', () {
     final report = VisualReport.fromJson({
@@ -79,12 +80,23 @@ void main() {
     expect(source, contains('Semantics'));
     expect(source, contains('Reintentar fotografía'));
     expect(source, contains('Versión actual'));
+    expect(source, contains('Fotografías obligatorias'));
+    expect(source, contains('Fotografías generales'));
+    expect(source, contains("? 'Sincronizado'"));
     expect(source, isNot(contains('localidad')));
     expect(source, isNot(contains('municipio')));
     expect(source, isNot(contains('correo')));
     expect(source, isNot(contains('teléfono')));
     expect(source, isNot(contains('Compartir')));
     expect(source, isNot(contains('Descargar')));
+  });
+  test('photo downloads do not duplicate the API v1 prefix', () {
+    final source = File(
+      'lib/features/visual_reports/data/visual_report_repository.dart',
+    ).readAsStringSync();
+    expect(source, contains("trimmed.startsWith('/api/v1/')"));
+    expect(source, contains("substring('/api/v1'.length)"));
+    expect(source, contains('_apiRelativePath(path)'));
   });
   test('navigation opens reports for unavailable hydrants', () {
     final map = File('lib/features/map/map_page.dart').readAsStringSync();

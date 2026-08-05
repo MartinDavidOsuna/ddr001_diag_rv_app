@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -24,10 +25,32 @@ class RvSummaryPage extends StatefulWidget {
   State<RvSummaryPage> createState() => _RvSummaryPageState();
 }
 
-class _RvSummaryPageState extends State<RvSummaryPage> {
+class _RvSummaryPageState extends State<RvSummaryPage>
+    with SingleTickerProviderStateMixin {
   bool busy = false;
   String? message;
   final _submissionGate = RvSubmissionCompletionGate();
+  late final AnimationController _sendingAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _sendingAnimation = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
+  }
+
+  @override
+  void dispose() {
+    _sendingAnimation.dispose();
+    super.dispose();
+  }
+
+  void _setBusy(bool value) {
+    setState(() => busy = value);
+    value ? _sendingAnimation.repeat() : _sendingAnimation.stop();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -129,7 +152,7 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
                             returnToSummary: true,
                           ),
                         );
-                        if (context.mounted) context.pop();
+                        if (context.mounted) context.pop(issue);
                       },
                     ),
                 ],
@@ -204,19 +227,33 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
               ),
             ),
           const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: busy || draft.isReadOnly || !validation.isValid
-                ? null
-                : () => _confirmAndSubmit(context, state, draft),
-            icon: const Icon(Icons.send_outlined),
-            label: Text(
-              busy
-                  ? 'Enviando...'
-                  : draft.localStatus == RvLocalStatus.submitted
-                  ? 'Inspección enviada'
-                  : syncedValidation.isValid
-                  ? 'Enviar inspección'
-                  : 'Sincronizar y enviar',
+          AnimatedBuilder(
+            animation: _sendingAnimation,
+            builder: (context, child) => CustomPaint(
+              foregroundPainter: busy
+                  ? _SendingBorderPainter(_sendingAnimation.value)
+                  : null,
+              child: child,
+            ),
+            child: FilledButton.icon(
+              onPressed: busy || draft.isReadOnly || !validation.isValid
+                  ? null
+                  : () => _confirmAndSubmit(context, state, draft),
+              icon: busy
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.send_outlined),
+              label: Text(
+                busy
+                    ? 'Enviando...'
+                    : draft.localStatus == RvLocalStatus.submitted
+                    ? 'Inspección enviada'
+                    : syncedValidation.isValid
+                    ? 'Enviar inspección'
+                    : 'Sincronizar y enviar',
+              ),
             ),
           ),
         ],
@@ -270,17 +307,18 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
       ),
     );
     if (confirmed != true || busy) return;
-    setState(() => busy = true);
-    await state.dynamicCatalogRepository?.synchronizePending();
-    final result = await state.inspectionSyncCoordinator.synchronize(
-      draft,
-      submit: true,
-    );
+    _setBusy(true);
+    late final RvDraft result;
+    try {
+      result = await state.inspectionSyncCoordinator.synchronize(
+        draft,
+        submit: true,
+      );
+    } finally {
+      if (mounted) _setBusy(false);
+    }
     if (!mounted || !context.mounted) return;
-    setState(() {
-      busy = false;
-      message = result.lastSyncError;
-    });
+    setState(() => message = result.lastSyncError);
     if (result.localStatus == RvLocalStatus.submitted ||
         result.localStatus == RvLocalStatus.conflict) {
       unawaited(state.synchronizeAssignments());
@@ -293,6 +331,39 @@ class _RvSummaryPageState extends State<RvSummaryPage> {
       await RvReviewNavigation.showSubmissionSuccessAndReturnHome(context);
     }
   }
+}
+
+class _SendingBorderPainter extends CustomPainter {
+  const _SendingBorderPainter(this.progress);
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(20)),
+      );
+    final metric = path.computeMetrics().first;
+    final start = metric.length * progress;
+    final segment = metric.length * .28;
+    final paint = Paint()
+      ..color = Colors.lightBlueAccent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+    final end = start + segment;
+    canvas.drawPath(
+      metric.extractPath(start, math.min(end, metric.length)),
+      paint,
+    );
+    if (end > metric.length) {
+      canvas.drawPath(metric.extractPath(0, end - metric.length), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SendingBorderPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }
 
 // ignore_for_file: curly_braces_in_flow_control_structures

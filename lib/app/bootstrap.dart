@@ -122,6 +122,7 @@ Future<AppState> bootstrap({BootstrapStatusCallback? onStatus}) async {
     index: inspectionIndexBox,
   );
   final rvDraftRepository = RvDraftRepository(visualRepository);
+  await rvDraftRepository.reconcileSubmittedStatuses();
   final inspectionSyncCoordinator = InspectionSyncCoordinator(
     drafts: rvDraftRepository,
     remote: InspectionRemoteRepository(apiClient),
@@ -202,7 +203,9 @@ class _AppBootstrapShellState extends State<AppBootstrapShell> {
                   bootstrap(onStatus: report))
               .timeout(const Duration(seconds: 30));
       if (mounted) setState(() => _state = state);
-    } on Object catch (error) {
+    } on Object catch (error, stackTrace) {
+      debugPrint('[BOOTSTRAP] status=$_status error=$error');
+      debugPrintStack(stackTrace: stackTrace);
       if (mounted) setState(() => _error = error);
     } finally {
       if (mounted) setState(() => _running = false);

@@ -67,6 +67,31 @@ void main() {
     );
   });
 
+  test('local completed projection also requires an exact account search', () {
+    final staleCatalog = hydrant(
+      rvStatus: 'available',
+      availableForRv: true,
+      localStatus: InspectionStatus.completed,
+    );
+    expect(
+      hydrantVisibleForNewRv(
+        staleCatalog,
+        normalizedQuery: '11',
+        hasLocalWork: false,
+      ),
+      isFalse,
+    );
+    expect(
+      hydrantVisibleForNewRv(
+        staleCatalog,
+        normalizedQuery: '000-42',
+        hasLocalWork: false,
+      ),
+      isTrue,
+    );
+    expect(hydrantAvailableForNewRv(staleCatalog), isFalse);
+  });
+
   test('map colors combine canonical and local state', () {
     expect(hydrantMarkerColor(hydrant()), AppColors.brightBlue);
     expect(

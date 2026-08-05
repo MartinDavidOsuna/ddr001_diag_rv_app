@@ -123,28 +123,33 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
               ),
             ),
           for (final hydrant in matches)
-            Card(
-              child: ListTile(
-                title: Text('Cuenta ${hydrant.code}'),
-                subtitle: Text(
-                  hydrant.availableForRv
-                      ? 'Disponible para revisión'
-                      : '${hydrant.rvStatus == 'validated' ? 'Validado' : 'Ya revisado'}${hydrant.lastStatusChangedAt == null ? '' : ' · ${hydrant.lastStatusChangedAt!.toLocal()}'}',
-                ),
-                trailing: startingId == hydrant.id
-                    ? const SizedBox.square(
-                        dimension: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.chevron_right),
-                onTap: startingId == null
-                    ? () => hydrant.availableForRv
-                          ? _confirmAndStart(state, hydrant)
-                          : context.push(
-                              '/visual-report/${Uri.encodeComponent(hydrant.code)}',
-                            )
-                    : null,
-              ),
+            Builder(
+              builder: (context) {
+                final canStart = hydrantAvailableForNewRv(hydrant);
+                return Card(
+                  child: ListTile(
+                    title: Text('Cuenta ${hydrant.code}'),
+                    subtitle: Text(
+                      canStart
+                          ? 'Disponible para revisión'
+                          : '${hydrant.rvStatus == 'validated' ? 'Validado' : 'Ya revisado'}${hydrant.lastStatusChangedAt == null ? '' : ' · ${hydrant.lastStatusChangedAt!.toLocal()}'}',
+                    ),
+                    trailing: startingId == hydrant.id
+                        ? const SizedBox.square(
+                            dimension: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.chevron_right),
+                    onTap: startingId == null
+                        ? () => canStart
+                              ? _confirmAndStart(state, hydrant)
+                              : context.push(
+                                  '/visual-report/${Uri.encodeComponent(hydrant.code)}',
+                                )
+                        : null,
+                  ),
+                );
+              },
             ),
         ],
       ),
@@ -304,6 +309,7 @@ bool hydrantVisibleForNewRv(
   final code = hydrant.code.trim().toLowerCase();
   final exactAccountMatch =
       normalizedQuery.isNotEmpty && code == normalizedQuery;
+  final alreadyReviewed = !hydrantAvailableForNewRv(hydrant);
   final matchesQuery =
       normalizedQuery.isEmpty ||
       code.contains(normalizedQuery) ||
@@ -311,5 +317,12 @@ bool hydrantVisibleForNewRv(
       hydrant.parcel.toLowerCase().contains(normalizedQuery);
   if (!matchesQuery) return false;
   if (exactAccountMatch) return true;
-  return hasLocalWork || (hydrant.isActive && hydrant.availableForRv);
+  return hasLocalWork ||
+      (hydrant.isActive && hydrant.availableForRv && !alreadyReviewed);
 }
+
+@visibleForTesting
+bool hydrantAvailableForNewRv(Hydrant hydrant) =>
+    hydrant.availableForRv &&
+    hydrant.f02a.status != InspectionStatus.completed &&
+    hydrant.f02a.status != InspectionStatus.validated;

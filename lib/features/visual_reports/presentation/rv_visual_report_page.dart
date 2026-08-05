@@ -100,7 +100,6 @@ class _ReportBody extends StatelessWidget {
   };
   @override
   Widget build(BuildContext context) {
-    final all = report.photos.all;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 840),
@@ -125,6 +124,14 @@ class _ReportBody extends StatelessWidget {
                         runSpacing: 8,
                         children: [
                           Chip(label: Text(status(report.status))),
+                          Chip(
+                            avatar: const Icon(Icons.cloud_done_outlined),
+                            label: Text(
+                              report.syncStatus == 'synchronized'
+                                  ? 'Sincronizado'
+                                  : 'Sincronización pendiente',
+                            ),
+                          ),
                           Chip(
                             label: Text(
                               'Versión actual: ${report.versionNumber}',
@@ -198,38 +205,15 @@ class _ReportBody extends StatelessWidget {
                   ],
                 ),
               ),
-            if (all.isNotEmpty)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Fotografías (${all.length})',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate:
-                            const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 180,
-                              childAspectRatio: .9,
-                              crossAxisSpacing: 8,
-                              mainAxisSpacing: 8,
-                            ),
-                        itemCount: all.length,
-                        itemBuilder: (context, index) => _PhotoTile(
-                          photo: all[index],
-                          all: all,
-                          index: index,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+            if (report.photos.required.isNotEmpty)
+              _PhotoSection(
+                title: 'Fotografías obligatorias',
+                photos: report.photos.required,
+              ),
+            if (report.photos.general.isNotEmpty)
+              _PhotoSection(
+                title: 'Fotografías generales',
+                photos: report.photos.general,
               ),
             _SummaryCard(
               title: 'Observaciones',
@@ -248,6 +232,42 @@ class _ReportBody extends StatelessWidget {
   static String _date(DateTime? value) => value == null
       ? 'No capturado'
       : DateFormat("d MMM yyyy · HH:mm", 'es').format(value);
+}
+
+class _PhotoSection extends StatelessWidget {
+  const _PhotoSection({required this.title, required this.photos});
+  final String title;
+  final List<ReportPhoto> photos;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$title (${photos.length})',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 180,
+              childAspectRatio: .9,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemCount: photos.length,
+            itemBuilder: (context, index) =>
+                _PhotoTile(photo: photos[index], all: photos, index: index),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _ConflictCard extends StatelessWidget {

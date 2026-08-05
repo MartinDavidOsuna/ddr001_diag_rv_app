@@ -16,6 +16,7 @@ class VisualReport {
     this.isValidated = false,
     this.isOwn = false,
     this.hasPendingChanges = false,
+    this.syncStatus = 'synchronized',
   });
   final String id, accountNumber, status;
   final int versionNumber, roundNumber;
@@ -28,6 +29,7 @@ class VisualReport {
   final List<ReportObservation> observations;
   final ReportConflict? conflict;
   final bool isValidated, isOwn, hasPendingChanges;
+  final String syncStatus;
 
   factory VisualReport.fromJson(
     Map<String, dynamic> json, {
@@ -38,6 +40,7 @@ class VisualReport {
     versionNumber: (json['versionNumber'] as num?)?.toInt() ?? 1,
     roundNumber: (json['rvRoundNumber'] as num?)?.toInt() ?? 1,
     status: '${json['status'] ?? 'submitted'}',
+    syncStatus: '${json['syncStatus'] ?? 'synchronized'}',
     lastStatusChangedAt: DateTime.tryParse(
       '${json['lastStatusChangedAt'] ?? ''}',
     )?.toLocal(),

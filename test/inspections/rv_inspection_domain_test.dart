@@ -2,6 +2,7 @@ import 'package:ddr001diag/features/checklist/data/checklist_models.dart';
 import 'package:ddr001diag/features/inspections/domain/rv_draft.dart';
 import 'package:ddr001diag/features/inspections/domain/rv_sync_state.dart';
 import 'package:ddr001diag/features/inspections/domain/rv_validator.dart';
+import 'package:ddr001diag/features/inspections/data/rv_draft_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -84,6 +85,84 @@ void main() {
   );
 
   group('borrador RV persistente', () {
+    test('incorpora ítems aditivos del checklist en un borrador activo', () {
+      final original = checklist();
+      final pilotItem = const ChecklistItemDefinition(
+        id: 'pilot-connected-id',
+        code: 'sustaining_pilot_connected',
+        label: '¿El piloto está conectado?',
+        type: 'boolean',
+        required: true,
+        order: 65,
+        dependency: ChecklistDependency(
+          parentCode: 'sustaining_pilot',
+          operator: 'eq',
+          value: true,
+        ),
+      );
+      final current = DynamicChecklist(
+        id: original.id,
+        code: original.code,
+        version: original.version,
+        title: original.title,
+        etag: 'etag-with-pilot',
+        cachedAt: now,
+        sections: [
+          ChecklistSectionDefinition(
+            id: original.sections.single.id,
+            code: original.sections.single.code,
+            title: original.sections.single.title,
+            order: original.sections.single.order,
+            items: [...original.sections.single.items, pilotItem],
+          ),
+        ],
+      );
+      final stored = draft(
+        answers: {'q1': answer('q1', true, type: 'boolean')},
+      );
+
+      final upgraded = upgradeDraftChecklist(stored, current);
+
+      expect(upgraded.checklist.etag, 'etag-with-pilot');
+      expect(
+        upgraded.checklist.sections.single.items.map((item) => item.code),
+        contains('sustaining_pilot_connected'),
+      );
+      expect(upgraded.answers['q1']?.value, true);
+    });
+    test('actualiza orden y dependencia sin exigir ítems nuevos', () {
+      final original = checklist();
+      final stale = DynamicChecklist(
+        id: original.id,
+        code: original.code,
+        version: original.version,
+        title: original.title,
+        etag: 'etag-stale-order',
+        cachedAt: now,
+        sections: [
+          ChecklistSectionDefinition(
+            id: original.sections.single.id,
+            code: original.sections.single.code,
+            title: original.sections.single.title,
+            order: original.sections.single.order,
+            items: original.sections.single.items.reversed.toList(),
+          ),
+        ],
+      );
+      final stored = RvDraft.fromJson({
+        ...draft(answers: {'q1': answer('q1', true, type: 'boolean')}).toJson(),
+        'checklistSnapshot': stale.toJson(),
+      });
+
+      final upgraded = upgradeDraftChecklist(stored, original);
+
+      expect(upgraded.checklist.etag, original.etag);
+      expect(
+        upgraded.checklist.sections.single.items.map((item) => item.code),
+        ['VISIBLE', 'DETAIL', 'STATE'],
+      );
+      expect(upgraded.answers['q1']?.value, true);
+    });
     test('conflicto es terminal y conserva referencias al serializar', () {
       final conflicted = draft().copyWith(
         localStatus: RvLocalStatus.conflict,
@@ -283,6 +362,130 @@ void main() {
       expect(
         validator.validate(value).issues.any((e) => e.code == 'invalid_answer'),
         isTrue,
+      );
+    });
+    test('acepta todos los rangos de manómetro locales válidos', () {
+      const rangeCodes = [
+        'sustaining_gauge_range',
+        'regulating_gauge_range',
+        'filter_gauge_before_range',
+        'filter_gauge_after_range',
+        'parcel_gauge_range',
+      ];
+      final definition = DynamicChecklist(
+        id: 'range-checklist',
+        code: 'RV',
+        version: 1,
+        title: 'Rangos',
+        etag: 'range-etag',
+        cachedAt: now,
+        sections: [
+          ChecklistSectionDefinition(
+            id: 'section-1',
+            code: 'GENERAL',
+            title: 'General',
+            order: 1,
+            items: [
+              for (var index = 0; index < rangeCodes.length; index++)
+                ChecklistItemDefinition(
+                  id: 'range-$index',
+                  code: rangeCodes[index],
+                  label: 'Rango ${rangeCodes[index]}',
+                  type: 'select',
+                  required: true,
+                  order: index,
+                ),
+            ],
+          ),
+        ],
+      );
+      final value = RvDraft(
+        clientInspectionId: 'client-range',
+        hydrantId: 'hydrant-1',
+        accountNumber: '1001',
+        fieldSessionId: 'session-1',
+        checklistId: definition.id,
+        checklistVersion: definition.version,
+        checklistSnapshot: definition.toJson(),
+        createdAt: now,
+        updatedAt: now,
+        answers: {
+          for (var index = 0; index < rangeCodes.length; index++)
+            'range-$index': answer('range-$index', {
+              'catalogId': null,
+              'localCatalogId': 'local-range-$index',
+              'minimum': 0.0,
+              'maximum': 100.0,
+              'unit': 'psi',
+              'displayValue': '0–100 psi',
+            }, type: 'select'),
+        },
+      );
+
+      expect(
+        validator
+            .validate(value)
+            .issues
+            .where((issue) => issue.questionId?.startsWith('range-') == true),
+        isEmpty,
+      );
+    });
+    test('acepta una marca ilegible con justificación suficiente', () {
+      final definition = DynamicChecklist(
+        id: 'brand-checklist',
+        code: 'RV',
+        version: 1,
+        title: 'Marcas',
+        etag: 'brand-etag',
+        cachedAt: now,
+        sections: const [
+          ChecklistSectionDefinition(
+            id: 'section-1',
+            code: 'GENERAL',
+            title: 'General',
+            order: 1,
+            items: [
+              ChecklistItemDefinition(
+                id: 'brand-1',
+                code: 'filter_brand',
+                label: 'Marca del filtro',
+                type: 'select',
+                required: true,
+                order: 1,
+              ),
+            ],
+          ),
+        ],
+      );
+      final value = RvDraft(
+        clientInspectionId: 'client-brand',
+        hydrantId: 'hydrant-1',
+        accountNumber: '1001',
+        fieldSessionId: 'session-1',
+        checklistId: definition.id,
+        checklistVersion: definition.version,
+        checklistSnapshot: definition.toJson(),
+        createdAt: now,
+        updatedAt: now,
+        answers: {
+          'brand-1': answer('brand-1', {
+            'mode': 'illegible',
+            'brandId': null,
+            'catalogId': null,
+            'localCatalogId': null,
+            'displayName': 'Ilegible',
+            'displayValue': 'Ilegible',
+            'reason': 'La placa está completamente desgastada.',
+          }, type: 'select'),
+        },
+      );
+
+      expect(
+        validator
+            .validate(value)
+            .issues
+            .where((issue) => issue.questionId == 'brand-1'),
+        isEmpty,
       );
     });
     test('requiere GPS y señal', () {

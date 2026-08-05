@@ -63,6 +63,41 @@ void main() {
     );
   });
 
+  test('AppConfig permite API HTTP privada solo en desarrollo', () {
+    final config = AppConfig.fromEnvironment(
+      environmentOverride: 'development',
+      apiBaseUrlOverride: 'http://192.168.0.166:3002/api/v1',
+    );
+    expect(config.apiBaseUrl.host, '192.168.0.166');
+    expect(config.apiBaseUrl.port, 3002);
+
+    for (final environment in ['test', 'staging', 'production']) {
+      expect(
+        () => AppConfig.fromEnvironment(
+          environmentOverride: environment,
+          apiBaseUrlOverride: 'http://192.168.0.166:3002/api/v1',
+        ),
+        throwsStateError,
+      );
+    }
+  });
+
+  test('AppConfig rechaza HTTP público y loopback en desarrollo', () {
+    for (final url in [
+      'http://8.8.8.8:3002/api/v1',
+      'http://127.0.0.1:3002/api/v1',
+      'http://192.168.0.166:3002/otra-ruta',
+    ]) {
+      expect(
+        () => AppConfig.fromEnvironment(
+          environmentOverride: 'development',
+          apiBaseUrlOverride: url,
+        ),
+        throwsStateError,
+      );
+    }
+  });
+
   test('AppConfig acepta configuración HTTPS inyectada para pruebas', () {
     final config = AppConfig.fromEnvironment(
       environmentOverride: 'test',
@@ -535,7 +570,6 @@ void main() {
     'USER_INACTIVE': 'desactivado',
     'DEVICE_BLOCKED': 'bloqueado',
     'DEVICE_BINDING_REVOKED': 'revocado',
-    'REFRESH_TOKEN_REUSE': 'seguridad',
   }.entries) {
     test('${entry.key} cierra credenciales con mensaje diferenciado', () async {
       final storage = MemorySessionStorage()
@@ -576,6 +610,36 @@ void main() {
       expect(translated.message, contains(entry.value));
     });
   }
+
+  test(
+    'REFRESH_TOKEN_REUSE conserva credenciales para recuperación automática',
+    () async {
+      final storage = MemorySessionStorage()
+        ..value = const FieldSession(
+          sessionId: 'session',
+          userId: 'user',
+          accessToken: 'expired',
+          refreshToken: 'refresh',
+          installationId: 'installation',
+        );
+      final client = ApiClient(
+        config: AppConfig.fromEnvironment(
+          environmentOverride: 'test',
+          apiBaseUrlOverride: 'https://example.test/api/v1',
+        ),
+        sessionStorage: storage,
+        dio: Dio()
+          ..httpClientAdapter = FakeHttpAdapter(
+            (options) async =>
+                jsonResponse('{"code":"REFRESH_TOKEN_REUSE"}', 401),
+          ),
+      );
+
+      await expectLater(client.refreshSession(), throwsA(isA<DioException>()));
+      expect(storage.value, isNotNull);
+      expect(storage.clearCalls, 0);
+    },
+  );
 
   test(
     'reemplazar sesión cancela peticiones autenticadas pero no login',
@@ -640,7 +704,7 @@ void main() {
     );
     expect(
       ApiException.fromDio(unauthorized).message,
-      'Sin conexión. Puedes continuar trabajando; los cambios se sincronizarán después.',
+      'La sesión no pudo verificarse temporalmente. Se reintentará automáticamente.',
     );
     expect(ApiException.fromDio(offline).message, 'Servidor no disponible.');
   });

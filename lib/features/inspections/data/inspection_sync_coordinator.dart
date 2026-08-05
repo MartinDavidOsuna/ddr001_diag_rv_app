@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -87,10 +88,33 @@ class InspectionSyncCoordinator {
       return draft;
     } on ApiException catch (error) {
       return _failure(draft, error);
-    } on Object {
+    } on TimeoutException {
       return _failure(
         draft,
-        const ApiException(ApiErrorKind.unknown, 'Error desconocido.'),
+        const ApiException(
+          ApiErrorKind.timeout,
+          'El servidor tardó demasiado en responder.',
+        ),
+      );
+    } on SocketException {
+      return _failure(
+        draft,
+        const ApiException(
+          ApiErrorKind.serverUnavailable,
+          'No fue posible comunicarse con el servidor.',
+        ),
+      );
+    } on Object catch (error, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('[RV-SYNC] error inesperado ${error.runtimeType}: $error');
+        debugPrintStack(stackTrace: stackTrace);
+      }
+      return _failure(
+        draft,
+        ApiException(
+          ApiErrorKind.unknown,
+          'No fue posible completar el envío (${error.runtimeType}).',
+        ),
       );
     } finally {
       _running.remove(initial.clientInspectionId);
@@ -529,20 +553,22 @@ class InspectionSyncCoordinator {
       '${error.kind.name}; retryable=${_retryable(error)}; intento=$retry '
           'requestId=${error.requestId ?? '-'} field=${error.field ?? '-'}',
     );
+    final retryable = _retryable(error);
     return _save(
       draft.copyWith(
         localStatus: error.kind == ApiErrorKind.sessionRevoked
             ? RvLocalStatus.requiresAuthentication
+            : retryable
+            ? RvLocalStatus.submitPending
             : RvLocalStatus.syncError,
-        lastSyncError: error.kind == ApiErrorKind.sessionRevoked
-            ? error.message
-            : 'Sin conexión. Puedes continuar trabajando; los cambios se sincronizarán después.',
+        lastSyncError: retryable
+            ? 'Sin conexión con el servidor. Puedes continuar trabajando; '
+                  'los cambios se sincronizarán después.'
+            : error.message,
         retryCount: retry,
         lastAttemptAt: failedAt,
         updatedAt: failedAt,
-        nextRetryAt: _retryable(error)
-            ? DateTime.now().toUtc().add(delay)
-            : null,
+        nextRetryAt: retryable ? DateTime.now().toUtc().add(delay) : null,
       ),
     );
   }

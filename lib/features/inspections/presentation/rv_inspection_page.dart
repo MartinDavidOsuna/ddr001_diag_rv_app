@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -9,9 +11,9 @@ import '../../../core/widgets/common_widgets.dart';
 import '../../checklist/presentation/dynamic_checklist_renderer.dart';
 import '../domain/rv_draft.dart';
 import '../domain/rv_sync_state.dart';
+import '../domain/rv_validator.dart';
 import 'rv_inspection_controller.dart';
 import 'rv_review_navigation.dart';
-import 'rv_steps_one_two.dart';
 
 class RvInspectionPage extends StatefulWidget {
   const RvInspectionPage({required this.hydrantId, super.key});
@@ -24,6 +26,14 @@ class _RvInspectionPageState extends State<RvInspectionPage> {
   RvInspectionController? controller;
   String? startupError;
   bool _allowPop = false;
+
+  Future<void> _openSummary(RvDraft draft) async {
+    final result = await context.push<Object?>(
+      '/hydrants/${widget.hydrantId}/inspection/a/summary/${draft.clientInspectionId}',
+    );
+    if (!mounted || result is! RvPendingIssue) return;
+    await controller?.navigateToPending(result);
+  }
 
   Future<void> _leaveFlow() async {
     if (!mounted) return;
@@ -141,12 +151,8 @@ class _RvInspectionPageState extends State<RvInspectionPage> {
                 const SizedBox(height: 14),
                 DynamicChecklistRenderer(
                   controller: controller!,
-                  stepOne: RvStepOnePanel(controller: controller!),
-                  stepTwo: RvStepTwoPhotoPanel(controller: controller!),
                   onExitRequested: _handleBack,
-                  onSummary: () => context.push(
-                    '/hydrants/${widget.hydrantId}/inspection/a/summary/${draft.clientInspectionId}',
-                  ),
+                  onSummary: () => unawaited(_openSummary(draft)),
                 ),
                 if (draft.returnToSummary) ...[
                   const SizedBox(height: 10),
@@ -154,9 +160,7 @@ class _RvInspectionPageState extends State<RvInspectionPage> {
                     onPressed: () async {
                       await controller!.clearSummaryReturn();
                       if (context.mounted) {
-                        context.push(
-                          '/hydrants/${widget.hydrantId}/inspection/a/summary/${draft.clientInspectionId}',
-                        );
+                        unawaited(_openSummary(draft));
                       }
                     },
                     icon: const Icon(Icons.arrow_back),
@@ -173,9 +177,7 @@ class _RvInspectionPageState extends State<RvInspectionPage> {
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
-                  onPressed: () => context.push(
-                    '/hydrants/${widget.hydrantId}/inspection/a/summary/${draft.clientInspectionId}',
-                  ),
+                  onPressed: () => unawaited(_openSummary(draft)),
                   icon: const Icon(Icons.fact_check_outlined),
                   label: Text(
                     'Resumen · ${validation.issues.length} pendientes',

@@ -53,11 +53,33 @@ class AppConfig {
         uri.path == '/api/v1' &&
         !uri.hasQuery &&
         !uri.hasFragment;
-    if (uri.scheme != 'https' && !isApprovedProductionHttp) {
+    final isApprovedDevelopmentHttp =
+        environment == 'development' &&
+        uri.scheme == 'http' &&
+        _isPrivateIpv4(uri.host) &&
+        uri.hasPort &&
+        uri.path == '/api/v1' &&
+        !uri.hasQuery &&
+        !uri.hasFragment;
+    if (uri.scheme != 'https' &&
+        !isApprovedProductionHttp &&
+        !isApprovedDevelopmentHttp) {
       throw StateError(
         'La conexión configurada no cumple la política de seguridad.',
       );
     }
     return AppConfig(environment: environment, apiBaseUrl: uri);
+  }
+
+  static bool _isPrivateIpv4(String host) {
+    final parts = host.split('.').map(int.tryParse).toList();
+    if (parts.length != 4 ||
+        parts.any((part) => part == null || part < 0 || part > 255)) {
+      return false;
+    }
+    final first = parts[0]!, second = parts[1]!;
+    return first == 10 ||
+        (first == 172 && second >= 16 && second <= 31) ||
+        (first == 192 && second == 168);
   }
 }

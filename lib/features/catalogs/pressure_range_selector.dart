@@ -116,78 +116,102 @@ class _PressureRangeSheetState extends State<_PressureRangeSheet> {
   }
 
   Future<void> _add() async {
-    final min = TextEditingController(), max = TextEditingController();
-    String unit = 'psi';
+    // The dialog must not inherit from the bottom sheet: after choosing a
+    // range the sheet closes too, while the dialog route is still unmounting.
+    // Anchoring it to the root navigator keeps those element trees independent.
+    final rootContext = Navigator.of(context, rootNavigator: true).context;
     final result = await showDialog<PressureRangeOption>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setLocal) => AlertDialog(
-          title: const Text('Nuevo rango'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: min,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: const InputDecoration(labelText: 'Mínimo'),
-              ),
-              TextField(
-                controller: max,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: const InputDecoration(labelText: 'Máximo'),
-              ),
-              DropdownButtonFormField(
-                initialValue: unit,
-                items: const [
-                  DropdownMenuItem(value: 'psi', child: Text('psi')),
-                  DropdownMenuItem(value: 'bar', child: Text('bar')),
-                ],
-                onChanged: (v) => setLocal(() => unit = v!),
-                decoration: const InputDecoration(labelText: 'Unidad'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                try {
-                  final item = await widget.repository.createPressureRange(
-                    double.parse(min.text.replaceAll(',', '.')),
-                    double.parse(max.text.replaceAll(',', '.')),
-                    unit,
-                    ownerUserId: widget.userId,
-                  );
-                  if (context.mounted) Navigator.pop(context, item);
-                } on Object catch (e) {
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        e is FormatException
-                            ? e.message
-                            : 'El rango no es válido.',
-                      ),
-                    ),
-                  );
-                }
-              },
-              child: const Text('Agregar'),
-            ),
-          ],
-        ),
+      context: rootContext,
+      builder: (context) => _NewPressureRangeDialog(
+        repository: widget.repository,
+        userId: widget.userId,
       ),
     );
-    min.dispose();
-    max.dispose();
     if (!mounted) return;
     if (result != null) Navigator.pop(context, result);
+  }
+}
+
+class _NewPressureRangeDialog extends StatefulWidget {
+  const _NewPressureRangeDialog({
+    required this.repository,
+    required this.userId,
+  });
+
+  final DynamicCatalogRepository repository;
+  final String userId;
+
+  @override
+  State<_NewPressureRangeDialog> createState() =>
+      _NewPressureRangeDialogState();
+}
+
+class _NewPressureRangeDialogState extends State<_NewPressureRangeDialog> {
+  final minimumController = TextEditingController();
+  final maximumController = TextEditingController();
+  String unit = 'psi';
+
+  @override
+  void dispose() {
+    minimumController.dispose();
+    maximumController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Nuevo rango'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          controller: minimumController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(labelText: 'Mínimo'),
+        ),
+        TextField(
+          controller: maximumController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(labelText: 'Máximo'),
+        ),
+        DropdownButtonFormField(
+          initialValue: unit,
+          items: const [
+            DropdownMenuItem(value: 'psi', child: Text('psi')),
+            DropdownMenuItem(value: 'bar', child: Text('bar')),
+          ],
+          onChanged: (value) => setState(() => unit = value!),
+          decoration: const InputDecoration(labelText: 'Unidad'),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancelar'),
+      ),
+      FilledButton(onPressed: _submit, child: const Text('Agregar')),
+    ],
+  );
+
+  Future<void> _submit() async {
+    try {
+      final item = await widget.repository.createPressureRange(
+        double.parse(minimumController.text.replaceAll(',', '.')),
+        double.parse(maximumController.text.replaceAll(',', '.')),
+        unit,
+        ownerUserId: widget.userId,
+      );
+      if (mounted) Navigator.pop(context, item);
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error is FormatException ? error.message : 'El rango no es válido.',
+          ),
+        ),
+      );
+    }
   }
 }

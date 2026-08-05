@@ -10,6 +10,7 @@ import '../../inspections/domain/filter_element_selection.dart';
 import '../../inspections/presentation/rv_inspection_controller.dart';
 import '../../inspections/presentation/rv_review_navigation.dart';
 import '../../inspections/presentation/rv_general_photos_observations_step.dart';
+import '../../inspections/presentation/rv_steps_one_two.dart';
 import '../../catalogs/dynamic_catalog_repository.dart';
 import '../../catalogs/pressure_range_selector.dart';
 import '../../catalogs/brand_selection.dart';
@@ -18,14 +19,11 @@ import '../data/checklist_models.dart';
 class DynamicChecklistRenderer extends StatefulWidget {
   const DynamicChecklistRenderer({
     required this.controller,
-    required this.stepOne,
-    required this.stepTwo,
     required this.onExitRequested,
     this.onSummary,
     super.key,
   });
   final RvInspectionController controller;
-  final Widget stepOne, stepTwo;
   final VoidCallback? onSummary;
   final Future<void> Function() onExitRequested;
 
@@ -41,10 +39,11 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
   bool _transitioning = false;
   int? _renderedStep;
 
-  void _scheduleStepFocus(int step) {
+  void _scheduleStepFocus(int step, {required bool hasNavigationTarget}) {
     if (_renderedStep == step) return;
     _renderedStep = step;
     FocusManager.instance.primaryFocus?.unfocus();
+    if (hasNavigationTarget) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final heading = _headingKey.currentContext;
@@ -95,15 +94,20 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
     final sections = draft.checklist.sections;
     if (sections.isEmpty) return const Text('El checklist no contiene pasos.');
     final currentStep = draft.activeFormStep.clamp(0, sections.length);
-    _scheduleStepFocus(currentStep);
-    if ((draft.navigationQuestionId != null ||
-            draft.navigationFieldId != null) &&
-        !_targetScheduled) {
+    final hasNavigationTarget =
+        draft.navigationQuestionId != null || draft.navigationFieldId != null;
+    _scheduleStepFocus(currentStep, hasNavigationTarget: hasNavigationTarget);
+    if (hasNavigationTarget && !_targetScheduled) {
       _targetScheduled = true;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
+        BuildContext? target;
+        for (var attempt = 0; attempt < 5 && mounted; attempt++) {
+          target = _targetKey.currentContext;
+          if (target != null) break;
+          await WidgetsBinding.instance.endOfFrame;
+        }
         if (!mounted) return;
-        final target = _targetKey.currentContext;
-        if (target != null) {
+        if (target != null && target.mounted) {
           await Scrollable.ensureVisible(
             target,
             duration: const Duration(milliseconds: 300),
@@ -129,15 +133,27 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
           child: switch (currentStep) {
             int step when step == sections.length =>
               RvGeneralPhotosAndObservationsStep(controller: widget.controller),
-            0 => widget.stepOne,
+            0 => RvStepOnePanel(
+              controller: widget.controller,
+              targetKey: _targetKey,
+              navigationFieldId: draft.navigationFieldId,
+            ),
             1 => Column(
               children: [
                 _Section(
                   section: sections[currentStep],
                   controller: widget.controller,
                   collapsible: false,
+                  targetQuestionId: draft.navigationQuestionId,
+                  targetKey: _targetKey,
                 ),
-                widget.stepTwo,
+                RvStepTwoPhotoPanel(
+                  controller: widget.controller,
+                  targetSlot: _photoSlotFromNavigationField(
+                    draft.navigationFieldId,
+                  ),
+                  targetKey: _targetKey,
+                ),
               ],
             ),
             _ =>
@@ -159,6 +175,11 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
         ),
       ),
     );
+  }
+
+  String? _photoSlotFromNavigationField(String? fieldId) {
+    if (fieldId == null || !fieldId.startsWith('photo:')) return null;
+    return fieldId.substring('photo:'.length);
   }
 }
 
@@ -533,28 +554,16 @@ class _ParcelValveCard extends StatelessWidget {
               onChanged(valve.copyWith(pilotBrand: brandValue(value))),
           onIllegible: (reason) =>
               onChanged(valve.copyWith(pilotBrand: illegibleBrandMap(reason))),
+          afterPresence: valve.hasPilot
+              ? _PilotConnectionField(
+                  key: targetFieldId == 'pilotConnected' ? targetKey : null,
+                  value: valve.pilotConnected,
+                  readOnly: readOnly,
+                  onChanged: (value) =>
+                      onChanged(valve.copyWith(pilotConnected: value)),
+                )
+              : null,
         ),
-        if (valve.hasPilot) ...[
-          const SizedBox(height: 8),
-          Semantics(
-            label: '¿El piloto está conectado?',
-            child: SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: true, label: Text('Sí')),
-                ButtonSegment(value: false, label: Text('No')),
-              ],
-              selected: valve.pilotConnected == null
-                  ? const <bool>{}
-                  : {valve.pilotConnected!},
-              emptySelectionAllowed: true,
-              onSelectionChanged: readOnly
-                  ? null
-                  : (selection) => onChanged(
-                      valve.copyWith(pilotConnected: selection.first),
-                    ),
-            ),
-          ),
-        ],
         _ComponentField(
           key: targetFieldId == 'pressureGaugeBrand' ? targetKey : null,
           label: 'Manómetro',
@@ -591,6 +600,7 @@ class _ComponentField extends StatelessWidget {
     required this.onPresence,
     required this.onBrand,
     required this.onIllegible,
+    this.afterPresence,
     super.key,
   });
   final String label;
@@ -603,6 +613,7 @@ class _ComponentField extends StatelessWidget {
   final ValueChanged<bool> onPresence;
   final ValueChanged<BrandOption> onBrand;
   final ValueChanged<String> onIllegible;
+  final Widget? afterPresence;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -623,6 +634,10 @@ class _ComponentField extends StatelessWidget {
         ),
         if (hasValue) ...[
           const SizedBox(height: 8),
+          if (afterPresence != null) ...[
+            afterPresence!,
+            const SizedBox(height: 8),
+          ],
           Text('Marca del ${label.toLowerCase()} *'),
           _BrandField(
             repository: catalogs,
@@ -635,6 +650,41 @@ class _ComponentField extends StatelessWidget {
         ],
       ],
     ),
+  );
+}
+
+class _PilotConnectionField extends StatelessWidget {
+  const _PilotConnectionField({
+    required this.value,
+    required this.readOnly,
+    required this.onChanged,
+    super.key,
+  });
+
+  final bool? value;
+  final bool readOnly;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text('¿El piloto está conectado? *'),
+      Semantics(
+        label: '¿El piloto está conectado?',
+        child: SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: true, label: Text('Sí')),
+            ButtonSegment(value: false, label: Text('No')),
+          ],
+          selected: value == null ? const <bool>{} : {value!},
+          emptySelectionAllowed: true,
+          onSelectionChanged: readOnly
+              ? null
+              : (selection) => onChanged(selection.first),
+        ),
+      ),
+    ],
   );
 }
 
@@ -938,6 +988,9 @@ class _Question extends StatelessWidget {
         elementType: _brandElementType(item.code),
         answer: answer,
         readOnly: readOnly,
+        evidenceCount: controller.draft!
+            .photosFor('brand_illegible:${item.id}')
+            .length,
         onSelected: (value) => controller.answer(
           section,
           item,
@@ -1109,6 +1162,7 @@ class _BrandField extends StatelessWidget {
     required this.onSelected,
     this.onIllegible,
     this.onEvidence,
+    this.evidenceCount = 0,
     super.key,
   });
   final DynamicCatalogRepository repository;
@@ -1118,6 +1172,7 @@ class _BrandField extends StatelessWidget {
   final ValueChanged<BrandOption> onSelected;
   final ValueChanged<String>? onIllegible;
   final Future<void> Function()? onEvidence;
+  final int evidenceCount;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -1160,9 +1215,10 @@ class _BrandField extends StatelessWidget {
               onChanged: onIllegible,
             ),
             Text(
-              raw['evidencePhotoId'] == null
+              evidenceCount == 0 && raw['evidencePhotoId'] == null
                   ? 'Evidencia: No agregada (opcional)'
-                  : 'Evidencia: 1 fotografía',
+                  : 'Evidencia: ${evidenceCount == 0 ? 1 : evidenceCount} '
+                        'fotografía${evidenceCount <= 1 ? '' : 's'}',
             ),
             if (!readOnly && onEvidence != null)
               OutlinedButton.icon(
