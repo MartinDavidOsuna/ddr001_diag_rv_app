@@ -1,8 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' as ui;
 
-import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:image_picker/image_picker.dart';
@@ -14,11 +13,16 @@ import '../../domain/media/inspection_photo.dart';
 import '../../domain/integrity/operation_journal.dart';
 import '../../data/local/operation_journal_repository.dart';
 import 'image_processing_service.dart';
+import 'file_digest_service.dart';
 
 class ReliablePhotoService {
-  ReliablePhotoService({ImageProcessingService? processor})
-    : processor = processor ?? FlutterImageCompressProcessingService();
+  ReliablePhotoService({
+    ImageProcessingService? processor,
+    FileDigestService? digestService,
+  }) : processor = processor ?? FlutterImageCompressProcessingService(),
+       digestService = digestService ?? const StreamingFileDigestService();
   final ImageProcessingService processor;
+  final FileDigestService digestService;
   bool _processing = false;
 
   Future<InspectionPhoto?> acquire({
@@ -39,7 +43,10 @@ class ReliablePhotoService {
     required String deviceId,
   }) async {
     if (_processing) throw StateError('Ya se está procesando otra fotografía.');
+    final totalWatch = Stopwatch()..start();
+    final pickerWatch = Stopwatch()..start();
     final picked = await ImagePicker().pickImage(source: pickerSource);
+    _perf('picker_return_ms', pickerWatch.elapsedMilliseconds);
     if (picked == null) return null;
     _processing = true;
     File? temporary;
@@ -87,18 +94,23 @@ class ReliablePhotoService {
       );
       await journal.save(operation);
       temporary = File(p.join(root.path, '$id.tmp.jpg'));
+      final normalizeWatch = Stopwatch()..start();
       final processed = await processor.normalize(source, temporary.path);
+      _perf('normalize_ms', normalizeWatch.elapsedMilliseconds);
       final finalFile = File(p.join(root.path, '$id.jpg'));
       await processed.file.open(mode: FileMode.append).then((handle) async {
         await handle.flush();
         await handle.close();
       });
       await processed.file.rename(finalFile.path);
-      final finalBytes = await finalFile.readAsBytes();
-      final codec = await ui.instantiateImageCodec(finalBytes);
-      await codec.getNextFrame();
-      codec.dispose();
+      final validationWatch = Stopwatch()..start();
+      final fileSize = await finalFile.length();
+      if (fileSize <= 0 || processed.width < 640 || processed.height < 480) {
+        throw StateError('La fotografía normalizada no es válida.');
+      }
+      _perf('validate_ms', validationWatch.elapsedMilliseconds);
       final thumbPath = p.join(root.path, '${id}_thumb.jpg');
+      final thumbnailWatch = Stopwatch()..start();
       final thumb = await FlutterImageCompress.compressAndGetFile(
         finalFile.path,
         thumbPath,
@@ -108,6 +120,11 @@ class ReliablePhotoService {
         format: CompressFormat.jpeg,
       );
       if (thumb == null) throw StateError('No fue posible crear la miniatura.');
+      _perf('thumbnail_ms', thumbnailWatch.elapsedMilliseconds);
+      final hashWatch = Stopwatch()..start();
+      // The digest consumes file chunks and never retains a full JPEG buffer.
+      final digest = await digestService.sha256Of(finalFile);
+      _perf('hash_ms', hashWatch.elapsedMilliseconds);
       final now = DateTime.now().toUtc();
       final photo = InspectionPhoto(
         id: id,
@@ -129,10 +146,10 @@ class ReliablePhotoService {
         localPath: finalFile.path,
         thumbnailPath: thumb.path,
         mimeType: 'image/jpeg',
-        fileSize: finalBytes.length,
+        fileSize: fileSize,
         width: processed.width,
         height: processed.height,
-        sha256: sha256.convert(finalBytes).toString(),
+        sha256: digest,
         capturedAt: now,
         capturedByUserId: userId,
         capturedByName: userName,
@@ -143,6 +160,7 @@ class ReliablePhotoService {
       );
       final photos = Hive.box<String>('inspection_photos_v1');
       final queue = Hive.box<String>('media_work_queue_v1');
+      final persistWatch = Stopwatch()..start();
       await photos.put(id, jsonEncode(photo.toJson()));
       operation = operation.advance(JournalStatus.documentsWritten);
       await journal.save(operation);
@@ -152,6 +170,8 @@ class ReliablePhotoService {
             .advance(JournalStatus.queueWritten)
             .advance(JournalStatus.committed),
       );
+      _perf('persist_ms', persistWatch.elapsedMilliseconds);
+      _perf('total_ms', totalWatch.elapsedMilliseconds);
       return photo;
     } on Object catch (error) {
       if (operation != null) {
@@ -165,6 +185,12 @@ class ReliablePhotoService {
         await temporary.delete();
       }
       _processing = false;
+    }
+  }
+
+  void _perf(String metric, int milliseconds) {
+    if (kDebugMode || kProfileMode) {
+      debugPrint('[PERF][PHOTO] $metric=$milliseconds');
     }
   }
 }

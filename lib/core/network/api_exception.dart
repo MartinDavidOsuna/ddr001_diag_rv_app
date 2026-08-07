@@ -6,6 +6,7 @@ enum ApiErrorKind {
   sessionExpired,
   authenticationRequired,
   sessionRevoked,
+  sessionAlreadyActive,
   invalidData,
   serverUnavailable,
   validation,
@@ -23,11 +24,13 @@ class ApiException implements Exception {
     this.domainCode,
     this.field,
     this.errors = const [],
+    this.takeoverToken,
   });
   final ApiErrorKind kind;
   final String message;
   final int? statusCode;
   final String? requestId, problemType, problemTitle, domainCode, field;
+  final String? takeoverToken;
   final List<Map<String, dynamic>> errors;
 
   factory ApiException.fromDio(DioException error) {
@@ -64,7 +67,8 @@ class ApiException implements Exception {
     }
     if (status == 401 || status == 403) {
       const definitiveMessages = <String, String>{
-        'SESSION_REVOKED': 'Tu sesión fue revocada por un administrador.',
+        'SESSION_REVOKED':
+            'Tu sesión fue cerrada desde otro dispositivo. La información guardada en este equipo se conservará.',
         'USER_INACTIVE': 'Tu usuario fue desactivado.',
         'DEVICE_BLOCKED': 'Este dispositivo fue bloqueado.',
         'DEVICE_BINDING_REVOKED': 'El acceso de este dispositivo fue revocado.',
@@ -97,16 +101,21 @@ class ApiException implements Exception {
             'El correo y el teléfono deben pertenecer al mismo usuario.',
         'USER_ACTIVE_ON_ANOTHER_DEVICE':
             'Tu usuario ya está activo en otro dispositivo.',
+        'SESSION_ALREADY_ACTIVE':
+            'Tu usuario ya está activo en otro dispositivo.',
         'DEVICE_ASSIGNED_TO_ANOTHER_USER':
             'Este dispositivo está asignado a otro usuario. Debe cerrar sesión primero.',
       };
       if (conflictMessages.containsKey(domainCode)) {
         return ApiException(
-          ApiErrorKind.invalidData,
+          domainCode == 'SESSION_ALREADY_ACTIVE'
+              ? ApiErrorKind.sessionAlreadyActive
+              : ApiErrorKind.invalidData,
           conflictMessages[domainCode]!,
           statusCode: status,
           requestId: requestId,
           domainCode: domainCode,
+          takeoverToken: problem['takeoverToken']?.toString(),
         );
       }
       if (type.endsWith('/phone-conflict') || title == 'phone conflict') {
@@ -131,24 +140,18 @@ class ApiException implements Exception {
       }
       return ApiException(
         ApiErrorKind.invalidData,
-        detail.isEmpty ? 'Existe un conflicto con los datos enviados.' : detail,
+        'Existe un conflicto con los datos enviados.',
         statusCode: status,
         requestId: requestId,
         domainCode: domainCode,
       );
     }
     if (status == 422 || status == 400) {
-      final detail = problem['detail']?.toString().trim();
-      final issue = firstError?['message']?.toString().trim();
-      final useful = [
-        if (detail != null && detail.isNotEmpty) detail,
-        if (issue != null && issue.isNotEmpty) issue,
-      ].join(' · ');
       return ApiException(
         status == 422 ? ApiErrorKind.validation : ApiErrorKind.invalidData,
-        useful.isEmpty
-            ? (status == 422 ? 'Error de validación.' : 'Datos inválidos.')
-            : useful,
+        status == 422
+            ? 'Uno o más datos no son válidos. Revisa la información capturada.'
+            : 'Los datos enviados no son válidos.',
         statusCode: status,
         requestId: requestId,
         problemType: problem['type']?.toString(),
@@ -178,6 +181,7 @@ class ApiException implements Exception {
       'Error desconocido.',
       statusCode: status,
       requestId: requestId,
+      domainCode: domainCode,
     );
   }
 

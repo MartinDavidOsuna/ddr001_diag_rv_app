@@ -12,6 +12,8 @@ enum NetworkAvailabilityState {
   apiAvailable,
 }
 
+enum NetworkTransport { none, mobile, wireless, ethernet, other }
+
 abstract interface class DeviceConnectivity {
   Future<List<ConnectivityResult>> checkConnectivity();
   Stream<List<ConnectivityResult>> get onConnectivityChanged;
@@ -47,17 +49,26 @@ class ConnectivityMonitor extends ChangeNotifier {
   DateTime? _lastCheck;
 
   NetworkAvailabilityState state = NetworkAvailabilityState.checking;
+  NetworkTransport transport = NetworkTransport.none;
   DateTime? checkedAt;
   Duration? apiLatency;
   bool get apiAvailable => state == NetworkAvailabilityState.apiAvailable;
 
-  String get label => switch (state) {
-    NetworkAvailabilityState.checking => 'Comprobando conexión',
-    NetworkAvailabilityState.noNetwork => 'Sin conexión',
-    NetworkAvailabilityState.internetAvailable => 'Internet disponible',
-    NetworkAvailabilityState.apiUnavailable => 'Servidor no disponible',
-    NetworkAvailabilityState.apiAvailable => 'API disponible',
+  String get transportLabel => switch (transport) {
+    NetworkTransport.none => 'Sin red',
+    NetworkTransport.mobile => 'Datos móviles',
+    NetworkTransport.wireless => 'Red inalámbrica',
+    NetworkTransport.ethernet => 'Ethernet',
+    NetworkTransport.other => 'Otra red',
   };
+  String get serviceLabel => switch (state) {
+    NetworkAvailabilityState.checking => 'Comprobando servidor',
+    NetworkAvailabilityState.noNetwork => 'Servicio no disponible',
+    NetworkAvailabilityState.internetAvailable => 'Comprobando servidor',
+    NetworkAvailabilityState.apiUnavailable => 'Servidor no disponible',
+    NetworkAvailabilityState.apiAvailable => 'Servidor disponible',
+  };
+  String get label => '$transportLabel · $serviceLabel';
 
   Future<void> start() async {
     _subscription ??= _deviceConnectivity.onConnectivityChanged.listen(
@@ -83,6 +94,7 @@ class ConnectivityMonitor extends ChangeNotifier {
   Future<NetworkAvailabilityState> _performCheck() async {
     _lastCheck = DateTime.now();
     final interfaces = await _deviceConnectivity.checkConnectivity();
+    transport = _transport(interfaces);
     if (interfaces.isEmpty ||
         interfaces.every((value) => value == ConnectivityResult.none)) {
       return _set(NetworkAvailabilityState.noNetwork);
@@ -109,6 +121,23 @@ class ConnectivityMonitor extends ChangeNotifier {
       apiLatency = stopwatch.elapsed;
       return _set(NetworkAvailabilityState.apiUnavailable);
     }
+  }
+
+  NetworkTransport _transport(List<ConnectivityResult> values) {
+    if (values.isEmpty ||
+        values.every((value) => value == ConnectivityResult.none)) {
+      return NetworkTransport.none;
+    }
+    if (values.contains(ConnectivityResult.wifi)) {
+      return NetworkTransport.wireless;
+    }
+    if (values.contains(ConnectivityResult.mobile)) {
+      return NetworkTransport.mobile;
+    }
+    if (values.contains(ConnectivityResult.ethernet)) {
+      return NetworkTransport.ethernet;
+    }
+    return NetworkTransport.other;
   }
 
   NetworkAvailabilityState _set(NetworkAvailabilityState value) {

@@ -44,6 +44,7 @@ class RvInspectionController extends ChangeNotifier {
   final validator = const RvValidator();
   RvDraft? draft;
   bool busy = false;
+  bool processingPhoto = false;
   String? message;
   String? highlightedFocusKey;
   Timer? _highlightTimer;
@@ -259,43 +260,68 @@ class RvInspectionController extends ChangeNotifier {
     message = 'Ubicación manual guardada.';
   });
 
-  Future<void> addPhoto(String slot, ImageSource source) => _run(() async {
-    final stepBefore = draft!.activeFormStep;
-    final photo = await photoService.acquire(
-      pickerSource: source,
-      hydrantId: hydrant.id,
-      inspectionId: draft!.clientInspectionId,
-      category: slot,
-      evidenceRequirementId: slot,
-      userId: user.id,
-      userName: user.fullName,
-      brigadeId: user.brigadeId,
-      deviceId: user.deviceId,
-    );
-    if (photo == null) {
+  Future<void> addPhoto(String slot, ImageSource source) async {
+    final current = draft;
+    if (current == null || current.isReadOnly || processingPhoto) return;
+    final totalWatch = Stopwatch()..start();
+    final stepBefore = current.activeFormStep;
+    processingPhoto = true;
+    message = 'Procesando fotografía...';
+    notifyListeners();
+    try {
+      final photo = await photoService.acquire(
+        pickerSource: source,
+        hydrantId: hydrant.id,
+        inspectionId: draft!.clientInspectionId,
+        category: slot,
+        evidenceRequirementId: slot,
+        userId: user.id,
+        userName: user.fullName,
+        brigadeId: user.brigadeId,
+        deviceId: user.deviceId,
+      );
+      if (photo == null) {
+        _externalActionLog(stepBefore, slot);
+        return;
+      }
+      final photos = <String, List<RvPhotoReference>>{
+        ...draft!.photos,
+        slot: [
+          ...draft!.photosFor(slot),
+          RvPhotoReference(
+            photoId: photo.id,
+            slotCode: slot,
+            status: RvPhotoUploadStatus.pending,
+          ),
+        ],
+      };
+      draft = draft!.copyWith(
+        photos: photos,
+        photosStatus: RvPartStatus.pending,
+        localStatus: RvLocalStatus.pendingPhotos,
+      );
+      final draftWatch = Stopwatch()..start();
+      await drafts.save(draft!);
+      if (kDebugMode || kProfileMode) {
+        debugPrint(
+          '[PERF][PHOTO] draft_save_ms=${draftWatch.elapsedMilliseconds}',
+        );
+      }
       _externalActionLog(stepBefore, slot);
-      return;
+      message = 'Fotografía capturada y guardada localmente.';
+    } on Object catch (error) {
+      message = 'No fue posible guardar la fotografía. Intenta nuevamente.';
+      if (kDebugMode) debugPrint('[RV][PHOTO] ${error.runtimeType}');
+    } finally {
+      processingPhoto = false;
+      if (kDebugMode || kProfileMode) {
+        debugPrint(
+          '[PERF][PHOTO] controller_total_ms=${totalWatch.elapsedMilliseconds}',
+        );
+      }
+      notifyListeners();
     }
-    final photos = <String, List<RvPhotoReference>>{
-      ...draft!.photos,
-      slot: [
-        ...draft!.photosFor(slot),
-        RvPhotoReference(
-          photoId: photo.id,
-          slotCode: slot,
-          status: RvPhotoUploadStatus.pending,
-        ),
-      ],
-    };
-    draft = draft!.copyWith(
-      photos: photos,
-      photosStatus: RvPartStatus.pending,
-      localStatus: RvLocalStatus.pendingPhotos,
-    );
-    await drafts.save(draft!);
-    _externalActionLog(stepBefore, slot);
-    message = 'Fotografía capturada y guardada localmente.';
-  });
+  }
 
   Future<void> addGeneralPhoto(ImageSource source) async {
     final current = draft;

@@ -119,6 +119,23 @@ class FieldSessionRepository {
     }
   }
 
+  Future<void> revokeExisting(String takeoverToken) async {
+    try {
+      await client.dio.post<void>(
+        '/field-sessions/revoke-existing',
+        data: {'takeoverToken': takeoverToken},
+        options: Options(extra: {'skipAuth': true}),
+      );
+    } on DioException catch (error) {
+      final apiError = ApiException.fromDio(error);
+      if (error.response?.statusCode == 404 &&
+          apiError.domainCode == 'SESSION_NOT_FOUND') {
+        return;
+      }
+      throw apiError;
+    }
+  }
+
   Future<FieldSession?> restore() async {
     lastRestoreOffline = false;
     final local = await storage.read();

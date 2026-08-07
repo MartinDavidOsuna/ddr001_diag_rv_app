@@ -518,7 +518,7 @@ class _GalleryPhoto extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListTile(
-    leading: photo != null && File(photo!.thumbnailPath).existsSync()
+    leading: photo != null
         ? GestureDetector(
             onTap: () => showDialog<void>(
               context: context,
@@ -533,6 +533,10 @@ class _GalleryPhoto extends StatelessWidget {
               width: 64,
               height: 64,
               fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => const SizedBox.square(
+                dimension: 64,
+                child: Icon(Icons.broken_image_outlined),
+              ),
             ),
           )
         : const SizedBox.square(

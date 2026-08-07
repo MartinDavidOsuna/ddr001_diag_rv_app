@@ -63,7 +63,9 @@ class InspectionSyncCoordinator {
       draft = await _create(draft);
       draft = await _photos(draft);
       draft = await _reconcilePhotos(draft);
-      await remote.saveGeneralContent(draft);
+      if (_generalPhotosReady(draft)) {
+        await remote.saveGeneralContent(draft);
+      }
       draft = await _answers(draft);
       if (draft.parcelValveConfiguration != null) {
         await remote.saveParcelValves(
@@ -339,7 +341,7 @@ class InspectionSyncCoordinator {
         final ref = slotRefs[index];
         if (ref.status == RvPhotoUploadStatus.verified) continue;
         final photo = _photo(ref.photoId);
-        if (photo == null || !File(photo.localPath).existsSync()) {
+        if (photo == null || !await File(photo.localPath).exists()) {
           slotRefs[index] = RvPhotoReference(
             photoId: ref.photoId,
             slotCode: slot,
@@ -552,6 +554,13 @@ class InspectionSyncCoordinator {
     ApiErrorKind.timeout,
     ApiErrorKind.serverUnavailable,
   }.contains(error.kind);
+
+  bool _generalPhotosReady(RvDraft draft) => draft.generalPhotos.every(
+    (photo) =>
+        photo.status == RvPhotoUploadStatus.verified &&
+        photo.serverPhotoId != null &&
+        photo.serverPhotoId!.isNotEmpty,
+  );
   InspectionPhoto? _photo(String id) {
     final raw = photoBox.get(id);
     if (raw == null) return null;

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -62,14 +64,72 @@ class _LoginPageState extends State<LoginPage> {
   final phone = TextEditingController();
   final crew = TextEditingController();
   bool submitting = false;
+  bool revokingSession = false;
   String? error;
+  String? takeoverSuccess;
+  Timer? _successTimer;
   @override
   void dispose() {
+    _successTimer?.cancel();
     name.dispose();
     email.dispose();
     phone.dispose();
     crew.dispose();
     super.dispose();
+  }
+
+  Future<void> confirmSessionTakeover() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Cerrar sesión activa'),
+        content: const Text(
+          'Tu usuario tiene una sesión abierta en otro dispositivo. ¿Estás seguro de que deseas cerrar esa sesión?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          StatefulBuilder(
+            builder: (context, setModalState) => FilledButton(
+              onPressed: revokingSession
+                  ? null
+                  : () async {
+                      setModalState(() => revokingSession = true);
+                      final failure = await context
+                          .read<AppState>()
+                          .revokeExistingFieldSession();
+                      if (!mounted || !dialogContext.mounted) return;
+                      setModalState(() => revokingSession = false);
+                      if (failure == null) {
+                        Navigator.pop(dialogContext, true);
+                      } else {
+                        Navigator.pop(dialogContext, false);
+                        setState(() => error = failure);
+                      }
+                    },
+              child: revokingSession
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Cerrar sesión'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    _successTimer?.cancel();
+    setState(() {
+      error = null;
+      takeoverSuccess =
+          'La sesión del otro dispositivo se cerró correctamente.';
+    });
+    _successTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) setState(() => takeoverSuccess = null);
+    });
   }
 
   Future<void> submit() async {
@@ -181,7 +241,37 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ),
                             const SizedBox(height: 14),
-                            if (error != null)
+                            if (takeoverSuccess != null)
+                              Semantics(
+                                liveRegion: true,
+                                child: Text(
+                                  takeoverSuccess!,
+                                  style: const TextStyle(
+                                    color: Colors.green,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            if (error != null &&
+                                state.pendingSessionTakeoverToken != null)
+                              Wrap(
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  const Text(
+                                    'Tu usuario ya está activo en otro dispositivo. ¿Deseas cerrar esa sesión? ',
+                                    style: TextStyle(color: AppColors.red),
+                                  ),
+                                  TextButton(
+                                    onPressed: confirmSessionTakeover,
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: const Size(44, 44),
+                                    ),
+                                    child: const Text('Presiona aquí'),
+                                  ),
+                                ],
+                              )
+                            else if (error != null)
                               Text(
                                 error!,
                                 style: const TextStyle(color: AppColors.red),

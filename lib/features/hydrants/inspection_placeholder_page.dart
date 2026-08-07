@@ -1771,7 +1771,6 @@ class _StepBody extends StatelessWidget {
               photo.inspectionId == inspection.id &&
               photo.category == category &&
               !photo.isDeleted &&
-              File(photo.localPath).existsSync() &&
               photo.fileSize > 0 &&
               photo.sha256.isNotEmpty &&
               accepted.contains(photo.syncStatus),

@@ -6,6 +6,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../domain/media/inspection_photo.dart';
 import '../domain/rv_draft.dart';
+import '../domain/rv_sync_state.dart';
 import '../domain/parcel_valve_configuration.dart';
 import '../domain/rv_versioning.dart';
 
@@ -61,11 +62,14 @@ class InspectionRemoteRepository {
           'generalObservation': draft.generalObservations,
           'generalPhotos': [
             for (final photo in draft.generalPhotos)
-              {
-                'photoId': photo.serverPhotoId ?? photo.photoId,
-                'order': photo.order ?? draft.generalPhotos.indexOf(photo) + 1,
-                'description': photo.description,
-              },
+              if (photo.status == RvPhotoUploadStatus.verified &&
+                  photo.serverPhotoId != null)
+                {
+                  'photoId': photo.serverPhotoId,
+                  'order':
+                      photo.order ?? draft.generalPhotos.indexOf(photo) + 1,
+                  'description': photo.description,
+                },
           ],
         },
         options: Options(
@@ -93,11 +97,14 @@ class InspectionRemoteRepository {
           'generalObservations': draft.generalObservations,
           'generalPhotos': [
             for (final photo in draft.generalPhotos)
-              {
-                'photoId': photo.serverPhotoId ?? photo.photoId,
-                'order': photo.order ?? draft.generalPhotos.indexOf(photo) + 1,
-                'description': photo.description,
-              },
+              if (photo.status == RvPhotoUploadStatus.verified &&
+                  photo.serverPhotoId != null)
+                {
+                  'photoId': photo.serverPhotoId,
+                  'order':
+                      photo.order ?? draft.generalPhotos.indexOf(photo) + 1,
+                  'description': photo.description,
+                },
           ],
         },
       );

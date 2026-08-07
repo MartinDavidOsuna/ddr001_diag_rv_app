@@ -531,7 +531,7 @@ void main() {
   });
 
   for (final entry in {
-    'SESSION_REVOKED': 'revocada',
+    'SESSION_REVOKED': 'cerrada desde otro dispositivo',
     'USER_INACTIVE': 'desactivado',
     'DEVICE_BLOCKED': 'bloqueado',
     'DEVICE_BINDING_REVOKED': 'revocado',
