@@ -14,20 +14,11 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final drafts = state.rvDraftRepository.pending();
-    final counts = {for (final group in RvWorkGroup.values) group: 0};
-    for (final draft in drafts) {
-      final group = RvWorkDashboardProjection.forDraft(draft);
-      counts[group] = counts[group]! + 1;
-    }
-    for (final hydrant in state.hydrants.where(
-      (item) =>
-          item.f02a.status == InspectionStatus.validated ||
-          item.f02a.status == InspectionStatus.returned,
-    )) {
-      final group = RvWorkDashboardProjection.forRemote(hydrant.f02a.status);
-      counts[group] = counts[group]! + 1;
-    }
+    final drafts = state.rvDraftRepository.all();
+    final grouped = RvWorkDashboardProjection.byHydrant(
+      drafts: drafts,
+      hydrants: state.hydrants,
+    );
     return Scaffold(
       appBar: AppPageHeader(
         title: 'DIAGNOSTICO HIDRANTES',
@@ -78,7 +69,7 @@ class HomePage extends StatelessWidget {
               for (final group in RvWorkGroup.values)
                 _Count(
                   label: group.label,
-                  value: counts[group]!,
+                  value: grouped[group]!.length,
                   color: switch (group) {
                     RvWorkGroup.inProgress => AppColors.blue,
                     RvWorkGroup.pendingSync => AppColors.orange,
@@ -87,6 +78,7 @@ class HomePage extends StatelessWidget {
                     RvWorkGroup.returned ||
                     RvWorkGroup.conflicts => AppColors.red,
                   },
+                  onTap: () => context.go('/hydrants?workGroup=${group.name}'),
                 ),
             ],
           ),
@@ -149,31 +141,41 @@ class HomePage extends StatelessWidget {
 }
 
 class _Count extends StatelessWidget {
-  const _Count({required this.label, required this.value, required this.color});
+  const _Count({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.onTap,
+  });
   final String label;
   final int value;
   final Color color;
+  final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => Container(
-    width: 150,
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: .1),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '$value',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w900,
-            color: color,
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(12),
+    child: Container(
+      width: 150,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$value',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              color: color,
+            ),
           ),
-        ),
-        Text(label),
-      ],
+          Text(label),
+        ],
+      ),
     ),
   );
 }

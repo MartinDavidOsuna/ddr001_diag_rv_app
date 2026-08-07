@@ -207,6 +207,23 @@ class VisualInspectionRepository {
     VersionedJsonCodec.decode(confirmed);
   }
 
+  Future<void> deleteLocalDraft(String id, {required String creatorId}) async {
+    final inspection = findById(id);
+    if (inspection == null) {
+      throw StateError('No se encontró el borrador local.');
+    }
+    if (inspection.createdBy != creatorId &&
+        inspection.inspectorId != creatorId) {
+      throw StateError('Sólo el creador puede eliminar este borrador.');
+    }
+    if (inspection.status == InspectionStatus.completed) {
+      throw StateError('Una revisión finalizada no puede eliminarse.');
+    }
+    await documents.delete(id);
+    final key = _indexKey(inspection.hydrantId);
+    if (index.get(key) == id) await index.delete(key);
+  }
+
   Future<VisualInspection> createRevision(
     VisualInspection original,
     AppUser supervisor,

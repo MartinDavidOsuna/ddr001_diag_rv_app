@@ -213,6 +213,15 @@ class AppState extends ChangeNotifier {
   bool get allSynchronized =>
       pendingDiagnostics == 0 && pendingPhotos == 0 && syncErrors == 0;
 
+  Future<void> deleteUnsyncedLocalDraft(String clientInspectionId) async {
+    await rvDraftRepository.deleteUnsyncedLocal(
+      clientInspectionId: clientInspectionId,
+      creatorId: user.id,
+    );
+    _refreshSyncMetrics();
+    notifyListeners();
+  }
+
   Future<void> initialize() async {
     connectivityMonitor?.addListener(_onConnectivityChanged);
     _clearAccessScope();

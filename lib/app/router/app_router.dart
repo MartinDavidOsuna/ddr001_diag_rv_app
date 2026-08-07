@@ -64,8 +64,12 @@ GoRouter createRouter(AppState state) => GoRouter(
           routes: [
             GoRoute(
               path: '/hydrants',
-              builder: (_, _) =>
-                  const BranchRootPopScope(index: 1, child: HydrantsPage()),
+              builder: (_, route) => BranchRootPopScope(
+                index: 1,
+                child: HydrantsPage(
+                  workGroup: route.uri.queryParameters['workGroup'],
+                ),
+              ),
               routes: [
                 GoRoute(
                   path: 'new',

@@ -1,10 +1,19 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:hive_ce/hive.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../data/local/visual_inspection_repository.dart';
+import '../../../domain/enums/app_enums.dart';
 import '../../../domain/inspections/visual_inspection.dart';
 import '../../../domain/models/app_models.dart';
 import '../../checklist/data/checklist_models.dart';
 import '../domain/rv_draft.dart';
+import '../domain/rv_sync_state.dart';
+import '../../../domain/integrity/operation_journal.dart';
+import '../../../domain/media/inspection_photo.dart';
+import '../../../domain/sync/sync_queue_item.dart';
 
 class RvDraftRepository {
   RvDraftRepository(this.visualRepository);
@@ -18,7 +27,11 @@ class RvDraftRepository {
   }) async {
     final inspection = await visualRepository.openOrCreate(hydrant, user);
     final existing = fromInspection(inspection);
-    if (existing != null) return existing;
+    if (existing != null) {
+      final upgraded = upgradeDraftChecklist(existing, checklist);
+      if (!identical(upgraded, existing)) await save(upgraded);
+      return upgraded;
+    }
     final now = DateTime.now().toUtc();
     final draft = RvDraft(
       clientInspectionId: inspection.id.isEmpty
@@ -54,6 +67,15 @@ class RvDraftRepository {
     return values;
   }
 
+  List<RvDraft> all() {
+    final values = <RvDraft>[];
+    for (final inspection in visualRepository.accessible()) {
+      final value = fromInspection(inspection);
+      if (value != null) values.add(value);
+    }
+    return values;
+  }
+
   RvDraft? find(String clientInspectionId) {
     final value = visualRepository.findById(clientInspectionId);
     return value == null ? null : fromInspection(value);
@@ -68,8 +90,15 @@ class RvDraftRepository {
     final inspection = visualRepository.findById(draft.clientInspectionId);
     if (inspection == null)
       throw StateError('No existe el documento local de inspección.');
+    final submitted =
+        draft.localStatus == RvLocalStatus.submitted &&
+        const {'submitted', 'validated'}.contains(draft.remoteStatus);
     await visualRepository.save(
       inspection.copyWith(
+        status: submitted ? InspectionStatus.completed : inspection.status,
+        completedAt: submitted
+            ? (draft.lastStatusChangedAt ?? draft.updatedAt)
+            : inspection.completedAt,
         updatedAt: draft.updatedAt,
         unknownFields: {
           ...inspection.unknownFields,
@@ -78,6 +107,125 @@ class RvDraftRepository {
       ),
     );
   }
+
+  Future<void> deleteUnsyncedLocal({
+    required String clientInspectionId,
+    required String creatorId,
+  }) async {
+    final draft = find(clientInspectionId);
+    if (draft == null) throw StateError('No se encontró el borrador local.');
+    if (draft.serverInspectionId != null) {
+      throw StateError(
+        'Este borrador ya existe en el servidor y no puede eliminarse localmente.',
+      );
+    }
+    final photoBox = Hive.box<String>('inspection_photos_v1');
+    final mediaBox = Hive.box<String>('media_sync_queue');
+    final mediaWorkBox = Hive.box<String>('media_work_queue_v1');
+    final queueBox = Hive.box<String>('sync_queue');
+    final journalBox = Hive.box<String>('operation_journal_v1');
+    final photoIds = <String>{};
+    for (final entry in photoBox.toMap().entries) {
+      try {
+        final photo = InspectionPhoto.fromJson(
+          Map<String, dynamic>.from(jsonDecode(entry.value) as Map),
+        );
+        if (photo.inspectionId != clientInspectionId ||
+            photo.capturedByUserId != creatorId) {
+          continue;
+        }
+        photoIds.add(photo.id);
+        for (final path in {photo.localPath, photo.thumbnailPath}) {
+          final file = File(path);
+          if (await file.exists()) await file.delete();
+        }
+        await photoBox.delete(entry.key);
+        await mediaBox.delete(photo.id);
+        await mediaWorkBox.delete(photo.id);
+      } on FormatException {
+        continue;
+      }
+    }
+    for (final entry in queueBox.toMap().entries) {
+      try {
+        final item = SyncQueueItem.fromJson(
+          Map<String, dynamic>.from(jsonDecode(entry.value) as Map),
+        );
+        if (item.ownerUserId == creatorId &&
+            (item.inspectionId == clientInspectionId ||
+                item.entityId == clientInspectionId ||
+                photoIds.contains(item.entityId))) {
+          await queueBox.delete(entry.key);
+        }
+      } on FormatException {
+        continue;
+      }
+    }
+    for (final entry in journalBox.toMap().entries) {
+      try {
+        final operation = OperationJournalEntry.fromJson(
+          Map<String, dynamic>.from(jsonDecode(entry.value) as Map),
+        );
+        if (operation.actor == creatorId &&
+            operation.entityIds.any(
+              (id) => id == clientInspectionId || photoIds.contains(id),
+            )) {
+          await journalBox.delete(entry.key);
+        }
+      } on FormatException {
+        continue;
+      }
+    }
+    await visualRepository.deleteLocalDraft(
+      clientInspectionId,
+      creatorId: creatorId,
+    );
+  }
+
+  Future<void> reconcileSubmittedStatuses() async {
+    for (final inspection in visualRepository.accessible()) {
+      if (inspection.status == InspectionStatus.completed) continue;
+      final draft = fromInspection(inspection);
+      if (draft == null ||
+          draft.localStatus != RvLocalStatus.submitted ||
+          !const {'submitted', 'validated'}.contains(draft.remoteStatus)) {
+        continue;
+      }
+      await visualRepository.save(
+        inspection.copyWith(
+          status: InspectionStatus.completed,
+          completedAt: draft.lastStatusChangedAt ?? draft.updatedAt,
+          updatedAt: draft.updatedAt,
+        ),
+      );
+    }
+  }
+}
+
+RvDraft upgradeDraftChecklist(RvDraft draft, DynamicChecklist current) {
+  if (draft.isReadOnly ||
+      draft.checklistId != current.id ||
+      draft.checklistVersion != current.version) {
+    return draft;
+  }
+  final storedIds = draft.checklist.sections
+      .expand((section) => section.items)
+      .map((item) => item.id)
+      .toSet();
+  final currentIds = current.sections
+      .expand((section) => section.items)
+      .map((item) => item.id)
+      .toSet();
+  if (!currentIds.containsAll(storedIds) ||
+      (currentIds.length == storedIds.length &&
+          draft.checklist.etag == current.etag)) {
+    return draft;
+  }
+  return RvDraft.fromJson({
+    ...draft.toJson(),
+    'checklistSnapshot': current.toJson(),
+    'updatedAt': DateTime.now().toUtc().toIso8601String(),
+  });
 }
 
 // ignore_for_file: curly_braces_in_flow_control_structures

@@ -365,6 +365,7 @@ class InspectionRemoteRepository {
     try {
       final response = await client.dio.post<Map<String, dynamic>>(
         '/inspections/$id/submit',
+        data: const {'enforceCurrentChecklist': true},
         options: Options(headers: {'Idempotency-Key': 'submit-$id'}),
       );
       return _inspection(response.data ?? const {}, fallbackId: id);

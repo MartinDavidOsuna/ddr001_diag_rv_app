@@ -225,6 +225,15 @@ class _RvSummaryPageState extends State<RvSummaryPage>
               ),
             ),
           const SizedBox(height: 16),
+          if (draft.serverInspectionId == null && !draft.isReadOnly) ...[
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(foregroundColor: AppColors.red),
+              onPressed: busy ? null : () => _deleteLocalDraft(state, draft),
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Eliminar borrador local'),
+            ),
+            const SizedBox(height: 10),
+          ],
           AnimatedBuilder(
             animation: _sendingAnimation,
             builder: (context, child) => CustomPaint(
@@ -257,6 +266,39 @@ class _RvSummaryPageState extends State<RvSummaryPage>
         ],
       ),
     );
+  }
+
+  Future<void> _deleteLocalDraft(AppState state, RvDraft draft) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Eliminar borrador local'),
+        content: const Text(
+          'Se eliminarán este borrador y sus fotografías guardadas en el dispositivo. Esta acción no se puede deshacer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    _setBusy(true);
+    try {
+      await state.deleteUnsyncedLocalDraft(draft.clientInspectionId);
+      if (mounted) context.go('/home');
+    } on Object catch (error) {
+      if (mounted)
+        setState(() => message = '$error'.replaceFirst('Bad state: ', ''));
+    } finally {
+      if (mounted) _setBusy(false);
+    }
   }
 
   Widget _row(String label, String value) => Padding(

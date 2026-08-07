@@ -94,6 +94,21 @@ void main() {
     );
   });
 
+  test('sólo el creador puede eliminar su borrador local', () async {
+    inspections.setAccessScope(scope('user-a', 'crew-a'));
+    final draft = await inspections.openOrCreate(hydrant, userA);
+
+    await expectLater(
+      inspections.deleteLocalDraft(draft.id, creatorId: 'user-b'),
+      throwsStateError,
+    );
+    expect(inspections.findById(draft.id), isNotNull);
+
+    await inspections.deleteLocalDraft(draft.id, creatorId: 'user-a');
+    expect(inspections.findById(draft.id), isNull);
+    expect(inspections.hasLocalInspection(hydrant.id), isFalse);
+  });
+
   test('cola offline de A no queda lista ni visible bajo B', () async {
     queue.setAccessScope(scope('user-a', 'crew-a'));
     final now = DateTime.utc(2026, 7, 27);

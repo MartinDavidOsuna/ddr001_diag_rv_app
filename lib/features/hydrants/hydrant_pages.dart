@@ -13,6 +13,7 @@ import '../../domain/filters/hydrant_filter_request.dart';
 import '../../domain/models/app_models.dart';
 import '../../domain/filters/hydrant_query_projection.dart';
 import '../../domain/functional/functional_models.dart';
+import '../home/rv_work_dashboard.dart';
 import '../../domain/inspections/visual_inspection.dart';
 import 'widgets/auto_visible_filter_bar.dart';
 
@@ -34,7 +35,8 @@ String syncLabel(SyncStatus s) => switch (s) {
 };
 
 class HydrantsPage extends StatefulWidget {
-  const HydrantsPage({super.key});
+  const HydrantsPage({this.workGroup, super.key});
+  final String? workGroup;
   @override
   State<HydrantsPage> createState() => _HydrantsPageState();
 }
@@ -115,14 +117,29 @@ class _HydrantsPageState extends State<HydrantsPage> {
       query = '';
       searchController.clear();
     }
-    final items = state
-        .hydrantsForFilter(state.hydrantListFilter)
-        .where(matchesSearch)
-        .toList();
+    final dashboardGroup = RvWorkGroup.values
+        .where((group) => group.name == widget.workGroup)
+        .firstOrNull;
+    final dashboardIds = dashboardGroup == null
+        ? null
+        : RvWorkDashboardProjection.byHydrant(
+            drafts: state.rvDraftRepository.all(),
+            hydrants: state.hydrants,
+          )[dashboardGroup]!;
+    final items =
+        (dashboardIds == null
+                ? state.hydrantsForFilter(state.hydrantListFilter)
+                : state.hydrants.where(
+                    (hydrant) => dashboardIds.contains(hydrant.id),
+                  ))
+            .where(matchesSearch)
+            .toList();
     return Scaffold(
       appBar: AppPageHeader(
         title: 'Hidrantes',
-        subtitle: '${state.hydrants.length} asignados',
+        subtitle: dashboardGroup == null
+            ? '${state.hydrants.length} asignados'
+            : dashboardGroup.label,
         actions: [
           IconButton(
             constraints: const BoxConstraints.tightFor(width: 48, height: 48),
