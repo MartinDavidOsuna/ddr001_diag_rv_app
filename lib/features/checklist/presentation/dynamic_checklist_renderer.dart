@@ -354,6 +354,8 @@ class _ParcelValveSection extends StatelessWidget {
                   DropdownMenuItem(value: 1, child: Text('1')),
                   DropdownMenuItem(value: 2, child: Text('2')),
                   DropdownMenuItem(value: 3, child: Text('3')),
+                  DropdownMenuItem(value: 4, child: Text('4')),
+                  DropdownMenuItem(value: 5, child: Text('5')),
                 ],
                 onChanged: draft.isReadOnly
                     ? null
@@ -719,33 +721,41 @@ class _Section extends StatelessWidget {
           ),
         )
         .toList();
-    final answerable = visible
+    final renderable = visible
         .where(
-          (item) => !const {
-            'photo',
-            'coordinates',
-            'signal',
-            'readonly',
-          }.contains(item.type),
+          (item) =>
+              !const {'coordinates', 'signal', 'readonly'}.contains(item.type),
         )
         .toList();
-    if (answerable.isEmpty) return const SizedBox.shrink();
-    final missing = answerable
-        .where((item) => item.required && !draft.answers.containsKey(item.id))
+    if (renderable.isEmpty) return const SizedBox.shrink();
+    final missing = renderable
+        .where(
+          (item) =>
+              item.required &&
+              (item.type == 'photo'
+                  ? draft.photosFor(item.photoSlot ?? item.code).isEmpty
+                  : !draft.answers.containsKey(item.id)),
+        )
         .length;
     final questions = [
-      for (final item in answerable)
+      for (final item in renderable)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
-          child: _Question(
-            key: item.id == targetQuestionId ? targetKey : null,
-            section: section,
-            item: item,
-            controller: controller,
-            highlighted:
-                item.id == targetQuestionId &&
-                controller.highlightedFocusKey != null,
-          ),
+          child: item.type == 'photo'
+              ? _ChecklistPhotoQuestion(
+                  key: item.id == targetQuestionId ? targetKey : null,
+                  item: item,
+                  controller: controller,
+                )
+              : _Question(
+                  key: item.id == targetQuestionId ? targetKey : null,
+                  section: section,
+                  item: item,
+                  controller: controller,
+                  highlighted:
+                      item.id == targetQuestionId &&
+                      controller.highlightedFocusKey != null,
+                ),
         ),
     ];
     return Card(
@@ -789,6 +799,67 @@ class _Section extends StatelessWidget {
                 ],
               ),
             ),
+    );
+  }
+}
+
+class _ChecklistPhotoQuestion extends StatelessWidget {
+  const _ChecklistPhotoQuestion({
+    required this.item,
+    required this.controller,
+    super.key,
+  });
+
+  final ChecklistItemDefinition item;
+  final RvInspectionController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final draft = controller.draft!;
+    final slot = item.photoSlot ?? item.code;
+    final photos = draft.photosFor(slot);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(item.label, style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text(item.required ? 'Fotografía obligatoria' : 'Fotografía opcional'),
+        for (final photo in photos)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.check_circle, color: Colors.green),
+            title: const Text('Fotografía guardada'),
+            subtitle: Text(photo.status.name),
+            trailing: draft.isReadOnly
+                ? null
+                : IconButton(
+                    tooltip: 'Eliminar fotografía',
+                    onPressed: () =>
+                        controller.removePhoto(slot, photo.photoId),
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+          ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: [
+            FilledButton.icon(
+              onPressed: draft.isReadOnly
+                  ? null
+                  : () => controller.addPhoto(slot, ImageSource.camera),
+              icon: const Icon(Icons.photo_camera),
+              label: const Text('Tomar foto'),
+            ),
+            OutlinedButton.icon(
+              onPressed: draft.isReadOnly
+                  ? null
+                  : () => controller.addPhoto(slot, ImageSource.gallery),
+              icon: const Icon(Icons.photo_library_outlined),
+              label: const Text('Galería'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

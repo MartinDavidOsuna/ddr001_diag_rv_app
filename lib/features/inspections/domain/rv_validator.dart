@@ -74,13 +74,40 @@ class RvValidator {
         continue;
       }
       for (final item in section.items) {
-        if (!isVisible(item, checklist, draft.answers) ||
-            const {
-              'photo',
-              'coordinates',
-              'signal',
-              'readonly',
-            }.contains(item.type))
+        if (!isVisible(item, checklist, draft.answers)) continue;
+        if (item.type == 'photo') {
+          final slot = item.photoSlot ?? item.code;
+          final photos = draft.photosFor(slot);
+          if (item.required && photos.isEmpty) {
+            issues.add(
+              RvValidationIssue(
+                code: 'required_photo_missing',
+                message: 'Falta ${item.label}.',
+                sectionId: section.id,
+                questionId: item.id,
+                slotCode: slot,
+                focusKey: 'photo:$slot',
+              ),
+            );
+          } else if (item.required &&
+              requireSynced &&
+              !photos.any(
+                (photo) => photo.status == RvPhotoUploadStatus.verified,
+              )) {
+            issues.add(
+              RvValidationIssue(
+                code: 'photo_pending',
+                message: '${item.label} no está subida.',
+                sectionId: section.id,
+                questionId: item.id,
+                slotCode: slot,
+                focusKey: 'photo:$slot',
+              ),
+            );
+          }
+          continue;
+        }
+        if (const {'coordinates', 'signal', 'readonly'}.contains(item.type))
           continue;
         final answer = draft.answers[item.id];
         if (item.code == 'filter_element' &&
@@ -246,7 +273,7 @@ class RvValidator {
       );
     }
     if (configuration.valveCount < 1 ||
-        configuration.valveCount > 3 ||
+        configuration.valveCount > 5 ||
         configuration.valves.length != configuration.valveCount) {
       issues.add(
         RvValidationIssue(
