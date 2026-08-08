@@ -114,6 +114,12 @@ class RvDraftRepository {
   }) async {
     final draft = find(clientInspectionId);
     if (draft == null) throw StateError('No se encontró el borrador local.');
+    final inspection = visualRepository.findById(clientInspectionId);
+    if (inspection == null ||
+        (inspection.createdBy != creatorId &&
+            inspection.inspectorId != creatorId)) {
+      throw StateError('Sólo el creador puede eliminar este borrador.');
+    }
     if (draft.serverInspectionId != null) {
       throw StateError(
         'Este borrador ya existe en el servidor y no puede eliminarse localmente.',
@@ -199,6 +205,33 @@ class RvDraftRepository {
         ),
       );
     }
+  }
+
+  Future<int> reconcileOrphanedInspectionQueue({
+    required String creatorId,
+  }) async {
+    final queueBox = Hive.box<String>('sync_queue');
+    final orphanKeys = <Object>[];
+    for (final entry in queueBox.toMap().entries) {
+      try {
+        final item = SyncQueueItem.fromJson(
+          Map<String, dynamic>.from(jsonDecode(entry.value) as Map),
+        );
+        final inspectionId = item.inspectionId;
+        if (item.ownerUserId != creatorId ||
+            inspectionId == null ||
+            inspectionId.isEmpty ||
+            item.entityType.toLowerCase().contains('photo') ||
+            visualRepository.findById(inspectionId) != null) {
+          continue;
+        }
+        orphanKeys.add(entry.key);
+      } on FormatException {
+        // Una entrada ilegible se conserva para diagnóstico; no se borra a ciegas.
+      }
+    }
+    if (orphanKeys.isNotEmpty) await queueBox.deleteAll(orphanKeys);
+    return orphanKeys.length;
   }
 }
 

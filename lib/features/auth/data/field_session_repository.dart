@@ -194,11 +194,13 @@ class FieldSessionRepository {
     await pendingStorage?.savePendingLogout(session);
     try {
       await client.dio.post<void>(
-        '/field-sessions/logout',
-        data: {'refreshToken': session.refreshToken},
+        '/field-sessions/${session.sessionId}/end',
         options: Options(
           extra: {'skipAuth': true},
-          headers: {'Idempotency-Key': 'end-${session.sessionId}'},
+          headers: {
+            'Authorization': 'Bearer ${session.accessToken}',
+            'Idempotency-Key': 'end-${session.sessionId}',
+          },
         ),
       );
       await pendingStorage?.clearPendingLogout();
@@ -219,11 +221,13 @@ class FieldSessionRepository {
     if (pending == null) return true;
     try {
       await client.dio.post<void>(
-        '/field-sessions/logout',
-        data: {'refreshToken': pending.refreshToken},
+        '/field-sessions/${pending.sessionId}/end',
         options: Options(
           extra: {'skipAuth': true},
-          headers: {'Idempotency-Key': 'end-${pending.sessionId}'},
+          headers: {
+            'Authorization': 'Bearer ${pending.accessToken}',
+            'Idempotency-Key': 'end-${pending.sessionId}',
+          },
         ),
       );
       await pendingStorage.clearPendingLogout();

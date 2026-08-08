@@ -129,6 +129,7 @@ class AppState extends ChangeNotifier {
   AssignmentSyncResult? lastAssignmentResult;
   DateTime? lastAssignmentCheck;
   String? assignmentError, assignmentCursor;
+  String? pendingSessionTakeoverToken;
   HydrantListFilter hydrantListFilter = HydrantListFilter.all;
   HydrantFilterRequest? hydrantFilterRequest;
   int _hydrantFilterRequestSequence = 0;
@@ -218,7 +219,6 @@ class AppState extends ChangeNotifier {
       clientInspectionId: clientInspectionId,
       creatorId: user.id,
     );
-    _refreshSyncMetrics();
     notifyListeners();
   }
 
@@ -232,6 +232,9 @@ class AppState extends ChangeNotifier {
       _session = localSession;
       sessionOffline = true;
       _applySession(localSession);
+      await rvDraftRepository.reconcileOrphanedInspectionQueue(
+        creatorId: localSession.userId,
+      );
     }
     initialized = true;
     notifyListeners();
@@ -295,6 +298,7 @@ class AppState extends ChangeNotifier {
   Future<String?> startFieldSession(FieldRegistration registration) async {
     final stopwatch = Stopwatch()..start();
     try {
+      pendingSessionTakeoverToken = null;
       final newSession = await sessionRepository.start(registration);
       _resetActiveSessionState();
       _session = newSession;
@@ -310,9 +314,33 @@ class AppState extends ChangeNotifier {
       debugPrint('[PERF] login_session_ms=${stopwatch.elapsedMilliseconds}');
       return null;
     } on ApiException catch (error) {
+      if (error.kind == ApiErrorKind.sessionAlreadyActive &&
+          error.takeoverToken?.isNotEmpty == true) {
+        pendingSessionTakeoverToken = error.takeoverToken;
+        return 'Tu usuario ya está activo en otro dispositivo. ¿Deseas cerrar esa sesión? Presiona aquí';
+      }
       return error.message;
     } on Object {
       return 'Error desconocido.';
+    }
+  }
+
+  Future<String?> revokeExistingFieldSession() async {
+    final token = pendingSessionTakeoverToken;
+    if (token == null || token.isEmpty) {
+      return 'La autorización para cerrar la sesión ya no está disponible. Intenta iniciar sesión nuevamente.';
+    }
+    try {
+      await sessionRepository.revokeExisting(token);
+      pendingSessionTakeoverToken = null;
+      notifyListeners();
+      return null;
+    } on ApiException catch (error) {
+      return error.kind == ApiErrorKind.timeout
+          ? 'El servidor tardó demasiado en responder. La sesión anterior no se modificó.'
+          : error.message;
+    } on Object {
+      return 'No fue posible cerrar la sesión del otro dispositivo.';
     }
   }
 
@@ -944,10 +972,15 @@ class AppState extends ChangeNotifier {
       List<CachedHydrant>? refreshed;
       final partialErrors = <Object>[];
       await Future.wait<void>([
-        hydrantRepository.refreshCatalogSnapshot().then<void>(
-          (value) => catalog = value,
-          onError: (Object error) => partialErrors.add(error),
-        ),
+        (hydrantRepository.cached(scope: 'all').isEmpty
+                ? hydrantRepository.refreshCatalogSnapshot()
+                : hydrantRepository.isCatalogCacheStale()
+                ? hydrantRepository.refreshMapChanges()
+                : Future.value(hydrantRepository.cached(scope: 'all')))
+            .then<void>(
+              (value) => catalog = value,
+              onError: (Object error) => partialErrors.add(error),
+            ),
         hydrantRepository
             .refresh(scope: 'mine')
             .then<void>(

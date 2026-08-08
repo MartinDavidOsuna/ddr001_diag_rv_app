@@ -359,7 +359,7 @@ void main() {
       );
       expect(await repository.completePendingLogout(), isTrue);
       expect(storage.pendingLogout, isNull);
-      expect(adapter.requests.single.path, '/field-sessions/logout');
+      expect(adapter.requests.single.path, '/field-sessions/old-session/end');
     },
   );
 

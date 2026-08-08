@@ -25,12 +25,14 @@ class HydrantMapPage {
     required this.nextCursor,
     required this.hasMore,
     required this.generatedAt,
+    this.syncCursor,
   });
 
   final List<CachedHydrant> items;
   final String? nextCursor;
   final bool hasMore;
   final DateTime generatedAt;
+  final String? syncCursor;
 }
 
 class HydrantRepository {
@@ -94,6 +96,20 @@ class HydrantRepository {
 
   String get _snapshotMetadataKey =>
       '${_accessScope?.namespace ?? 'unscoped'}/meta/catalog-snapshot';
+
+  bool isCatalogCacheStale({Duration ttl = const Duration(minutes: 15)}) {
+    final raw = box.get(_snapshotMetadataKey);
+    if (raw == null) return true;
+    try {
+      final updatedAt = DateTime.tryParse(
+        '${(jsonDecode(raw) as Map)['updatedAt'] ?? ''}',
+      )?.toUtc();
+      return updatedAt == null ||
+          DateTime.now().toUtc().difference(updatedAt) >= ttl;
+    } on Object {
+      return true;
+    }
+  }
 
   Future<List<CachedHydrant>> refreshCatalogSnapshot({
     bool recheckCapability = false,
@@ -193,6 +209,7 @@ class HydrantRepository {
           'etag': response.headers.value('etag'),
           'updatedAt': now.toIso8601String(),
           'count': downloaded.length,
+          'cursor': response.data?['syncCursor']?.toString(),
         }),
       );
       cacheWatch.stop();
@@ -274,13 +291,18 @@ class HydrantRepository {
     HydrantMapBounds? bounds,
     int pageSize = 100,
     String? cursor,
+    bool allCatalog = false,
   }) async {
     final radiusMode = latitude != null || longitude != null;
-    if (radiusMode == (bounds != null) ||
-        (radiusMode && (latitude == null || longitude == null))) {
+    if (!allCatalog &&
+        (radiusMode == (bounds != null) ||
+            (radiusMode && (latitude == null || longitude == null)))) {
       throw ArgumentError(
         'Provide either latitude/longitude or visible bounds.',
       );
+    }
+    if (allCatalog && (radiusMode || bounds != null)) {
+      throw ArgumentError('allCatalog cannot be combined with a region.');
     }
     final watch = Stopwatch()..start();
     try {
@@ -294,6 +316,7 @@ class HydrantRepository {
           if (bounds != null) 'west': bounds.west,
           if (bounds != null) 'north': bounds.north,
           if (bounds != null) 'east': bounds.east,
+          if (allCatalog) 'scope': 'all',
           'pageSize': pageSize,
           if (cursor case final value?) ...{'cursor': value},
         },
@@ -333,10 +356,62 @@ class HydrantRepository {
         nextCursor: data['nextCursor']?.toString(),
         hasMore: data['hasMore'] == true,
         generatedAt: now,
+        syncCursor: data['syncCursor']?.toString(),
       );
     } on DioException catch (error) {
       throw ApiException.fromDio(error);
     }
+  }
+
+  Future<List<CachedHydrant>> refreshMapChanges() async {
+    final rawMetadata = box.get(_snapshotMetadataKey);
+    String? cursor;
+    if (rawMetadata != null) {
+      try {
+        cursor = (jsonDecode(rawMetadata) as Map)['cursor']?.toString();
+      } on Object {
+        cursor = null;
+      }
+    }
+    if (cursor == null || cursor.isEmpty) return refreshCatalogSnapshot();
+    var currentCursor = cursor;
+    var hasMore = false;
+    do {
+      final page = await fetchMapPage(
+        allCatalog: true,
+        pageSize: 500,
+        cursor: currentCursor,
+      );
+      final writes = <String, String>{};
+      final removals = <String>[];
+      for (final item in page.items) {
+        final key = _key('all', item.hydrantId);
+        if (item.isActive) {
+          writes[key] = jsonEncode(item.toJson());
+        } else {
+          removals.add(key);
+        }
+      }
+      if (writes.isNotEmpty) await box.putAll(writes);
+      if (removals.isNotEmpty) await box.deleteAll(removals);
+      currentCursor = page.syncCursor ?? currentCursor;
+      hasMore = page.hasMore && page.nextCursor != null;
+      if (hasMore) currentCursor = page.nextCursor!;
+    } while (hasMore);
+    final metadata = rawMetadata == null
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(rawMetadata) as Map);
+    await box.put(
+      _snapshotMetadataKey,
+      jsonEncode({
+        ...metadata,
+        'cursor': currentCursor,
+        'updatedAt': DateTime.now().toUtc().toIso8601String(),
+        'count': cached(scope: 'all').length,
+      }),
+    );
+    _memoryCache.clear();
+    return cached(scope: 'all');
   }
 
   Future<CachedHydrant> synchronizeManual(

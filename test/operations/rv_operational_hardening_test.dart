@@ -54,6 +54,8 @@ void main() {
       );
       expect(repository, contains('draft.serverInspectionId != null'));
       expect(repository, contains("Hive.box<String>('operation_journal_v1')"));
+      expect(repository, contains('reconcileOrphanedInspectionQueue'));
+      expect(repository, contains("contains('photo')"));
     },
   );
 

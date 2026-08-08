@@ -122,7 +122,7 @@ class CachedHydrant {
     installationAngleDeg: _double(json['installation_angle_deg']),
     elevationM: _double(json['elevation_m']),
     outletCount: _int(json['outlet_count']),
-    updatedAt: updatedAt,
+    updatedAt: _date(json['updatedAt'] ?? json['updated_at']) ?? updatedAt,
     source: json['source_type']?.toString() == 'manual' ? 'manual' : 'remote',
     createdByUserId: json['created_by_user_id']?.toString(),
     environment: json['source_environment']?.toString(),
