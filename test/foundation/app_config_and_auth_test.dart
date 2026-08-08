@@ -22,12 +22,20 @@ void main() {
     expect(config.apiBaseUrl.path, '/api/v1');
   });
 
-  test('AppConfig rechaza URL ausente en cualquier ambiente', () {
+  test('AppConfig usa el endpoint aprobado si producción no inyecta URL', () {
+    final config = AppConfig.fromEnvironment(
+      environmentOverride: 'production',
+      apiBaseUrlOverride: '',
+      debugMode: false,
+    );
+    expect(config.apiBaseUrl.toString(), AppConfig.productionBaseUrl);
+  });
+
+  test('AppConfig rechaza URL ausente fuera de producción', () {
     expect(
       () => AppConfig.fromEnvironment(
-        environmentOverride: 'production',
+        environmentOverride: 'development',
         apiBaseUrlOverride: '',
-        debugMode: false,
       ),
       throwsStateError,
     );

@@ -17,7 +17,7 @@ mantienen simultáneamente:
 ## Compilar producción
 
 ```powershell
-flutter build apk --release --dart-define=APP_ENV=production --dart-define=ALLOW_PRODUCTION_BUILD=true
+flutter build apk --release --dart-define=APP_ENV=production --dart-define=API_BASE_URL=http://cifra.aquafim.com:3002/api/v1 --dart-define=ALLOW_PRODUCTION_BUILD=true
 ```
 
 Perder el keystore o su contraseña impide publicar actualizaciones compatibles
