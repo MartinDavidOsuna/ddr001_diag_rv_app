@@ -12,6 +12,10 @@ String syncConnectionMessage(bool online) => online
     ? 'Conectado a la API; cada elemento requiere confirmación remota'
     : 'Los cambios permanecen guardados hasta recuperar la conexión';
 
+@visibleForTesting
+String mediaSyncStatusForUi(String? persistedStatus) =>
+    persistedStatus ?? MediaSyncStatus.pendingUpload.name;
+
 class SyncPage extends StatefulWidget {
   const SyncPage({required this.returnLocation, super.key});
   final String returnLocation;
@@ -60,7 +64,11 @@ class _SyncPageState extends State<SyncPage> {
           actions: [
             Padding(
               padding: const EdgeInsets.only(right: 12),
-              child: ConnectionBadge(online: state.online),
+              child: ConnectionBadge(
+                online: state.online,
+                state: state.connectivityState,
+                transport: state.connectivityMonitor?.transport,
+              ),
             ),
           ],
         ),
@@ -189,7 +197,7 @@ class _SyncPageState extends State<SyncPage> {
                     for (final id in photos)
                       PhotoRow(
                         id: id,
-                        status: state.mediaBox.get(id)!,
+                        status: mediaSyncStatusForUi(state.mediaBox.get(id)),
                         onRetry: () => state.retryMedia(id),
                       ),
                   ],

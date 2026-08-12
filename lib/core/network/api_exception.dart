@@ -9,6 +9,7 @@ enum ApiErrorKind {
   sessionAlreadyActive,
   invalidData,
   serverUnavailable,
+  serverError,
   validation,
   unknown,
 }
@@ -72,8 +73,6 @@ class ApiException implements Exception {
         'USER_INACTIVE': 'Tu usuario fue desactivado.',
         'DEVICE_BLOCKED': 'Este dispositivo fue bloqueado.',
         'DEVICE_BINDING_REVOKED': 'El acceso de este dispositivo fue revocado.',
-        'REFRESH_TOKEN_REUSE':
-            'La seguridad de la sesión requiere iniciar nuevamente.',
       };
       if (definitiveMessages.containsKey(domainCode)) {
         return ApiException(
@@ -85,8 +84,8 @@ class ApiException implements Exception {
         );
       }
       return ApiException(
-        ApiErrorKind.authenticationRequired,
-        'Sin conexión. Puedes continuar trabajando; los cambios se sincronizarán después.',
+        ApiErrorKind.serverUnavailable,
+        'No fue posible verificar la sesión con el servidor. Puedes continuar trabajando y se intentará nuevamente.',
         statusCode: status,
         requestId: requestId,
         domainCode: domainCode,
@@ -147,10 +146,11 @@ class ApiException implements Exception {
       );
     }
     if (status == 422 || status == 400) {
+      final validationMessage = _validationMessage(problem, problemErrors);
       return ApiException(
         status == 422 ? ApiErrorKind.validation : ApiErrorKind.invalidData,
         status == 422
-            ? 'Uno o más datos no son válidos. Revisa la información capturada.'
+            ? validationMessage
             : 'Los datos enviados no son válidos.',
         statusCode: status,
         requestId: requestId,
@@ -168,10 +168,18 @@ class ApiException implements Exception {
         requestId: requestId,
       );
     }
-    if (status == 429 || (status != null && status >= 500)) {
+    if (status == 429) {
       return ApiException(
         ApiErrorKind.serverUnavailable,
-        status == 429 ? 'Demasiadas solicitudes.' : 'Servidor no disponible.',
+        'Demasiadas solicitudes.',
+        statusCode: status,
+        requestId: requestId,
+      );
+    }
+    if (status != null && status >= 500) {
+      return ApiException(
+        ApiErrorKind.serverError,
+        'El servidor respondió con un error. Intenta nuevamente.',
         statusCode: status,
         requestId: requestId,
       );
@@ -187,4 +195,72 @@ class ApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+String _validationMessage(
+  Map<dynamic, dynamic> problem,
+  List<Map<String, dynamic>> errors,
+) {
+  final title = problem['title']?.toString().toLowerCase() ?? '';
+  final detail = problem['detail']?.toString() ?? '';
+  if (title == 'invalid parcel valve catalogs') {
+    final valve = RegExp(
+      r'valve\s+(\d+)',
+      caseSensitive: false,
+    ).firstMatch(detail)?.group(1);
+    return valve == null
+        ? 'Una marca o diámetro de las válvulas no coincide con su catálogo. Vuelve a seleccionar ese dato.'
+        : 'Una marca o diámetro de la válvula $valve no coincide con su catálogo. Vuelve a seleccionar ese dato.';
+  }
+
+  final issue = errors.firstOrNull;
+  if (issue == null) {
+    return 'Uno o más datos no son válidos. Revisa la información capturada.';
+  }
+  final path = issue['path'] is List
+      ? (issue['path'] as List).map((part) => part.toString()).toList()
+      : const <String>[];
+  final field = _spanishField(path, issue);
+  return field == null
+      ? 'Uno o más datos no son válidos. Revisa la información capturada.'
+      : 'El servidor rechazó $field. Revísalo e intenta nuevamente.';
+}
+
+String? _spanishField(List<String> path, Map<String, dynamic> issue) {
+  final focusKey = issue['focusKey']?.toString();
+  final itemCode = issue['itemCode']?.toString();
+  final raw = path.isNotEmpty ? path.last : focusKey ?? itemCode;
+  if (raw == null || raw.isEmpty) return null;
+
+  final valvePosition = path.indexOf('valves');
+  final valveIndex = valvePosition >= 0 && valvePosition + 1 < path.length
+      ? int.tryParse(path[valvePosition + 1])
+      : null;
+  final valveSuffix = valveIndex == null
+      ? ''
+      : ' de la válvula ${valveIndex + 1}';
+  const labels = <String, String>{
+    'customConfigurationText': 'la configuración de válvulas',
+    'configurationType': 'el tipo de configuración de válvulas',
+    'valveCount': 'la cantidad de válvulas',
+    'diameterId': 'el diámetro',
+    'valveBrandId': 'la marca de la válvula',
+    'valveBrandIllegibleReason': 'el motivo de marca ilegible',
+    'pilotConnected': 'la conexión del piloto',
+    'pilotBrandId': 'la marca del piloto',
+    'pilotBrandIllegibleReason': 'el motivo de piloto ilegible',
+    'solenoidBrandId': 'la marca del solenoide',
+    'pressureGaugeBrandId': 'la marca del manómetro',
+    'valves': 'las válvulas',
+    'generalPhotos': 'las fotografías generales',
+    'answers': 'las respuestas obligatorias',
+    'slotCode': 'el tipo de fotografía',
+  };
+  final label = labels[raw];
+  if (label != null) return '$label$valveSuffix';
+
+  const itemLabels = <String, String>{
+    'flow_meter_pulse_cable': 'la respuesta sobre el cable de pulsos',
+  };
+  return itemLabels[itemCode] ?? itemLabels[raw];
 }

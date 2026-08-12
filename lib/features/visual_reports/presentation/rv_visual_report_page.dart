@@ -6,6 +6,9 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/services/app_state.dart';
 import '../domain/visual_report.dart';
 
+String rvReportTitle(String accountNumber) =>
+    'Reporte RV - Hidrante ${accountNumber.trim()}';
+
 class RvVisualReportPage extends StatefulWidget {
   const RvVisualReportPage({required this.accountNumber, super.key});
   final String accountNumber;
@@ -33,7 +36,7 @@ class _RvVisualReportPageState extends State<RvVisualReportPage> {
   void _retry() => setState(() => _future = _load());
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Reporte RV')),
+    appBar: AppBar(title: Text(rvReportTitle(widget.accountNumber))),
     body: SafeArea(
       child: FutureBuilder<VisualReport>(
         future: _future,

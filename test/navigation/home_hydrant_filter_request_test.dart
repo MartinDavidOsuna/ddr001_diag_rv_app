@@ -4,6 +4,9 @@ import 'package:ddr001diag/core/network/api_client.dart';
 import 'package:ddr001diag/data/local/functional_repositories.dart';
 import 'package:ddr001diag/data/local/visual_inspection_repository.dart';
 import 'package:ddr001diag/domain/enums/hydrant_list_filter.dart';
+import 'package:ddr001diag/domain/enums/app_enums.dart';
+import 'package:ddr001diag/domain/models/app_models.dart';
+import 'package:ddr001diag/features/checklist/data/checklist_models.dart';
 import 'package:ddr001diag/features/auth/data/field_session_repository.dart';
 import 'package:ddr001diag/features/hydrants/data/hydrant_repository.dart';
 import 'package:ddr001diag/features/checklist/data/checklist_repository.dart';
@@ -142,6 +145,67 @@ void main() {
     }
   });
 
+  test(
+    'estado oficial prevalece sobre borrador y traza local obsoletos',
+    () async {
+      const official = Hydrant(
+        id: 'hydrant-1497',
+        code: '1497',
+        locality: '',
+        parcel: '',
+        priority: PriorityLevel.medium,
+        access: AccessType.vehicle,
+        syncStatus: SyncStatus.synced,
+        f02a: InspectionSummary(
+          type: InspectionType.f02A,
+          status: InspectionStatus.completed,
+          progress: 1,
+        ),
+        f02b: InspectionSummary(
+          type: InspectionType.f02B,
+          status: InspectionStatus.notRequired,
+          progress: 0,
+        ),
+        latitude: 0,
+        longitude: 0,
+        rvStatus: 'submitted',
+        officialInspectionId: 'official-report',
+        availableForRv: false,
+      );
+      state.hydrants.add(official);
+      await state.rvDraftRepository.openOrCreate(
+        hydrant: official.copyWith(
+          f02a: const InspectionSummary(
+            type: InspectionType.f02A,
+            status: InspectionStatus.pending,
+            progress: 0,
+          ),
+        ),
+        user: state.user,
+        checklist: DynamicChecklist(
+          id: 'rv',
+          code: 'rv',
+          version: 1,
+          title: 'RV',
+          etag: 'etag',
+          cachedAt: DateTime.now().toUtc(),
+          sections: const [],
+        ),
+      );
+      await state.trace('legacy_event', 'Traza previa', hydrantId: official.id);
+
+      expect(state.pendingDiagnostics, 0);
+      expect(
+        state.hydrantsForFilter(HydrantListFilter.synchronizationPending),
+        isEmpty,
+      );
+      expect(state.hydrantsForFilter(HydrantListFilter.pendingToday), isEmpty);
+      expect(state.profileTodayStats.pending, 0);
+      expect(state.profileTodayStats.unsynced, 0);
+      expect(state.profileTodayStats.submitted, 1);
+    },
+  );
+
   testWidgets('Perfil no expone simulación ni actualizaciones', (tester) async {
     await tester.pumpWidget(
       ChangeNotifierProvider<AppState>.value(
@@ -149,7 +213,7 @@ void main() {
         child: const MaterialApp(home: ProfilePage()),
       ),
     );
-    expect(find.text('ESTADÍSTICAS DE HOY'), findsOneWidget);
+    expect(find.text('ESTADÍSTICAS ACTUALES'), findsOneWidget);
     expect(find.text('Enviados'), findsOneWidget);
     expect(find.text('Simular conexión'), findsNothing);
     expect(find.text('Revisar actualización'), findsNothing);

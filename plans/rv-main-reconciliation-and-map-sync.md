@@ -101,6 +101,52 @@ La proyección global recuperada se consume en modelo de hidrante, navegación, 
 - Los artefactos locales preexistentes (`dist`, APK, `node_modules`, `package*.json`) quedaron fuera de commits.
 - El `pubspec.lock` preexistente está preservado en `stash@{0}` con mensaje `preserve-preexisting-pubspec-lock-before-rv-reconciliation`; no pertenece a esta reconciliación.
 
+## Auditoría de regresión 1497 y plan de cierre (2026-08-08)
+
+La corrección sí existía en `fix/rv-field-anr-local-first-and-session-takeover`,
+principalmente en el commit `6a44d53` (`manage local drafts and dashboard
+groups`). Durante la reconciliación semántica hacia esta rama, el commit
+equivalente `4cbafc0` conservó el borrado y los grupos, pero dejó fuera parte de
+la proyección que distinguía un reporte local finalizado de un borrador local.
+Esto explica que la cuenta 1497 pudiera verse como `Guardado localmente` y que
+la UI evaluara un `RvDraft` antiguo sin consultar primero el estado oficial del
+hidrante.
+
+| Cambio presente en `6a44d53` | Estado actual antes del parche | Acción |
+|---|---|---|
+| Proyectar `VisualInspection.completed` como sincronizado/validado al reconstruir la caché | Faltante | Restaurar con precedencia del estado remoto oficial |
+| Conservar fecha y cantidad de fotos en `Hydrant.copyWith` | Faltante | Restaurar para que la proyección no pierda metadatos |
+| No convertir un reporte finalizado en `SyncStatus.local` | Parcial | Corregir caché y mapeo de hidrante manual remoto |
+| Abrir el visor al tocar una RV completada/validada | Faltante | Restaurar; consulta no equivale a edición |
+| Impedir borrado cuando el documento local está finalizado | Insuficiente tras permitir IDs remotos parciales | Agregar guardia por documento y estado global |
+| Contadores Hive cacheados mediante listeners con debounce | Faltante | Reintegrar en una etapa separada de performance |
+| `Sincronizar todo` transmite `submit=true` para estados listos | Faltante | Restaurar y cubrir con prueba de regresión |
+| Snapshot completo en cada sincronización | Superado por la implementación incremental actual | No restaurar |
+| Reconciliación conservadora de colas huérfanas al inicio | Mejora más nueva de esta rama | Conservar |
+| Session takeover | Implementación más nueva presente | Conservar sin cambios |
+
+### Cambios de esta intervención
+
+1. Centralizar la precedencia `reporte oficial > borrador local obsoleto` en la reconstrucción y autorización de borrado.
+2. Mostrar 1497 como enviado/sincronizado y retirar el botón de eliminación sin borrar su copia local ni su reporte remoto.
+3. Restaurar la navegación de RV terminada hacia el visor.
+4. Sustituir la leyenda del mapa por seis filtros uniformes: Todo, Disponible, Trabajo local, Revisado, Conflicto e Inactivo.
+5. Igualar la altura de los seis rubros del dashboard.
+6. Agregar pruebas de precedencia, borrado protegido, clasificación y filtrado del mapa y layout.
+
+### Trabajo posterior recomendado
+
+- Restaurar los contadores cacheados de `6a44d53` sin perder la reconciliación de colas posterior; evita recorridos de Hive desde getters de widgets.
+- Auditar datos legacy donde un reporte finalizado conserve un `RvDraft` internamente inconsistente y normalizarlos de forma no destructiva durante el arranque.
+
+### Validación en dispositivo
+
+- Pixel 7 Pro, API de producción y actualización conservando datos locales.
+- Cuenta 1497: `Sincronizado`, RV `Terminado`, CTA `Ver reporte RV vigente` y sin botón de eliminación.
+- Dashboard: las seis tarjetas tienen altura idéntica; 1497 se cuenta en `Enviados`, no en pendientes.
+- Mapa: 1,169 puntos con coordenadas en caché; el filtro `Revisado` mostró 133 y contiene la cuenta 1497.
+- Los seis botones del mapa quedaron en dos filas de tres con dimensiones idénticas.
+
 ### Archivos y commits
 
 La rama es `fix/rv-main-reconciliation-and-map-sync`. Los commits recuperados quedaron aplicados individualmente (`1fee9f9` a `4cbafc0`) y el cierre incremental se confirma junto con este plan. El inventario exacto se obtiene con `git diff --name-only origin/main...fix/rv-main-reconciliation-and-map-sync`. No se hizo push ni merge.

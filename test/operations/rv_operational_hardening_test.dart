@@ -23,6 +23,7 @@ void main() {
       expect(home, contains('rvDraftRepository.all()'));
       expect(home, contains('RvWorkDashboardProjection.byHydrant'));
       expect(home, contains('/hydrants?workGroup='));
+      expect(home, contains('height: 92'));
       final projection = File(
         'lib/features/home/rv_work_dashboard.dart',
       ).readAsStringSync();
@@ -34,30 +35,75 @@ void main() {
     },
   );
 
+  test('map exposes six uniform filters in a three-column grid', () {
+    final map = File('lib/features/map/map_page.dart').readAsStringSync();
+    expect(map, contains('HydrantMapFilter.values'));
+    expect(map, contains('crossAxisCount: 3'));
+    expect(map, contains('height: 86'));
+    expect(map, contains('mainAxisExtent: 40'));
+    for (final label in [
+      'Todo',
+      'Disponible',
+      'Trabajo local',
+      'Revisado',
+      'Conflicto',
+      'Inactivo',
+    ]) {
+      expect(map, contains("'$label'"));
+    }
+  });
+
   test(
-    'only a creator-owned never-synchronized draft exposes local deletion',
+    'map renders every hydrant at its exact coordinate without clusters',
     () {
-      final summary = File(
-        'lib/features/inspections/presentation/rv_summary_page.dart',
-      ).readAsStringSync();
-      final repository = File(
-        'lib/features/inspections/data/rv_draft_repository.dart',
-      ).readAsStringSync();
-      final documents = File(
-        'lib/data/local/visual_inspection_repository.dart',
-      ).readAsStringSync();
-      expect(summary, contains('draft.serverInspectionId == null'));
-      expect(summary, contains('Eliminar borrador local'));
-      expect(
-        documents,
-        contains('Sólo el creador puede eliminar este borrador'),
-      );
-      expect(repository, contains('draft.serverInspectionId != null'));
-      expect(repository, contains("Hive.box<String>('operation_journal_v1')"));
-      expect(repository, contains('reconcileOrphanedInspectionQueue'));
-      expect(repository, contains("contains('photo')"));
+      final map = File('lib/features/map/map_page.dart').readAsStringSync();
+      expect(map, contains('for (final item in items)'));
+      expect(map, contains('point: item.position'));
+      expect(map, isNot(contains('HydrantMapClusterer.cluster(')));
     },
   );
+
+  test('only a creator-owned non-official draft exposes local deletion', () {
+    final summary = File(
+      'lib/features/inspections/presentation/rv_summary_page.dart',
+    ).readAsStringSync();
+    final repository = File(
+      'lib/features/inspections/data/rv_draft_repository.dart',
+    ).readAsStringSync();
+    final documents = File(
+      'lib/data/local/visual_inspection_repository.dart',
+    ).readAsStringSync();
+    final hydrants = File(
+      'lib/features/hydrants/hydrant_pages.dart',
+    ).readAsStringSync();
+    expect(summary, contains('canDeleteUnsyncedLocal'));
+    expect(summary, contains('Eliminar revisión local'));
+    expect(hydrants, contains("ValueKey('delete-local-rv')"));
+    expect(hydrants, contains('Eliminar revisión local'));
+    expect(documents, contains('Sólo el creador puede eliminar este borrador'));
+    expect(repository, contains('hasOfficialRemoteState'));
+    expect(repository, contains('draft.officialInspectionId != null'));
+    expect(repository, contains("'submitted'"));
+    expect(repository, contains("Hive.box<String>('operation_journal_v1')"));
+    expect(repository, contains('reconcileOrphanedInspectionQueue'));
+    expect(repository, contains("contains('photo')"));
+  });
+
+  test('RV screens do not display or search locality and municipality', () {
+    final survey = File(
+      'lib/features/hydrants/new_survey_page.dart',
+    ).readAsStringSync();
+    final hydrants = File(
+      'lib/features/hydrants/hydrant_pages.dart',
+    ).readAsStringSync();
+    expect(survey, isNot(contains('Localidad')));
+    expect(survey, isNot(contains('Municipio')));
+    expect(survey, isNot(contains('hydrant.locality')));
+    expect(survey, isNot(contains('hydrant.parcel')));
+    expect(hydrants, isNot(contains('hydrant.locality')));
+    expect(hydrants, isNot(contains('hydrant.parcel')));
+    expect(hydrants, contains('Buscar número de cuenta'));
+  });
 
   test(
     'completed RV opens the read-only visual report instead of the form',
@@ -109,14 +155,39 @@ void main() {
     },
   );
 
-  test('map legend documents all five semantic states', () {
+  test('submit attempts the current coordinator before deferring work', () {
+    final summary = File(
+      'lib/features/inspections/presentation/rv_summary_page.dart',
+    ).readAsStringSync();
+    final appState = File(
+      'lib/core/services/app_state.dart',
+    ).readAsStringSync();
+    final apiClient = File(
+      'lib/core/network/api_client.dart',
+    ).readAsStringSync();
+
+    expect(summary, contains('inspectionSyncCoordinator.synchronize('));
+    expect(summary, contains('submit: true'));
+    expect(
+      summary,
+      isNot(contains('La sincronización comenzó en segundo plano.')),
+    );
+    expect(summary, contains('result.lastSyncError'));
+    expect(appState, contains('submitStatus == RvPartStatus.pending'));
+    expect(apiClient, contains('connectTimeout: const Duration(seconds: 30)'));
+    expect(apiClient, contains('receiveTimeout: const Duration(seconds: 30)'));
+    expect(apiClient, contains('sendTimeout: const Duration(seconds: 30)'));
+  });
+
+  test('map filter labels document all six visible selections', () {
     final source = File('lib/features/map/map_page.dart').readAsStringSync();
     for (final label in [
+      'Todo',
       'Disponible',
       'Trabajo local',
       'Revisado',
-      'Conflicto o devuelto',
-      'Inactivo o no disponible',
+      'Conflicto',
+      'Inactivo',
     ]) {
       expect(source, contains(label));
     }

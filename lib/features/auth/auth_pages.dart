@@ -300,7 +300,11 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     const SizedBox(height: 18),
-                    ConnectionBadge(online: state.online),
+                    ConnectionBadge(
+                      online: state.online,
+                      state: state.connectivityState,
+                      transport: state.connectivityMonitor?.transport,
+                    ),
                     const SizedBox(height: 12),
                     VersionLabel(state.versionLabel),
                   ],

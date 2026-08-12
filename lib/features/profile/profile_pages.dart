@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
-import '../../domain/enums/hydrant_list_filter.dart';
+import '../home/rv_work_dashboard.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -21,7 +21,11 @@ class ProfilePage extends StatelessWidget {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: ConnectionBadge(online: state.online),
+            child: ConnectionBadge(
+              online: state.online,
+              state: state.connectivityState,
+              transport: state.connectivityMonitor?.transport,
+            ),
           ),
         ],
       ),
@@ -83,7 +87,7 @@ class ProfilePage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'ESTADÍSTICAS DE HOY',
+                  'ESTADÍSTICAS ACTUALES',
                   style: TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
                 const SizedBox(height: 18),
@@ -95,11 +99,8 @@ class ProfilePage extends StatelessWidget {
                           : '${stats.submitted}',
                       label: 'Enviados',
                       color: AppColors.green,
-                      onTap: () => _openFilter(
-                        context,
-                        state,
-                        HydrantListFilter.submittedToday,
-                      ),
+                      onTap: () =>
+                          _openWorkGroup(context, RvWorkGroup.submitted),
                     ),
                     _StatMetric(
                       value: state.profileStatsLoading
@@ -107,11 +108,8 @@ class ProfilePage extends StatelessWidget {
                           : '${stats.pending}',
                       label: 'Pendientes',
                       color: AppColors.orange,
-                      onTap: () => _openFilter(
-                        context,
-                        state,
-                        HydrantListFilter.pendingToday,
-                      ),
+                      onTap: () =>
+                          _openWorkGroup(context, RvWorkGroup.inProgress),
                     ),
                     _StatMetric(
                       value: state.profileStatsLoading
@@ -119,11 +117,8 @@ class ProfilePage extends StatelessWidget {
                           : '${stats.unsynced}',
                       label: 'Sin sincronizar',
                       color: AppColors.red,
-                      onTap: () => _openFilter(
-                        context,
-                        state,
-                        HydrantListFilter.synchronizationPending,
-                      ),
+                      onTap: () =>
+                          _openWorkGroup(context, RvWorkGroup.pendingSync),
                     ),
                   ],
                 ),
@@ -191,14 +186,8 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  static void _openFilter(
-    BuildContext context,
-    AppState state,
-    HydrantListFilter filter,
-  ) {
-    state.requestHydrantListFilterFromHome(filter);
-    context.go('/hydrants');
-  }
+  static void _openWorkGroup(BuildContext context, RvWorkGroup group) =>
+      context.go('/hydrants?workGroup=${group.name}');
 }
 
 class _StatMetric extends StatelessWidget {
@@ -333,7 +322,7 @@ class ManualPage extends StatelessWidget {
     ),
     (
       '11. Perfil',
-      'Consulta tu nombre, rol, cuadrilla, estadísticas del día, versión, '
+      'Consulta tu nombre, rol, cuadrilla, estadísticas actuales, versión, '
           'manual y cierre de sesión. Las estadísticas pertenecen únicamente '
           'a la sesión activa.',
     ),

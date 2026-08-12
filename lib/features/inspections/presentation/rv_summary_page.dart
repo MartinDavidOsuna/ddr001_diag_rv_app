@@ -12,6 +12,7 @@ import '../../../core/widgets/common_widgets.dart';
 import '../domain/rv_sync_state.dart';
 import '../domain/rv_validator.dart';
 import '../domain/rv_draft.dart';
+import 'rv_review_navigation.dart';
 
 class RvSummaryPage extends StatefulWidget {
   const RvSummaryPage({
@@ -28,6 +29,7 @@ class _RvSummaryPageState extends State<RvSummaryPage>
     with SingleTickerProviderStateMixin {
   bool busy = false;
   String? message;
+  final _submissionGate = RvSubmissionCompletionGate();
   late final AnimationController _sendingAnimation;
 
   @override
@@ -133,25 +135,7 @@ class _RvSummaryPageState extends State<RvSummaryPage>
                         color: AppColors.red,
                       ),
                       title: Text(issue.message),
-                      onTap: () async {
-                        final inferred = issue.sectionId == null
-                            ? (issue.stepIndex ?? 0)
-                            : draft.checklist.sections.indexWhere(
-                                (section) => section.id == issue.sectionId,
-                              );
-                        await state.rvDraftRepository.save(
-                          draft.copyWith(
-                            activeFormStep: inferred < 0
-                                ? (issue.stepIndex ?? 0)
-                                : inferred,
-                            navigationQuestionId: issue.questionId,
-                            navigationSubItemId: issue.subItemId,
-                            navigationFieldId: issue.fieldId ?? issue.focusKey,
-                            returnToSummary: true,
-                          ),
-                        );
-                        if (context.mounted) context.pop(issue);
-                      },
+                      onTap: () => context.pop(issue),
                     ),
                 ],
               ),
@@ -225,12 +209,12 @@ class _RvSummaryPageState extends State<RvSummaryPage>
               ),
             ),
           const SizedBox(height: 16),
-          if (draft.serverInspectionId == null && !draft.isReadOnly) ...[
+          if (state.canDeleteUnsyncedLocalDraft(draft.clientInspectionId)) ...[
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(foregroundColor: AppColors.red),
               onPressed: busy ? null : () => _deleteLocalDraft(state, draft),
               icon: const Icon(Icons.delete_outline),
-              label: const Text('Eliminar borrador local'),
+              label: const Text('Eliminar revisión local'),
             ),
             const SizedBox(height: 10),
           ],
@@ -263,6 +247,16 @@ class _RvSummaryPageState extends State<RvSummaryPage>
               ),
             ),
           ),
+          if (validation.issues.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: busy
+                  ? null
+                  : () => context.go('/hydrants/${widget.hydrantId}'),
+              icon: const Icon(Icons.schedule_outlined),
+              label: const Text('Continuar después'),
+            ),
+          ],
         ],
       ),
     );
@@ -272,9 +266,11 @@ class _RvSummaryPageState extends State<RvSummaryPage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Eliminar borrador local'),
+        title: const Text('Eliminar revisión local'),
         content: const Text(
-          'Se eliminarán este borrador y sus fotografías guardadas en el dispositivo. Esta acción no se puede deshacer.',
+          'Se eliminarán esta revisión no enviada y sus fotografías guardadas '
+          'en el dispositivo. Los reportes oficiales no se modifican. Esta '
+          'acción no se puede deshacer.',
         ),
         actions: [
           TextButton(
@@ -350,23 +346,40 @@ class _RvSummaryPageState extends State<RvSummaryPage>
     _setBusy(true);
     late final RvDraft result;
     try {
-      result = draft.copyWith(
+      final queued = draft.copyWith(
         localStatus: RvLocalStatus.submitPending,
         submitStatus: RvPartStatus.pending,
         clearError: true,
         updatedAt: DateTime.now().toUtc(),
       );
-      await state.rvDraftRepository.save(result);
+      await state.rvDraftRepository.save(queued);
+      result = await state.inspectionSyncCoordinator.synchronize(
+        queued,
+        submit: true,
+      );
     } finally {
       if (mounted) _setBusy(false);
     }
     if (!mounted || !context.mounted) return;
-    setState(
-      () => message = state.online
-          ? 'Revisión guardada en el dispositivo. La sincronización comenzó en segundo plano.'
-          : 'Revisión guardada en el dispositivo. Se enviará cuando haya una conexión disponible.',
-    );
-    if (state.online) unawaited(state.synchronize());
+    if (result.localStatus == RvLocalStatus.submitted ||
+        result.localStatus == RvLocalStatus.conflict) {
+      state.reconcileLocalWorkProjection();
+      unawaited(state.synchronizeAssignments());
+    }
+    if (result.localStatus == RvLocalStatus.conflict) {
+      await RvReviewNavigation.showConflictAndReturnHome(context);
+      return;
+    }
+    if (_submissionGate.consumeIfComplete(result)) {
+      await RvReviewNavigation.showSubmissionSuccessAndReturnHome(context);
+      return;
+    }
+    setState(() {
+      message =
+          result.lastSyncError ??
+          'No fue posible confirmar el envío. La revisión permanece '
+              'guardada en el dispositivo.';
+    });
   }
 }
 

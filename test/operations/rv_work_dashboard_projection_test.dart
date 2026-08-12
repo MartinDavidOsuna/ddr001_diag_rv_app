@@ -88,4 +88,77 @@ void main() {
     );
     expect(grouped[RvWorkGroup.submitted], {'done'});
   });
+
+  test(
+    'a submitted local report remains in personal work after assignment removal',
+    () {
+      final completed = hydrant('1001', status: InspectionStatus.completed);
+      final visible = RvWorkDashboardProjection.personalWorkHydrants(
+        assigned: const [],
+        catalog: [
+          completed,
+          hydrant('reviewed-by-other', status: InspectionStatus.completed),
+        ],
+        drafts: [draft('sent', '1001', RvLocalStatus.submitted)],
+      );
+
+      expect(visible.map((item) => item.id), ['1001']);
+      final grouped = RvWorkDashboardProjection.byHydrant(
+        drafts: [draft('sent', '1001', RvLocalStatus.submitted)],
+        hydrants: visible,
+      );
+      expect(grouped[RvWorkGroup.submitted], {'1001'});
+      expect(
+        RvWorkDashboardProjection.recent(
+          drafts: [draft('sent', '1001', RvLocalStatus.submitted)],
+          hydrants: visible,
+        ).map((item) => item.id),
+        ['1001'],
+      );
+    },
+  );
+
+  test('an official report wins over an obsolete local pending projection', () {
+    final grouped = RvWorkDashboardProjection.byHydrant(
+      drafts: [draft('stale', 'done', RvLocalStatus.pendingAnswers)],
+      hydrants: [hydrant('done', status: InspectionStatus.completed)],
+    );
+    expect(grouped[RvWorkGroup.submitted], {'done'});
+    expect(grouped[RvWorkGroup.pendingSync], isEmpty);
+  });
+
+  test('authorized version work remains pending over an official report', () {
+    final base = draft('version', 'done', RvLocalStatus.pendingVersion);
+    final version = RvDraft.fromJson({
+      ...base.toJson(),
+      'hasPendingChanges': true,
+      'baseVersionId': 'official-version',
+    });
+    final grouped = RvWorkDashboardProjection.byHydrant(
+      drafts: [version],
+      hydrants: [hydrant('done', status: InspectionStatus.completed)],
+    );
+    expect(grouped[RvWorkGroup.pendingSync], {'done'});
+  });
+
+  test('recent reviews exclude untouched and deleted local hydrants', () {
+    final local = hydrant('local');
+    final untouched = hydrant('untouched');
+    final remote = hydrant('remote', status: InspectionStatus.completed);
+
+    expect(
+      RvWorkDashboardProjection.recent(
+        drafts: [draft('draft', 'local', RvLocalStatus.pendingAnswers)],
+        hydrants: [local, untouched, remote],
+      ).map((item) => item.id),
+      ['local', 'remote'],
+    );
+    expect(
+      RvWorkDashboardProjection.recent(
+        drafts: const [],
+        hydrants: [local, untouched, remote],
+      ).map((item) => item.id),
+      ['remote'],
+    );
+  });
 }

@@ -113,6 +113,7 @@ class HydrantRepository {
 
   Future<List<CachedHydrant>> refreshCatalogSnapshot({
     bool recheckCapability = false,
+    bool force = false,
     void Function(int received, int? total)? onProgress,
   }) {
     final active = _activeSnapshotRefresh;
@@ -120,12 +121,13 @@ class HydrantRepository {
     if (recheckCapability) _syncEndpointSupported = null;
     final future = _syncEndpointSupported == false
         ? _performRefresh(pageSize: 200, scope: 'all', onProgress: onProgress)
-        : _performCatalogSnapshotRefresh(onProgress: onProgress);
+        : _performCatalogSnapshotRefresh(force: force, onProgress: onProgress);
     _activeSnapshotRefresh = future;
     return future.whenComplete(() => _activeSnapshotRefresh = null);
   }
 
   Future<List<CachedHydrant>> _performCatalogSnapshotRefresh({
+    required bool force,
     void Function(int received, int? total)? onProgress,
   }) async {
     final requestWatch = Stopwatch()..start();
@@ -142,7 +144,7 @@ class HydrantRepository {
       final response = await client.dio.get<Map<String, dynamic>>(
         '/hydrants/sync',
         options: Options(
-          headers: {'If-None-Match': ?etag},
+          headers: {if (!force) 'If-None-Match': ?etag},
           validateStatus: (status) =>
               status != null &&
               ((status >= 200 && status < 300) || status == 304),
@@ -282,6 +284,27 @@ class HydrantRepository {
     );
     _memoryCache.clear();
     return item;
+  }
+
+  Future<bool> deleteUnsyncedManualLocal({
+    required String hydrantId,
+    required String creatorId,
+  }) async {
+    final records = cached()
+        .where((item) => item.hydrantId == hydrantId)
+        .toList();
+    if (records.isEmpty ||
+        records.any(
+          (item) =>
+              item.source != 'manual' ||
+              item.createdByUserId != creatorId ||
+              item.remoteId != null,
+        )) {
+      return false;
+    }
+    await box.deleteAll([_key('mine', hydrantId), _key('all', hydrantId)]);
+    _memoryCache.clear();
+    return true;
   }
 
   Future<HydrantMapPage> fetchMapPage({
@@ -552,7 +575,16 @@ class HydrantRepository {
     }
   }
 
-  Future<({DateTime date, int submitted, int pending})> todayStats() async {
+  Future<
+    ({
+      DateTime date,
+      int submitted,
+      int pending,
+      List<String> completedInspectionIds,
+      List<String> pendingInspectionIds,
+    })
+  >
+  todayStats() async {
     try {
       final response = await client.dio.get<Map<String, dynamic>>(
         '/profile/today-stats',
@@ -562,6 +594,14 @@ class HydrantRepository {
         date: DateTime.parse('${data['date']}').toLocal(),
         submitted: (data['completed'] as num?)?.toInt() ?? 0,
         pending: (data['pending'] as num?)?.toInt() ?? 0,
+        completedInspectionIds:
+            (data['completedInspectionIds'] as List? ?? const [])
+                .map((value) => '$value')
+                .toList(growable: false),
+        pendingInspectionIds:
+            (data['pendingInspectionIds'] as List? ?? const [])
+                .map((value) => '$value')
+                .toList(growable: false),
       );
     } on DioException catch (error) {
       throw ApiException.fromDio(error);

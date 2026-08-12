@@ -40,16 +40,26 @@ class ConnectionBadge extends StatelessWidget {
   const ConnectionBadge({
     required this.online,
     this.state,
+    this.transport,
     this.pending = false,
     super.key,
   });
   final bool online;
   final NetworkAvailabilityState? state;
+  final NetworkTransport? transport;
   final bool pending;
   @override
   Widget build(BuildContext context) {
     final label = pending
         ? 'Pendiente de sincronizar'
+        : transport != null
+        ? switch (transport!) {
+            NetworkTransport.none => 'Sin conexión',
+            NetworkTransport.mobile => 'Datos móviles',
+            NetworkTransport.wireless => 'Red inalámbrica',
+            NetworkTransport.ethernet => 'Ethernet',
+            NetworkTransport.other => 'Otra red',
+          }
         : switch (state) {
             NetworkAvailabilityState.noNetwork => 'Sin conexión',
             NetworkAvailabilityState.internetAvailable => 'Internet disponible',

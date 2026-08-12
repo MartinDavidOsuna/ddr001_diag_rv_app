@@ -229,15 +229,25 @@ class CachedHydrant {
   };
 
   Hydrant toAppModel() {
-    final status = switch (rvStatus ??
-        latestInspectionStatus ??
-        calculatedStatus) {
+    final canonicalStatus =
+        rvStatus ?? latestInspectionStatus ?? calculatedStatus ?? 'available';
+    final status = switch (canonicalStatus) {
       'submitted' || 'completed' => InspectionStatus.completed,
       'validated' => InspectionStatus.validated,
       'returned' || 'rejected' => InspectionStatus.returned,
       'draft' || 'in_progress' || 'pending_sync' => InspectionStatus.inProgress,
       _ => InspectionStatus.pending,
     };
+    final effectiveAvailableForRv =
+        availableForRv &&
+        !const {
+          'submitted',
+          'completed',
+          'validated',
+          'conflict',
+          'returned',
+          'rejected',
+        }.contains(canonicalStatus);
     return Hydrant(
       id: hydrantId,
       code: accountNumber,
@@ -247,7 +257,11 @@ class CachedHydrant {
       parcel: municipality ?? 'Sin municipio',
       priority: PriorityLevel.medium,
       access: AccessType.both,
-      syncStatus: source == 'manual' && remoteId == null
+      syncStatus: status == InspectionStatus.validated
+          ? SyncStatus.validated
+          : status == InspectionStatus.completed || officialInspectionId != null
+          ? SyncStatus.synced
+          : source == 'manual' && remoteId == null
           ? SyncStatus.pending
           : SyncStatus.synced,
       f02a: InspectionSummary(
@@ -265,14 +279,14 @@ class CachedHydrant {
       source: source == 'manual'
           ? HydrantSource.fieldCreated
           : HydrantSource.assigned,
-      rvStatus: rvStatus ?? 'available',
+      rvStatus: canonicalStatus,
       officialInspectionId: officialInspectionId,
       lastStatusChangedAt: lastStatusChangedAt,
       reviewedByName: reviewedByName,
       reviewedByCrew: reviewedByCrew,
       hasConflict: hasConflict,
       conflictCount: conflictCount,
-      availableForRv: availableForRv,
+      availableForRv: effectiveAvailableForRv,
       currentRound: currentRound,
       requiredPhotosVerified: requiredPhotosVerified,
       isActive: isActive,

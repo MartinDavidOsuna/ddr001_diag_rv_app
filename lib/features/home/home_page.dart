@@ -19,6 +19,10 @@ class HomePage extends StatelessWidget {
       drafts: drafts,
       hydrants: state.hydrants,
     );
+    final recent = RvWorkDashboardProjection.recent(
+      drafts: drafts,
+      hydrants: state.hydrants,
+    );
     return Scaffold(
       appBar: AppPageHeader(
         title: 'DIAGNOSTICO HIDRANTES',
@@ -26,7 +30,11 @@ class HomePage extends StatelessWidget {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: ConnectionBadge(online: state.online),
+            child: ConnectionBadge(
+              online: state.online,
+              state: state.connectivityState,
+              transport: state.connectivityMonitor?.transport,
+            ),
           ),
         ],
       ),
@@ -112,11 +120,11 @@ class HomePage extends StatelessWidget {
             'REVISIONES RECIENTES',
             style: TextStyle(fontWeight: FontWeight.w800),
           ),
-          if (state.hydrants.isEmpty)
+          if (recent.isEmpty)
             const SectionCard(
               child: Text('Todavía no has creado revisiones visuales.'),
             ),
-          for (final hydrant in state.hydrants.take(5))
+          for (final hydrant in recent)
             Card(
               child: ListTile(
                 leading: const Icon(Icons.assignment_outlined),
@@ -157,6 +165,7 @@ class _Count extends StatelessWidget {
     borderRadius: BorderRadius.circular(12),
     child: Container(
       width: 150,
+      height: 92,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: color.withValues(alpha: .1),
@@ -173,7 +182,7 @@ class _Count extends StatelessWidget {
               color: color,
             ),
           ),
-          Text(label),
+          Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
         ],
       ),
     ),

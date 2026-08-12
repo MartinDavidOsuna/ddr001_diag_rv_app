@@ -60,7 +60,7 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
             onChanged: (value) => setState(() => query = value),
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search),
-              labelText: 'Número de cuenta, localidad o municipio',
+              labelText: 'Número de cuenta',
               helperText: 'La búsqueda admite cuenta exacta o parcial.',
             ),
           ),
@@ -153,8 +153,6 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
 
   Future<void> _registerManual(AppState state) async {
     final account = TextEditingController(text: query.trim());
-    final locality = TextEditingController();
-    final municipality = TextEditingController();
     final reason = TextEditingController();
     final formKey = GlobalKey<FormState>();
     final accepted = await showDialog<bool>(
@@ -176,16 +174,6 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
                   validator: (value) => value?.trim().isEmpty == true
                       ? 'Captura una clave visible.'
                       : null,
-                ),
-                TextFormField(
-                  controller: locality,
-                  decoration: const InputDecoration(labelText: 'Localidad'),
-                ),
-                TextFormField(
-                  controller: municipality,
-                  decoration: const InputDecoration(
-                    labelText: 'Municipio o módulo',
-                  ),
                 ),
                 TextFormField(
                   key: const ValueKey('manual-hydrant-reason'),
@@ -221,8 +209,6 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
     );
     if (accepted != true || !mounted) {
       account.dispose();
-      locality.dispose();
-      municipality.dispose();
       reason.dispose();
       return;
     }
@@ -230,16 +216,14 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
     try {
       final hydrant = await state.createManualHydrant(
         accountNumber: account.text,
-        locality: locality.text,
-        municipality: municipality.text,
+        locality: '',
+        municipality: '',
         reason: reason.text,
       );
       if (!mounted) return;
       await _confirmAndStart(state, hydrant);
     } finally {
       account.dispose();
-      locality.dispose();
-      municipality.dispose();
       reason.dispose();
       if (mounted) setState(() => startingId = null);
     }
@@ -255,9 +239,7 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
               ? 'Confirmar hidrante'
               : 'Continuar revisión existente',
         ),
-        content: Text(
-          'Cuenta: ${hydrant.code}\nLocalidad: ${hydrant.locality}\nMunicipio: ${hydrant.parcel}',
-        ),
+        content: Text('Cuenta: ${hydrant.code}'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -305,10 +287,7 @@ bool hydrantVisibleForNewRv(
   final exactAccountMatch =
       normalizedQuery.isNotEmpty && code == normalizedQuery;
   final matchesQuery =
-      normalizedQuery.isEmpty ||
-      code.contains(normalizedQuery) ||
-      hydrant.locality.toLowerCase().contains(normalizedQuery) ||
-      hydrant.parcel.toLowerCase().contains(normalizedQuery);
+      normalizedQuery.isEmpty || code.contains(normalizedQuery);
   if (!matchesQuery) return false;
   if (exactAccountMatch) return true;
   return hasLocalWork || (hydrant.isActive && hydrant.availableForRv);

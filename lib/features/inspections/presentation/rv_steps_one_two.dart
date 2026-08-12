@@ -89,8 +89,15 @@ String? manualCoordinateError(String? value, {required bool isLatitude}) {
 }
 
 class RvStepOnePanel extends StatefulWidget {
-  const RvStepOnePanel({required this.controller, super.key});
+  const RvStepOnePanel({
+    required this.controller,
+    this.navigationFieldId,
+    this.targetKey,
+    super.key,
+  });
   final RvInspectionController controller;
+  final String? navigationFieldId;
+  final GlobalKey? targetKey;
 
   @override
   State<RvStepOnePanel> createState() => _RvStepOnePanelState();
@@ -119,6 +126,9 @@ class _RvStepOnePanelState extends State<RvStepOnePanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SectionCard(
+          key: const {'location', 'signal'}.contains(widget.navigationFieldId)
+              ? widget.targetKey
+              : null,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -331,8 +341,15 @@ Widget _detail(String label, String value) => Padding(
 );
 
 class RvStepTwoPhotoPanel extends StatelessWidget {
-  const RvStepTwoPhotoPanel({required this.controller, super.key});
+  const RvStepTwoPhotoPanel({
+    required this.controller,
+    this.targetSlot,
+    this.targetKey,
+    super.key,
+  });
   final RvInspectionController controller;
+  final String? targetSlot;
+  final GlobalKey? targetKey;
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +365,7 @@ class RvStepTwoPhotoPanel extends StatelessWidget {
           ),
           for (final slot in requiredRvPhotoSlots)
             _PhotoSlot(
+              key: slot == targetSlot ? targetKey : null,
               slot: slot,
               references: draft.photosFor(slot),
               readOnly: draft.isReadOnly,
@@ -365,6 +383,7 @@ class _PhotoSlot extends StatelessWidget {
     required this.references,
     required this.readOnly,
     required this.controller,
+    super.key,
   });
   final String slot;
   final List<RvPhotoReference> references;

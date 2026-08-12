@@ -19,15 +19,18 @@ import '../../domain/filters/hydrant_query_projection.dart';
 import '../../domain/models/app_models.dart';
 import '../../domain/models/assignment_sync_models.dart';
 import '../../domain/functional/functional_models.dart';
+import '../../domain/inspections/visual_inspection.dart';
 import '../../domain/sync/sync_queue_item.dart';
 import '../../features/auth/data/field_session_models.dart';
 import '../../features/auth/data/field_session_repository.dart';
 import '../../features/hydrants/data/hydrant_repository.dart';
 import '../../features/hydrants/data/hydrant_api_models.dart';
+import '../../features/home/rv_work_dashboard.dart';
 import '../../features/checklist/data/checklist_models.dart';
 import '../../features/checklist/data/checklist_repository.dart';
 import '../../features/inspections/data/inspection_sync_coordinator.dart';
 import '../../features/inspections/data/rv_draft_repository.dart';
+import '../../features/inspections/domain/rv_draft.dart';
 import '../../features/inspections/domain/rv_sync_state.dart';
 import '../../features/catalogs/dynamic_catalog_repository.dart';
 import '../../features/visual_reports/data/visual_report_repository.dart';
@@ -133,7 +136,6 @@ class AppState extends ChangeNotifier {
   HydrantListFilter hydrantListFilter = HydrantListFilter.all;
   HydrantFilterRequest? hydrantFilterRequest;
   int _hydrantFilterRequestSequence = 0;
-  ProfileTodayStats? _remoteProfileStats;
   bool profileStatsLoading = false;
 
   bool get authenticated => _session != null;
@@ -151,12 +153,22 @@ class AppState extends ChangeNotifier {
   bool get editingRestricted =>
       AppConfig.appUpdatesEnabled &&
       updateInfo?.status == UpdateStatus.required;
-  int get pendingDiagnostics =>
-      syncQueueRepository
-          .all()
-          .where((item) => item.status != SyncQueueStatus.synced)
-          .length +
-      syncQueueRepository.unreadableCount;
+  int get pendingDiagnostics {
+    final pendingIds = <String>{};
+    for (final item in syncQueueRepository.all()) {
+      if (item.status == SyncQueueStatus.synced) continue;
+      final draft = item.inspectionId == null
+          ? null
+          : rvDraftRepository.find(item.inspectionId!);
+      if (draft != null && _isSupersededByOfficialState(draft)) continue;
+      pendingIds.add(item.inspectionId ?? item.id);
+    }
+    pendingIds.addAll(
+      _pendingDraftsForSync().map((draft) => draft.clientInspectionId),
+    );
+    return pendingIds.length + syncQueueRepository.unreadableCount;
+  }
+
   Set<String> get accessiblePhotoIds {
     if (!authenticated) return const {};
     final ids = <String>{};
@@ -215,12 +227,54 @@ class AppState extends ChangeNotifier {
       pendingDiagnostics == 0 && pendingPhotos == 0 && syncErrors == 0;
 
   Future<void> deleteUnsyncedLocalDraft(String clientInspectionId) async {
+    final draft = rvDraftRepository.find(clientInspectionId);
+    if (draft == null) {
+      throw StateError('No se encontró la revisión local.');
+    }
+    if (!canDeleteUnsyncedLocalDraft(clientInspectionId)) {
+      throw StateError(
+        'Esta revisión ya fue enviada y no puede eliminarse localmente.',
+      );
+    }
     await rvDraftRepository.deleteUnsyncedLocal(
       clientInspectionId: clientInspectionId,
       creatorId: user.id,
     );
+    if (visualInspectionRepository.forHydrant(draft.hydrantId).isEmpty) {
+      await hydrantRepository.deleteUnsyncedManualLocal(
+        hydrantId: draft.hydrantId,
+        creatorId: user.id,
+      );
+    }
+    _replaceHydrantsFromCache();
     notifyListeners();
   }
+
+  bool canDeleteUnsyncedLocalDraft(String clientInspectionId) {
+    final draft = rvDraftRepository.find(clientInspectionId);
+    if (draft == null) return false;
+    final matching = [
+      ...hydrants,
+      ...catalogHydrants,
+    ].where((item) => item.id == draft.hydrantId).toList(growable: false);
+    if (matching.any(_hasOfficialRvState)) return false;
+    return rvDraftRepository.canDeleteUnsyncedLocal(
+      clientInspectionId: clientInspectionId,
+      creatorId: user.id,
+    );
+  }
+
+  static bool _hasOfficialRvState(Hydrant hydrant) =>
+      hydrant.officialInspectionId != null ||
+      const {
+        'submitted',
+        'completed',
+        'validated',
+      }.contains(hydrant.rvStatus) ||
+      const {
+        InspectionStatus.completed,
+        InspectionStatus.validated,
+      }.contains(hydrant.f02a.status);
 
   Future<void> initialize() async {
     connectivityMonitor?.addListener(_onConnectivityChanged);
@@ -235,6 +289,7 @@ class AppState extends ChangeNotifier {
       await rvDraftRepository.reconcileOrphanedInspectionQueue(
         creatorId: localSession.userId,
       );
+      await _reconcileLegacyDeletedManualHydrants(localSession.userId);
     }
     initialized = true;
     notifyListeners();
@@ -253,7 +308,9 @@ class AppState extends ChangeNotifier {
         _applySession(restored);
       }
     } on ApiException catch (error) {
-      if (error.kind == ApiErrorKind.sessionRevoked) {
+      if (error.kind == ApiErrorKind.sessionRevoked ||
+          error.kind == ApiErrorKind.authenticationRequired ||
+          error.kind == ApiErrorKind.sessionExpired) {
         _resetActiveSessionState();
         assignmentError = error.message;
       } else {
@@ -345,7 +402,6 @@ class AppState extends ChangeNotifier {
   }
 
   void _applySession(FieldSession session) {
-    _remoteProfileStats = null;
     profileStatsLoading = true;
     _user = AppUser(
       id: session.userId,
@@ -396,7 +452,6 @@ class AppState extends ChangeNotifier {
   void _resetActiveSessionState() {
     sessionRepository.cancelActiveRequests();
     _session = null;
-    _remoteProfileStats = null;
     profileStatsLoading = false;
     _clearAccessScope();
     hydrants.clear();
@@ -419,27 +474,86 @@ class AppState extends ChangeNotifier {
   }
 
   void _replaceHydrantsFromCache() {
+    final latestLocalByHydrant = <String, VisualInspection>{};
+    for (final report in visualInspectionRepository.accessible()) {
+      final current = latestLocalByHydrant[report.hydrantId];
+      if (current == null || report.updatedAt.isAfter(current.updatedAt)) {
+        latestLocalByHydrant[report.hydrantId] = report;
+      }
+    }
+    Hydrant project(Hydrant item) {
+      final report = latestLocalByHydrant[item.id];
+      if (report == null || report.status != InspectionStatus.completed) {
+        return item;
+      }
+      final draft = rvDraftRepository.fromInspection(report);
+      final validated = draft?.remoteStatus == 'validated';
+      return item.copyWith(
+        syncStatus: validated ? SyncStatus.validated : SyncStatus.synced,
+        f02a: InspectionSummary(
+          type: item.f02a.type,
+          status: validated
+              ? InspectionStatus.validated
+              : InspectionStatus.completed,
+          progress: 1,
+        ),
+        lastStatusChangedAt:
+            draft?.lastStatusChangedAt ??
+            report.completedAt ??
+            report.updatedAt,
+        photoCount: draft?.photoCount ?? report.photoIds.length,
+      );
+    }
+
     final catalog = hydrantRepository
         .cached(scope: 'all')
-        .map((e) => e.toAppModel())
+        .map((e) => project(e.toAppModel()))
         .toList();
     catalogHydrants
       ..clear()
       ..addAll(catalog);
-    final cached = hydrantRepository
+    final assigned = hydrantRepository
         .cached(scope: 'mine')
-        .map((e) => e.toAppModel())
+        .map((e) => project(e.toAppModel()))
         .toList();
-    final ids = cached.map((item) => item.id).toSet();
-    for (final item in catalog) {
-      if (!ids.contains(item.id) &&
-          visualInspectionRepository.hasLocalInspection(item.id)) {
-        cached.add(item.copyWith(syncStatus: SyncStatus.local));
-      }
-    }
+    final cached = RvWorkDashboardProjection.personalWorkHydrants(
+      assigned: assigned,
+      catalog: catalog,
+      drafts: rvDraftRepository.all(),
+    );
     hydrants
       ..clear()
       ..addAll(cached);
+  }
+
+  void reconcileLocalWorkProjection() {
+    _replaceHydrantsFromCache();
+    notifyListeners();
+  }
+
+  Future<void> _reconcileLegacyDeletedManualHydrants(String creatorId) async {
+    final queuedManuals = syncQueueRepository
+        .all()
+        .where(
+          (item) =>
+              item.entityType == 'manualHydrant' &&
+              item.ownerUserId == creatorId &&
+              item.status != SyncQueueStatus.synced,
+        )
+        .toList(growable: false);
+    for (final item in queuedManuals) {
+      final hydrantId = item.hydrantId ?? item.entityId;
+      if (hydrantId.isEmpty ||
+          visualInspectionRepository.forHydrant(hydrantId).isNotEmpty) {
+        continue;
+      }
+      final removed = await hydrantRepository.deleteUnsyncedManualLocal(
+        hydrantId: hydrantId,
+        creatorId: creatorId,
+      );
+      if (removed) await syncQueueRepository.delete(item.id);
+    }
+    _replaceHydrantsFromCache();
   }
 
   Future<void> refreshChecklist() async {
@@ -509,9 +623,14 @@ class AppState extends ChangeNotifier {
       hydrant.id,
     );
     final eligibility = functionalEligibilityRepository.find(hydrant.id);
+    final activeDraft = rvDraftRepository.activeFor(hydrant.id);
+    final officialWithoutVersionWork =
+        _hasOfficialRvState(hydrant) &&
+        (activeDraft == null || !_hasActiveVersionWork(activeDraft));
     final visualInProgress =
-        hydrant.f02a.status == InspectionStatus.inProgress ||
-        visualInspectionRepository.hasLocalInspection(hydrant.id);
+        !officialWithoutVersionWork &&
+        (hydrant.f02a.status == InspectionStatus.inProgress ||
+            activeDraft != null);
     final functionalInProgress =
         activeFunctional != null &&
         activeFunctional.status != FunctionalInspectionStatus.completed &&
@@ -535,7 +654,8 @@ class AppState extends ChangeNotifier {
       functionalInProgress: functionalInProgress,
       visualCompleted: hydrant.f02a.status == InspectionStatus.completed,
       functionalCompleted: functionalCompleted,
-      unsynchronized: _hasUnsynchronizedData(hydrant),
+      unsynchronized:
+          !officialWithoutVersionWork && _hasUnsynchronizedData(hydrant),
       visualPending: hydrant.f02a.status == InspectionStatus.pending,
       functionalPending: functional.status == InspectionStatus.pending,
       functionalRequired:
@@ -556,57 +676,27 @@ class AppState extends ChangeNotifier {
             value.completedAt != null &&
             isToday(value.completedAt!),
       ),
-      visualPendingToday: visualHistory.any(
-        (value) =>
-            value.status != InspectionStatus.completed &&
-            isToday(value.startedAt),
-      ),
+      visualPendingToday:
+          !officialWithoutVersionWork &&
+          visualHistory.any(
+            (value) =>
+                value.status != InspectionStatus.completed &&
+                isToday(value.startedAt),
+          ),
     );
   }
 
   ProfileTodayStats get profileTodayStats {
     final today = DateTime.now();
-    bool isToday(DateTime value) {
-      final local = value.toLocal();
-      return local.year == today.year &&
-          local.month == today.month &&
-          local.day == today.day;
-    }
-
-    final reports = visualInspectionRepository.accessible();
-    final submittedIds = {
-      for (final report in reports)
-        if (report.status == InspectionStatus.completed &&
-            report.completedAt != null &&
-            isToday(report.completedAt!))
-          report.id,
-    };
-    final pendingIds = {
-      for (final report in reports)
-        if (report.status != InspectionStatus.completed &&
-            isToday(report.startedAt))
-          report.id,
-    };
-    final unsyncedIds = {
-      for (final item in syncQueueRepository.all())
-        if (item.status != SyncQueueStatus.synced)
-          item.inspectionId ?? item.entityId,
-      for (final draft in rvDraftRepository.pending())
-        if (!draft.isReadOnly) draft.clientInspectionId,
-    };
-    final local = ProfileTodayStats(
-      date: DateTime(today.year, today.month, today.day),
-      submitted: submittedIds.length,
-      pending: pendingIds.length,
-      unsynced: unsyncedIds.length,
+    final grouped = RvWorkDashboardProjection.byHydrant(
+      drafts: rvDraftRepository.all(),
+      hydrants: hydrants,
     );
-    final remote = _remoteProfileStats;
-    if (remote == null || remote.date != local.date) return local;
     return ProfileTodayStats(
-      date: local.date,
-      submitted: remote.submitted,
-      pending: remote.pending,
-      unsynced: local.unsynced,
+      date: DateTime(today.year, today.month, today.day),
+      submitted: grouped[RvWorkGroup.submitted]!.length,
+      pending: grouped[RvWorkGroup.inProgress]!.length,
+      unsynced: grouped[RvWorkGroup.pendingSync]!.length,
     );
   }
 
@@ -633,22 +723,30 @@ class AppState extends ChangeNotifier {
         continue;
       }
     }
-    for (final entry in traceBox.toMap().entries) {
-      if (syncedTraceBox.containsKey('${entry.key}')) continue;
-      try {
-        final payload = Map<String, dynamic>.from(
-          jsonDecode(entry.value) as Map,
-        );
-        if (payload['userId'] == user.id &&
-            payload['hydrantId'] == hydrant.id) {
-          return true;
-        }
-      } on Object {
-        continue;
-      }
-    }
     return false;
   }
+
+  bool _hasActiveVersionWork(RvDraft draft) =>
+      draft.hasPendingChanges ||
+      draft.pendingVersionClientId != null ||
+      const {
+        RvLocalStatus.pendingVersion,
+        RvLocalStatus.syncingVersion,
+        RvLocalStatus.versionConflict,
+      }.contains(draft.localStatus);
+
+  bool _isSupersededByOfficialState(RvDraft draft) {
+    final matching = [
+      ...hydrants,
+      ...catalogHydrants,
+    ].where((hydrant) => hydrant.id == draft.hydrantId).toList(growable: false);
+    return matching.any(_hasOfficialRvState) && !_hasActiveVersionWork(draft);
+  }
+
+  List<RvDraft> _pendingDraftsForSync() => rvDraftRepository
+      .pending()
+      .where((draft) => !_isSupersededByOfficialState(draft))
+      .toList(growable: false);
 
   Hydrant hydrant(String id) =>
       [...hydrants, ...catalogHydrants].firstWhere((item) => item.id == id);
@@ -906,7 +1004,7 @@ class AppState extends ChangeNotifier {
           .ready()
           .where((value) => value.entityType == 'manualHydrant')
           .toList();
-      final drafts = rvDraftRepository.pending();
+      final drafts = _pendingDraftsForSync();
       syncTotal = manual.length + drafts.length;
       for (final item in syncQueueRepository.ready().where(
         (value) => value.entityType == 'manualHydrant',
@@ -927,6 +1025,11 @@ class AppState extends ChangeNotifier {
         syncingReport = drafts[index].accountNumber;
         final result = await inspectionSyncCoordinator.synchronize(
           drafts[index],
+          submit:
+              drafts[index].localStatus == RvLocalStatus.submitPending ||
+              drafts[index].localStatus == RvLocalStatus.readyToSubmit ||
+              drafts[index].submitStatus == RvPartStatus.pending ||
+              drafts[index].submitStatus == RvPartStatus.syncing,
         );
         if (result.localStatus == RvLocalStatus.conflict ||
             result.localStatus == RvLocalStatus.versionConflict) {
@@ -987,18 +1090,10 @@ class AppState extends ChangeNotifier {
               (value) => refreshed = value,
               onError: (Object error) => partialErrors.add(error),
             ),
-        hydrantRepository.todayStats().then((remoteStats) {
-          _remoteProfileStats = ProfileTodayStats(
-            date: DateTime(
-              remoteStats.date.year,
-              remoteStats.date.month,
-              remoteStats.date.day,
-            ),
-            submitted: remoteStats.submitted,
-            pending: remoteStats.pending,
-            unsynced: 0,
-          );
-        }, onError: (Object error) => partialErrors.add(error)),
+        hydrantRepository.todayStats().then<void>(
+          (_) {},
+          onError: (Object error) => partialErrors.add(error),
+        ),
       ]);
       profileStatsLoading = false;
       _replaceHydrantsFromCache();
@@ -1058,8 +1153,21 @@ class AppState extends ChangeNotifier {
       profileStatsLoading = false;
       lastAssignmentCheck = DateTime.now();
       await trace('assignment_sync_error', assignmentError!);
+    } on Object {
+      assignmentError =
+          'No fue posible actualizar los hidrantes. Se conservan los datos guardados.';
+      profileStatsLoading = false;
+      lastAssignmentCheck = DateTime.now();
+      await trace('assignment_sync_error', assignmentError!);
+    } finally {
+      assignmentSyncing = false;
+      notifyListeners();
     }
-    assignmentSyncing = false;
+  }
+
+  Future<void> refreshMapCatalog({bool forceSnapshot = false}) async {
+    await hydrantRepository.refreshCatalogSnapshot(force: forceSnapshot);
+    _replaceHydrantsFromCache();
     notifyListeners();
   }
 

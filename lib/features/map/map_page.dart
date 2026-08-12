@@ -16,7 +16,6 @@ import '../../domain/models/app_models.dart';
 import '../hydrants/data/hydrant_repository.dart';
 import '../hydrants/new_survey_route.dart';
 import 'hydrant_map_marker_source.dart';
-import 'hydrant_spatial_index.dart';
 import 'map_location_provider.dart';
 
 class MapPage extends StatefulWidget {
@@ -50,6 +49,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   DateTime? _regionUpdatedAt;
   String? _regionError;
   final Map<String, HydrantMapItem> _visibleItems = {};
+  HydrantMapFilter _filter = HydrantMapFilter.all;
 
   @override
   void initState() {
@@ -58,7 +58,9 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 320),
     );
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadInitialRegion());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _refreshInitialCatalog(),
+    );
   }
 
   @override
@@ -73,49 +75,50 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     _seedCachedItems(state);
-    final items = _visibleItems.values.toList(growable: false);
-    final clusters = HydrantMapClusterer.cluster(
-      items,
-      zoom: _mapReady
-          ? _mapController.camera.zoom
-          : HydrantMapCameraPolicy.initialZoom,
-    );
+    final allItems = _visibleItems.values.toList(growable: false);
+    final items = allItems
+        .where((item) => hydrantMatchesMapFilter(item.hydrant, _filter))
+        .toList(growable: false);
     final selected = _selection.selectedFrom(items);
-    final withoutCoordinates = state.catalogHydrants.length - items.length;
+    final withoutCoordinates = state.catalogHydrants.length - allItems.length;
 
     return Scaffold(
       appBar: AppPageHeader(
         title: 'Mapa general',
         subtitle:
-            '${items.length} hidrantes · $withoutCoordinates sin coordenadas',
+            '${items.length} de ${allItems.length} hidrantes · '
+            '$withoutCoordinates sin coordenadas',
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: ConnectionBadge(online: state.online),
+            child: ConnectionBadge(
+              online: state.online,
+              state: state.connectivityState,
+              transport: state.connectivityMonitor?.transport,
+            ),
           ),
         ],
       ),
       body: Column(
         children: [
           Padding(
-            padding: EdgeInsets.all(10),
-            child: Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 14,
-              runSpacing: 6,
-              children: [
-                const _Legend(color: AppColors.brightBlue, label: 'Disponible'),
-                _Legend(color: Colors.amber.shade700, label: 'Trabajo local'),
-                const _Legend(color: AppColors.green, label: 'Revisado'),
-                const _Legend(
-                  color: AppColors.red,
-                  label: 'Conflicto o devuelto',
-                ),
-                const _Legend(
-                  color: Colors.grey,
-                  label: 'Inactivo o no disponible',
-                ),
-              ],
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: _MapFilterGrid(
+              selected: _filter,
+              onSelected: (filter) {
+                setState(() {
+                  _filter = filter;
+                  final selectedId = _selection.selectedId;
+                  if (selectedId != null &&
+                      !allItems.any(
+                        (item) =>
+                            item.id == selectedId &&
+                            hydrantMatchesMapFilter(item.hydrant, filter),
+                      )) {
+                    _selection.clear();
+                  }
+                });
+              },
             ),
           ),
           Expanded(
@@ -127,6 +130,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
                     options: MapOptions(
                       initialCenter: _centerOf(items),
                       initialZoom: HydrantMapCameraPolicy.initialZoom,
+                      initialCameraFit: _initialCameraFit(items),
                       minZoom: HydrantMapCameraPolicy.minimumZoom,
                       maxZoom: HydrantMapCameraPolicy.maximumZoom,
                       interactionOptions: const InteractionOptions(
@@ -153,29 +157,16 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
                       ),
                       MarkerLayer(
                         markers: [
-                          for (final cluster in clusters)
+                          for (final item in items)
                             Marker(
-                              point: cluster.center,
-                              width: cluster.isCluster ? 54 : 48,
-                              height: cluster.isCluster ? 54 : 48,
-                              child: cluster.isCluster
-                                  ? _ClusterMarker(
-                                      count: cluster.items.length,
-                                      onTap: () => _animateCamera(
-                                        cluster.center,
-                                        HydrantMapCameraPolicy.clampZoom(
-                                          _mapController.camera.zoom + 2,
-                                        ),
-                                      ),
-                                    )
-                                  : _HydrantMarker(
-                                      item: cluster.items.single,
-                                      selected:
-                                          cluster.items.single.id ==
-                                          selected?.id,
-                                      onTap: () =>
-                                          _selectHydrant(cluster.items.single),
-                                    ),
+                              point: item.position,
+                              width: 48,
+                              height: 48,
+                              child: _HydrantMarker(
+                                item: item,
+                                selected: item.id == selected?.id,
+                                onTap: () => _selectHydrant(item),
+                              ),
                             ),
                           if (_currentLocation case final location?)
                             Marker(
@@ -308,58 +299,41 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     if (_catalogSignature == signature) return;
     _catalogSignature = signature;
     final all = widget.markerSource.itemsFor(state.catalogHydrants);
-    if (_currentLocation == null) return;
-    final index = HydrantSpatialIndex(all);
-    final cached = index.withinRadius(_currentLocation!, 2);
-    for (final item in cached) {
-      _visibleItems[item.id] = item;
-    }
+    _visibleItems
+      ..clear()
+      ..addEntries(all.map((item) => MapEntry(item.id, item)));
   }
 
-  Future<void> _loadInitialRegion() async {
-    if (_locating || _loadingRegion) return;
-    setState(() => _locating = true);
+  Future<void> _refreshInitialCatalog() async {
+    if (_loadingRegion) return;
+    final state = context.read<AppState>();
+    final cached = widget.markerSource.itemsFor(state.catalogHydrants);
+    if (cached.isNotEmpty || state.catalogHydrants.isEmpty) return;
+    setState(() {
+      _loadingRegion = true;
+      _regionError = null;
+    });
     try {
-      final location = await widget.locationProvider.currentLocation();
+      await state.refreshMapCatalog(forceSnapshot: true);
       if (!mounted) return;
-      _currentLocation = location;
-      final state = context.read<AppState>();
-      final cached = HydrantSpatialIndex(
-        widget.markerSource.itemsFor(state.catalogHydrants),
-      ).withinRadius(location, 2);
+      final refreshed = widget.markerSource.itemsFor(state.catalogHydrants);
       setState(() {
         _visibleItems
           ..clear()
-          ..addEntries(cached.map((item) => MapEntry(item.id, item)));
+          ..addEntries(refreshed.map((item) => MapEntry(item.id, item)));
+        _regionUpdatedAt = DateTime.now();
       });
-      if (_mapReady) {
-        await _animateCamera(location, HydrantMapCameraPolicy.initialZoom);
-      }
-      await _loadRadius(location);
+      if (_mapReady) _showAll(refreshed);
     } on Object catch (error) {
-      if (mounted) {
-        setState(() {
-          _regionError = error is MapLocationException
-              ? error.message
-              : 'No fue posible actualizar esta zona.';
-        });
-      }
+      if (!mounted) return;
+      setState(
+        () => _regionError = error is ApiException
+            ? error.message
+            : 'No fue posible actualizar el catálogo del mapa.',
+      );
     } finally {
-      if (mounted) setState(() => _locating = false);
+      if (mounted) setState(() => _loadingRegion = false);
     }
-  }
-
-  Future<void> _loadRadius(LatLng center) async {
-    await _loadPages(
-      request: (cursor) =>
-          context.read<AppState>().hydrantRepository.fetchMapPage(
-            latitude: center.latitude,
-            longitude: center.longitude,
-            radiusKm: 2,
-            cursor: cursor,
-          ),
-      authoritativeBounds: null,
-    );
   }
 
   Future<void> _loadVisibleRegion({required bool force}) async {
@@ -434,6 +408,8 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
                     'El servidor tardó demasiado en actualizar esta zona.',
                   ApiErrorKind.serverUnavailable || ApiErrorKind.offline =>
                     'Sin conexión con el servidor. Se conservan los datos guardados.',
+                  ApiErrorKind.serverError =>
+                    'El servidor respondió con un error. Se conservan los datos guardados.',
                   _ => 'No fue posible actualizar esta zona.',
                 }
               : 'No fue posible actualizar esta zona.',
@@ -562,6 +538,17 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     return LatLng(latitude, longitude);
   }
 
+  static CameraFit? _initialCameraFit(List<HydrantMapItem> items) {
+    if (items.length < 2) return null;
+    return CameraFit.bounds(
+      bounds: LatLngBounds.fromPoints(
+        items.map((item) => item.position).toList(growable: false),
+      ),
+      padding: const EdgeInsets.fromLTRB(48, 72, 48, 72),
+      maxZoom: 16,
+    );
+  }
+
   static bool _completed(Hydrant hydrant) =>
       hydrant.f02a.status == InspectionStatus.completed;
 }
@@ -602,61 +589,68 @@ class _HydrantMarker extends StatelessWidget {
 
 @visibleForTesting
 Color hydrantMarkerColor(Hydrant hydrant) {
-  final hasLocalWork = hydrant.f02a.status == InspectionStatus.inProgress;
-  if (hydrant.rvStatus == 'conflict' || hydrant.rvStatus == 'returned') {
-    return AppColors.red;
+  return switch (hydrantMapCategory(hydrant)) {
+    HydrantMapCategory.available => AppColors.brightBlue,
+    HydrantMapCategory.localWork => Colors.amber.shade700,
+    HydrantMapCategory.reviewed => AppColors.green,
+    HydrantMapCategory.conflict => AppColors.red,
+    HydrantMapCategory.inactive => Colors.grey,
+  };
+}
+
+enum HydrantMapCategory { available, localWork, reviewed, conflict, inactive }
+
+enum HydrantMapFilter {
+  all,
+  available,
+  localWork,
+  reviewed,
+  conflict,
+  inactive,
+}
+
+@visibleForTesting
+HydrantMapCategory hydrantMapCategory(Hydrant hydrant) {
+  if (hydrant.hasConflict ||
+      const {'conflict', 'returned', 'rejected'}.contains(hydrant.rvStatus)) {
+    return HydrantMapCategory.conflict;
   }
   if (!hydrant.isActive ||
-      !hydrant.availableForRv &&
+      (!hydrant.availableForRv &&
+          hydrant.officialInspectionId == null &&
           !const {
+            'submitted',
             'completed',
             'validated',
-            'conflict',
-            'returned',
-          }.contains(hydrant.rvStatus)) {
-    return Colors.grey;
+          }.contains(hydrant.rvStatus))) {
+    return HydrantMapCategory.inactive;
   }
-  if (hasLocalWork) return Colors.amber.shade700;
-  if ((hydrant.rvStatus == 'completed' || hydrant.rvStatus == 'validated') &&
-      hydrant.requiredPhotosVerified) {
-    return AppColors.green;
+  if (hydrant.officialInspectionId != null ||
+      const {
+        'submitted',
+        'completed',
+        'validated',
+      }.contains(hydrant.rvStatus) ||
+      const {
+        InspectionStatus.completed,
+        InspectionStatus.validated,
+      }.contains(hydrant.f02a.status)) {
+    return HydrantMapCategory.reviewed;
   }
-  return AppColors.brightBlue;
+  if (hydrant.f02a.status == InspectionStatus.inProgress ||
+      const {
+        SyncStatus.local,
+        SyncStatus.pending,
+      }.contains(hydrant.syncStatus)) {
+    return HydrantMapCategory.localWork;
+  }
+  return HydrantMapCategory.available;
 }
 
-class _ClusterMarker extends StatelessWidget {
-  const _ClusterMarker({required this.count, required this.onTap});
-
-  final int count;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    label: '$count hidrantes agrupados',
-    button: true,
-    child: InkWell(
-      onTap: onTap,
-      customBorder: const CircleBorder(),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primary,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 3),
-          boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 5)],
-        ),
-        child: Center(
-          child: Text(
-            '$count',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
-}
+@visibleForTesting
+bool hydrantMatchesMapFilter(Hydrant hydrant, HydrantMapFilter filter) =>
+    filter == HydrantMapFilter.all ||
+    hydrantMapCategory(hydrant).name == filter.name;
 
 class _CurrentLocationMarker extends StatelessWidget {
   const _CurrentLocationMarker();
@@ -797,21 +791,81 @@ class _HydrantSheet extends StatelessWidget {
   );
 }
 
-class _Legend extends StatelessWidget {
-  const _Legend({required this.color, required this.label});
-  final Color color;
-  final String label;
+class _MapFilterGrid extends StatelessWidget {
+  const _MapFilterGrid({required this.selected, required this.onSelected});
+
+  final HydrantMapFilter selected;
+  final ValueChanged<HydrantMapFilter> onSelected;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Container(
-        width: 12,
-        height: 12,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+  Widget build(BuildContext context) {
+    const labels = {
+      HydrantMapFilter.all: 'Todo',
+      HydrantMapFilter.available: 'Disponible',
+      HydrantMapFilter.localWork: 'Trabajo local',
+      HydrantMapFilter.reviewed: 'Revisado',
+      HydrantMapFilter.conflict: 'Conflicto',
+      HydrantMapFilter.inactive: 'Inactivo',
+    };
+    return SizedBox(
+      height: 86,
+      child: GridView.count(
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisCount: 3,
+        crossAxisSpacing: 6,
+        mainAxisSpacing: 6,
+        mainAxisExtent: 40,
+        children: [
+          for (final filter in HydrantMapFilter.values)
+            OutlinedButton(
+              key: ValueKey('map-filter-${filter.name}'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                backgroundColor: selected == filter
+                    ? Theme.of(context).colorScheme.primaryContainer
+                    : null,
+                side: BorderSide(
+                  color: selected == filter
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
+              onPressed: () => onSelected(filter),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (filter == HydrantMapFilter.all)
+                    const Icon(Icons.filter_alt_outlined, size: 14)
+                  else
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: _filterColor(filter),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(labels[filter]!),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
-      const SizedBox(width: 6),
-      Text(label),
-    ],
-  );
+    );
+  }
+
+  static Color _filterColor(HydrantMapFilter filter) => switch (filter) {
+    HydrantMapFilter.available => AppColors.brightBlue,
+    HydrantMapFilter.localWork => Colors.amber,
+    HydrantMapFilter.reviewed => AppColors.green,
+    HydrantMapFilter.conflict => AppColors.red,
+    HydrantMapFilter.inactive => Colors.grey,
+    HydrantMapFilter.all => Colors.transparent,
+  };
 }

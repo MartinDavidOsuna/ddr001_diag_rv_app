@@ -67,6 +67,45 @@ void main() {
     );
   });
 
+  test('new RV search no longer matches locality or municipality', () {
+    final value = hydrant(
+      locality: 'LOCALIDAD-OCULTA',
+      parcel: 'MUNICIPIO-OCULTO',
+    );
+
+    expect(
+      hydrantVisibleForNewRv(
+        value,
+        normalizedQuery: 'localidad-oculta',
+        hasLocalWork: false,
+      ),
+      isFalse,
+    );
+    expect(
+      hydrantVisibleForNewRv(
+        value,
+        normalizedQuery: value.code.toLowerCase(),
+        hasLocalWork: false,
+      ),
+      isTrue,
+    );
+  });
+
+  test(
+    'terminal global status wins over an inconsistent availability flag',
+    () {
+      final cached = CachedHydrant.fromApi({
+        'hydrant_id': '735d3d0e-78a3-4ca8-a34b-6c0513458d29',
+        'account_number': '1497',
+        'rvStatus': 'completed',
+        'availableForRv': true,
+      }, DateTime.utc(2026, 8, 8));
+
+      expect(cached.toAppModel().availableForRv, isFalse);
+      expect(cached.toAppModel().rvStatus, 'completed');
+    },
+  );
+
   test('map colors combine canonical and local state', () {
     expect(hydrantMarkerColor(hydrant()), AppColors.brightBlue);
     expect(
@@ -112,6 +151,37 @@ void main() {
       Colors.grey,
     );
   });
+
+  test('official manual hydrant is synchronized, never locally pending', () {
+    final cached = CachedHydrant.fromApi({
+      'hydrant_id': 'official-manual',
+      'account_number': '1497',
+      'source': 'manual',
+      'rvStatus': 'completed',
+      'officialInspectionId': 'inspection-1497',
+      'availableForRv': false,
+    }, DateTime.utc(2026, 8, 8));
+
+    expect(cached.toAppModel().syncStatus, SyncStatus.synced);
+    expect(cached.toAppModel().f02a.status, InspectionStatus.completed);
+  });
+
+  test('map filters use one exclusive canonical category per hydrant', () {
+    final reviewed = hydrant(rvStatus: 'completed', availableForRv: false);
+    final local = hydrant(localStatus: InspectionStatus.inProgress);
+
+    expect(hydrantMapCategory(reviewed), HydrantMapCategory.reviewed);
+    expect(
+      hydrantMatchesMapFilter(reviewed, HydrantMapFilter.reviewed),
+      isTrue,
+    );
+    expect(
+      hydrantMatchesMapFilter(reviewed, HydrantMapFilter.available),
+      isFalse,
+    );
+    expect(hydrantMapCategory(local), HydrantMapCategory.localWork);
+    expect(hydrantMatchesMapFilter(local, HydrantMapFilter.all), isTrue);
+  });
 }
 
 Hydrant hydrant({
@@ -120,11 +190,13 @@ Hydrant hydrant({
   bool photosVerified = false,
   bool isActive = true,
   InspectionStatus localStatus = InspectionStatus.pending,
+  String locality = 'L',
+  String parcel = 'P',
 }) => Hydrant(
   id: 'h',
   code: '000-42',
-  locality: 'L',
-  parcel: 'P',
+  locality: locality,
+  parcel: parcel,
   priority: PriorityLevel.medium,
   access: AccessType.both,
   syncStatus: SyncStatus.synced,

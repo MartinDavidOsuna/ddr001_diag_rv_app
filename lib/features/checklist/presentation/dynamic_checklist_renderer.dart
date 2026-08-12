@@ -10,22 +10,30 @@ import '../../inspections/domain/filter_element_selection.dart';
 import '../../inspections/presentation/rv_inspection_controller.dart';
 import '../../inspections/presentation/rv_review_navigation.dart';
 import '../../inspections/presentation/rv_general_photos_observations_step.dart';
+import '../../inspections/presentation/rv_steps_one_two.dart';
 import '../../catalogs/dynamic_catalog_repository.dart';
 import '../../catalogs/pressure_range_selector.dart';
 import '../../catalogs/brand_selection.dart';
 import '../data/checklist_models.dart';
 
+bool showNotApplicableForChecklistItem(ChecklistItemDefinition item) =>
+    !item.required && item.code != 'cabinet_comments';
+
+bool renderChecklistItemInSection(
+  ChecklistItemDefinition item, {
+  required bool hidePhotoQuestions,
+}) =>
+    !const {'coordinates', 'signal', 'readonly'}.contains(item.type) &&
+    !(hidePhotoQuestions && item.type == 'photo');
+
 class DynamicChecklistRenderer extends StatefulWidget {
   const DynamicChecklistRenderer({
     required this.controller,
-    required this.stepOne,
-    required this.stepTwo,
     required this.onExitRequested,
     this.onSummary,
     super.key,
   });
   final RvInspectionController controller;
-  final Widget stepOne, stepTwo;
   final VoidCallback? onSummary;
   final Future<void> Function() onExitRequested;
 
@@ -41,10 +49,11 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
   bool _transitioning = false;
   int? _renderedStep;
 
-  void _scheduleStepFocus(int step) {
+  void _scheduleStepFocus(int step, {required bool hasNavigationTarget}) {
     if (_renderedStep == step) return;
     _renderedStep = step;
     FocusManager.instance.primaryFocus?.unfocus();
+    if (hasNavigationTarget) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final heading = _headingKey.currentContext;
@@ -95,15 +104,20 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
     final sections = draft.checklist.sections;
     if (sections.isEmpty) return const Text('El checklist no contiene pasos.');
     final currentStep = draft.activeFormStep.clamp(0, sections.length);
-    _scheduleStepFocus(currentStep);
-    if ((draft.navigationQuestionId != null ||
-            draft.navigationFieldId != null) &&
-        !_targetScheduled) {
+    final hasNavigationTarget =
+        draft.navigationQuestionId != null || draft.navigationFieldId != null;
+    _scheduleStepFocus(currentStep, hasNavigationTarget: hasNavigationTarget);
+    if (hasNavigationTarget && !_targetScheduled) {
       _targetScheduled = true;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
+        BuildContext? target;
+        for (var attempt = 0; attempt < 5 && mounted; attempt++) {
+          target = _targetKey.currentContext;
+          if (target != null) break;
+          await WidgetsBinding.instance.endOfFrame;
+        }
         if (!mounted) return;
-        final target = _targetKey.currentContext;
-        if (target != null) {
+        if (target != null && target.mounted) {
           await Scrollable.ensureVisible(
             target,
             duration: const Duration(milliseconds: 300),
@@ -129,15 +143,26 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
           child: switch (currentStep) {
             int step when step == sections.length =>
               RvGeneralPhotosAndObservationsStep(controller: widget.controller),
-            0 => widget.stepOne,
+            0 => RvStepOnePanel(
+              controller: widget.controller,
+              targetKey: _targetKey,
+              navigationFieldId: draft.navigationFieldId,
+            ),
             1 => Column(
               children: [
                 _Section(
                   section: sections[currentStep],
                   controller: widget.controller,
                   collapsible: false,
+                  hidePhotoQuestions: true,
                 ),
-                widget.stepTwo,
+                RvStepTwoPhotoPanel(
+                  controller: widget.controller,
+                  targetSlot: _photoSlotFromNavigationField(
+                    draft.navigationFieldId,
+                  ),
+                  targetKey: _targetKey,
+                ),
               ],
             ),
             _ =>
@@ -159,6 +184,11 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
         ),
       ),
     );
+  }
+
+  String? _photoSlotFromNavigationField(String? fieldId) {
+    if (fieldId == null || !fieldId.startsWith('photo:')) return null;
+    return fieldId.substring('photo:'.length);
   }
 }
 
@@ -329,19 +359,10 @@ class _ParcelValveSection extends StatelessWidget {
             ),
             if (config?.type == ParcelValveConfigurationType.other) ...[
               const SizedBox(height: 12),
-              TextFormField(
-                key: targetFieldId == 'customDescription'
-                    ? targetKey
-                    : const ValueKey('parcel-custom-description'),
-                initialValue: config?.customDescription,
-                decoration: const InputDecoration(
-                  labelText: 'Especifique la configuración de válvulas',
-                ),
-                onChanged: (value) => unawaited(
-                  controller.saveParcelValveConfiguration(
-                    config!.copyWith(customDescription: value),
-                  ),
-                ),
+              const Text(
+                'Especifique la configuración de válvulas',
+                key: ValueKey('parcel-custom-configuration-instruction'),
+                style: TextStyle(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<int>(
@@ -538,23 +559,12 @@ class _ParcelValveCard extends StatelessWidget {
         ),
         if (valve.hasPilot) ...[
           const SizedBox(height: 8),
-          Semantics(
-            label: '¿El piloto está conectado?',
-            child: SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: true, label: Text('Sí')),
-                ButtonSegment(value: false, label: Text('No')),
-              ],
-              selected: valve.pilotConnected == null
-                  ? const <bool>{}
-                  : {valve.pilotConnected!},
-              emptySelectionAllowed: true,
-              onSelectionChanged: readOnly
-                  ? null
-                  : (selection) => onChanged(
-                      valve.copyWith(pilotConnected: selection.first),
-                    ),
-            ),
+          _PilotConnectionField(
+            key: targetFieldId == 'pilotConnected' ? targetKey : null,
+            value: valve.pilotConnected,
+            readOnly: readOnly,
+            onChanged: (value) =>
+                onChanged(valve.copyWith(pilotConnected: value)),
           ),
         ],
         _ComponentField(
@@ -577,6 +587,49 @@ class _ParcelValveCard extends StatelessWidget {
         ),
       ],
     ),
+  );
+}
+
+class _PilotConnectionField extends StatelessWidget {
+  const _PilotConnectionField({
+    required this.value,
+    required this.readOnly,
+    required this.onChanged,
+    super.key,
+  });
+
+  final bool? value;
+  final bool readOnly;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text(
+        '¿El piloto está conectado? *',
+        style: TextStyle(fontWeight: FontWeight.w700),
+      ),
+      const Text(
+        'Indica si el piloto está conectado físicamente a esta válvula; '
+        'es distinto de indicar si la válvula tiene piloto.',
+      ),
+      const SizedBox(height: 8),
+      Semantics(
+        label: '¿El piloto está conectado físicamente a esta válvula?',
+        child: SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: true, label: Text('Sí')),
+            ButtonSegment(value: false, label: Text('No')),
+          ],
+          selected: value == null ? const <bool>{} : {value!},
+          emptySelectionAllowed: true,
+          onSelectionChanged: readOnly
+              ? null
+              : (selection) => onChanged(selection.first),
+        ),
+      ),
+    ],
   );
 }
 
@@ -700,12 +753,14 @@ class _Section extends StatelessWidget {
     required this.section,
     required this.controller,
     this.collapsible = true,
+    this.hidePhotoQuestions = false,
     this.targetQuestionId,
     this.targetKey,
   });
   final ChecklistSectionDefinition section;
   final RvInspectionController controller;
   final bool collapsible;
+  final bool hidePhotoQuestions;
   final String? targetQuestionId;
   final GlobalKey? targetKey;
 
@@ -721,14 +776,22 @@ class _Section extends StatelessWidget {
           ),
         )
         .toList();
-    final renderable = visible
+    final countable = visible
         .where(
           (item) =>
               !const {'coordinates', 'signal', 'readonly'}.contains(item.type),
         )
         .toList();
+    final renderable = countable
+        .where(
+          (item) => renderChecklistItemInSection(
+            item,
+            hidePhotoQuestions: hidePhotoQuestions,
+          ),
+        )
+        .toList();
     if (renderable.isEmpty) return const SizedBox.shrink();
-    final missing = renderable
+    final missing = countable
         .where(
           (item) =>
               item.required &&
@@ -913,7 +976,7 @@ class _Question extends StatelessWidget {
               ),
             const SizedBox(height: 8),
             _field(context, answer, readOnly),
-            if (!item.required)
+            if (showNotApplicableForChecklistItem(item))
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
                 value: answer?.notApplicable ?? false,

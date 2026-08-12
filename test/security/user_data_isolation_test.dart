@@ -4,6 +4,8 @@ import 'package:ddr001diag/data/local/visual_inspection_repository.dart';
 import 'package:ddr001diag/domain/enums/app_enums.dart';
 import 'package:ddr001diag/domain/models/app_models.dart';
 import 'package:ddr001diag/domain/sync/sync_queue_item.dart';
+import 'package:ddr001diag/features/checklist/data/checklist_models.dart';
+import 'package:ddr001diag/features/inspections/data/rv_draft_repository.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -13,6 +15,7 @@ void main() {
   late HiveTestEnvironment hive;
   late VisualInspectionRepository inspections;
   late SyncQueueRepository queue;
+  late RvDraftRepository rvDrafts;
 
   const userA = AppUser(
     id: 'user-a',
@@ -62,6 +65,7 @@ void main() {
       index: Hive.box<String>('active_inspection_index_v1'),
     );
     queue = SyncQueueRepository(Hive.box<String>('sync_queue'));
+    rvDrafts = RvDraftRepository(inspections);
   });
 
   tearDown(() => hive.close());
@@ -107,6 +111,94 @@ void main() {
     await inspections.deleteLocalDraft(draft.id, creatorId: 'user-a');
     expect(inspections.findById(draft.id), isNull);
     expect(inspections.hasLocalInspection(hydrant.id), isFalse);
+  });
+
+  test(
+    'la revisión nunca sincronizada expone borrado en la ficha del creador',
+    () async {
+      inspections.setAccessScope(scope('user-a', 'crew-a'));
+      final now = DateTime.utc(2026, 8, 8);
+      final draft = await rvDrafts.openOrCreate(
+        hydrant: hydrant,
+        user: userA,
+        checklist: DynamicChecklist(
+          id: 'rv',
+          code: 'rv',
+          version: 1,
+          title: 'RV',
+          etag: 'etag',
+          cachedAt: now,
+          sections: const [],
+        ),
+      );
+
+      expect(
+        rvDrafts.canDeleteUnsyncedLocal(
+          clientInspectionId: draft.clientInspectionId,
+          creatorId: 'user-a',
+        ),
+        isTrue,
+      );
+      expect(
+        rvDrafts.canDeleteUnsyncedLocal(
+          clientInspectionId: draft.clientInspectionId,
+          creatorId: 'user-b',
+        ),
+        isFalse,
+      );
+
+      final partiallySynchronized = draft.copyWith(
+        serverInspectionId: 'remote-partial-draft',
+      );
+      await rvDrafts.save(partiallySynchronized);
+      expect(
+        rvDrafts.canDeleteUnsyncedLocal(
+          clientInspectionId: draft.clientInspectionId,
+          creatorId: 'user-a',
+        ),
+        isTrue,
+        reason: 'crear parcialmente en API no equivale a enviar el reporte',
+      );
+
+      await rvDrafts.deleteUnsyncedLocal(
+        clientInspectionId: draft.clientInspectionId,
+        creatorId: 'user-a',
+      );
+      expect(rvDrafts.find(draft.clientInspectionId), isNull);
+      expect(inspections.hasLocalInspection(hydrant.id), isFalse);
+    },
+  );
+
+  test('a completed local document cannot be deleted as a draft', () async {
+    inspections.setAccessScope(scope('user-a', 'crew-a'));
+    final draft = await rvDrafts.openOrCreate(
+      hydrant: hydrant,
+      user: userA,
+      checklist: DynamicChecklist(
+        id: 'rv-final',
+        code: 'rv',
+        version: 1,
+        title: 'RV',
+        etag: 'etag-final',
+        cachedAt: DateTime.utc(2026, 8, 8),
+        sections: const [],
+      ),
+    );
+    final document = inspections.findById(draft.clientInspectionId)!;
+    await inspections.save(
+      document.copyWith(
+        status: InspectionStatus.completed,
+        completedAt: DateTime.utc(2026, 8, 8, 20),
+      ),
+    );
+
+    expect(
+      rvDrafts.canDeleteUnsyncedLocal(
+        clientInspectionId: draft.clientInspectionId,
+        creatorId: 'user-a',
+      ),
+      isFalse,
+    );
   });
 
   test('cola offline de A no queda lista ni visible bajo B', () async {

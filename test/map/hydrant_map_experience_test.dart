@@ -25,6 +25,27 @@ void main() {
 
       expect(source.itemsFor([hydrant]).single.id, 'hydrant-42');
     });
+
+    test('preserves the exact latitude and longitude of every marker', () {
+      const source = FlatHydrantMapMarkerSource();
+      final items = source.itemsFor([
+        _hydrant(id: 'exact', latitude: 28.987654, longitude: -111.123456),
+      ]);
+
+      expect(items.single.position.latitude, 28.987654);
+      expect(items.single.position.longitude, -111.123456);
+    });
+
+    test('keeps every valid cached hydrant for the initial catalog view', () {
+      const source = FlatHydrantMapMarkerSource();
+      final items = source.itemsFor([
+        _hydrant(id: 'north', latitude: 29.2, longitude: -110.9),
+        _hydrant(id: 'south', latitude: 28.9, longitude: -110.7),
+        _hydrant(id: 'missing', latitude: 0, longitude: 0),
+      ]);
+
+      expect(items.map((item) => item.id), ['north', 'south']);
+    });
   });
 
   group('HydrantMapSelection', () {

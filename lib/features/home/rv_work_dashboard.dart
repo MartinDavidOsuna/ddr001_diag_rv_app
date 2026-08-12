@@ -24,6 +24,64 @@ extension RvWorkGroupLabel on RvWorkGroup {
 }
 
 abstract final class RvWorkDashboardProjection {
+  static List<Hydrant> personalWorkHydrants({
+    required List<Hydrant> assigned,
+    required List<Hydrant> catalog,
+    required List<RvDraft> drafts,
+  }) {
+    final result = <String, Hydrant>{
+      for (final hydrant in assigned) hydrant.id: hydrant,
+    };
+    final localWorkIds = drafts.map((draft) => draft.hydrantId).toSet();
+    for (final hydrant in catalog) {
+      if (localWorkIds.contains(hydrant.id)) {
+        result.putIfAbsent(hydrant.id, () => hydrant);
+      }
+    }
+    return result.values.toList(growable: false);
+  }
+
+  static List<Hydrant> recent({
+    required List<RvDraft> drafts,
+    required List<Hydrant> hydrants,
+    int limit = 5,
+  }) {
+    final hydrantsById = {for (final hydrant in hydrants) hydrant.id: hydrant};
+    final timestamps = <String, DateTime>{};
+    for (final draft in drafts) {
+      if (!hydrantsById.containsKey(draft.hydrantId)) continue;
+      final previous = timestamps[draft.hydrantId];
+      if (previous == null || draft.updatedAt.isAfter(previous)) {
+        timestamps[draft.hydrantId] = draft.updatedAt;
+      }
+    }
+    for (final hydrant in hydrants) {
+      final isRemoteReport =
+          hydrant.officialInspectionId != null ||
+          hydrant.hasConflict ||
+          const {
+            InspectionStatus.completed,
+            InspectionStatus.validated,
+            InspectionStatus.returned,
+          }.contains(hydrant.f02a.status);
+      if (!isRemoteReport) continue;
+      timestamps.putIfAbsent(
+        hydrant.id,
+        () =>
+            hydrant.lastStatusChangedAt ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+      );
+    }
+    final result =
+        timestamps.entries
+            .map(
+              (entry) => (hydrant: hydrantsById[entry.key]!, at: entry.value),
+            )
+            .toList()
+          ..sort((a, b) => b.at.compareTo(a.at));
+    return result.take(limit).map((entry) => entry.hydrant).toList();
+  }
+
   static RvWorkGroup forDraft(RvDraft draft) {
     if (draft.localStatus == RvLocalStatus.conflict ||
         draft.localStatus == RvLocalStatus.versionConflict) {
@@ -90,19 +148,29 @@ abstract final class RvWorkDashboardProjection {
       final current =
           local.where((draft) => !draft.isReadOnly).firstOrNull ??
           local.firstOrNull;
-      if (current == null &&
-          !hydrant.hasConflict &&
-          !const {
+      final hasOfficialRemoteState =
+          hydrant.officialInspectionId != null ||
+          const {
             InspectionStatus.completed,
             InspectionStatus.validated,
             InspectionStatus.returned,
-          }.contains(hydrant.f02a.status)) {
+          }.contains(hydrant.f02a.status);
+      final hasActiveVersionWork =
+          current != null &&
+          (current.hasPendingChanges ||
+              current.pendingVersionClientId != null ||
+              current.localStatus == RvLocalStatus.pendingVersion ||
+              current.localStatus == RvLocalStatus.syncingVersion ||
+              current.localStatus == RvLocalStatus.versionConflict);
+      if (current == null && !hydrant.hasConflict && !hasOfficialRemoteState) {
         continue;
       }
-      final group = current != null
-          ? forDraft(current)
-          : hydrant.hasConflict
+      final group = hydrant.hasConflict
           ? RvWorkGroup.conflicts
+          : hasOfficialRemoteState && !hasActiveVersionWork
+          ? forRemote(hydrant.f02a.status)
+          : current != null
+          ? forDraft(current)
           : forRemote(hydrant.f02a.status);
       result[group]!.add(hydrant.id);
     }

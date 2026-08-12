@@ -1,8 +1,13 @@
 import 'dart:io';
 import 'package:ddr001diag/features/visual_reports/domain/visual_report.dart';
+import 'package:ddr001diag/features/visual_reports/presentation/rv_visual_report_page.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('report title identifies the hydrant account', () {
+    expect(rvReportTitle(' 1001 '), 'Reporte RV - Hidrante 1001');
+  });
+
   test('parses complete report into typed presentation models', () {
     final report = VisualReport.fromJson({
       'visualReportId': 'r',

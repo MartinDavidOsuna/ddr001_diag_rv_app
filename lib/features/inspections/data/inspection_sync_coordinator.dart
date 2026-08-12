@@ -520,6 +520,7 @@ class InspectionSyncCoordinator {
   Future<RvDraft> _failure(RvDraft draft, ApiException error) {
     final retry = draft.retryCount + 1;
     final failedAt = DateTime.now().toUtc();
+    final retryable = _retryable(error);
     final delay = switch (retry) {
       1 => const Duration(seconds: 5),
       2 => const Duration(seconds: 15),
@@ -528,7 +529,7 @@ class InspectionSyncCoordinator {
     _debug(
       draft,
       'error',
-      '${error.kind.name}; retryable=${_retryable(error)}; intento=$retry '
+      '${error.kind.name}; retryable=$retryable; intento=$retry '
           'requestId=${error.requestId ?? '-'} field=${error.field ?? '-'}',
     );
     return _save(
@@ -536,15 +537,11 @@ class InspectionSyncCoordinator {
         localStatus: error.kind == ApiErrorKind.sessionRevoked
             ? RvLocalStatus.requiresAuthentication
             : RvLocalStatus.syncError,
-        lastSyncError: error.kind == ApiErrorKind.sessionRevoked
-            ? error.message
-            : 'Sin conexión. Puedes continuar trabajando; los cambios se sincronizarán después.',
+        lastSyncError: retryable ? _retryMessage(error) : error.message,
         retryCount: retry,
         lastAttemptAt: failedAt,
         updatedAt: failedAt,
-        nextRetryAt: _retryable(error)
-            ? DateTime.now().toUtc().add(delay)
-            : null,
+        nextRetryAt: retryable ? DateTime.now().toUtc().add(delay) : null,
       ),
     );
   }
@@ -553,7 +550,20 @@ class InspectionSyncCoordinator {
     ApiErrorKind.offline,
     ApiErrorKind.timeout,
     ApiErrorKind.serverUnavailable,
+    ApiErrorKind.serverError,
   }.contains(error.kind);
+
+  String _retryMessage(ApiException error) => switch (error.kind) {
+    ApiErrorKind.timeout =>
+      'El servidor tardó demasiado en responder. La revisión quedó '
+          'guardada en el dispositivo y se reintentará en segundo plano.',
+    ApiErrorKind.serverError =>
+      'El servidor respondió con un error. La revisión quedó guardada '
+          'en el dispositivo y se reintentará en segundo plano.',
+    _ =>
+      'No fue posible establecer comunicación con el servidor. La revisión '
+          'quedó guardada en el dispositivo y se reintentará en segundo plano.',
+  };
 
   bool _generalPhotosReady(RvDraft draft) => draft.generalPhotos.every(
     (photo) =>

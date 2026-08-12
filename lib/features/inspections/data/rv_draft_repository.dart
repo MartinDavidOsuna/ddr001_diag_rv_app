@@ -81,6 +81,31 @@ class RvDraftRepository {
     return value == null ? null : fromInspection(value);
   }
 
+  bool canDeleteUnsyncedLocal({
+    required String clientInspectionId,
+    required String creatorId,
+  }) {
+    final draft = find(clientInspectionId);
+    final inspection = visualRepository.findById(clientInspectionId);
+    if (draft == null || inspection == null) return false;
+    if (inspection.status == InspectionStatus.completed) return false;
+    final ownedByCreator =
+        inspection.createdBy == creatorId ||
+        inspection.inspectorId == creatorId;
+    final hasOfficialRemoteState =
+        draft.officialInspectionId != null ||
+        draft.visualReportId != null ||
+        const {
+          'submitted',
+          'completed',
+          'validated',
+        }.contains(draft.remoteStatus);
+    return ownedByCreator &&
+        !hasOfficialRemoteState &&
+        draft.localStatus != RvLocalStatus.submitted &&
+        !draft.isReadOnly;
+  }
+
   RvDraft? fromInspection(VisualInspection inspection) {
     final raw = inspection.unknownFields[storageKey];
     return raw is Map ? RvDraft.fromJson(Map<String, dynamic>.from(raw)) : null;
@@ -120,9 +145,12 @@ class RvDraftRepository {
             inspection.inspectorId != creatorId)) {
       throw StateError('Sólo el creador puede eliminar este borrador.');
     }
-    if (draft.serverInspectionId != null) {
+    if (!canDeleteUnsyncedLocal(
+      clientInspectionId: clientInspectionId,
+      creatorId: creatorId,
+    )) {
       throw StateError(
-        'Este borrador ya existe en el servidor y no puede eliminarse localmente.',
+        'Esta revisión ya fue enviada y no puede eliminarse localmente.',
       );
     }
     final photoBox = Hive.box<String>('inspection_photos_v1');
@@ -160,6 +188,8 @@ class RvDraftRepository {
         if (item.ownerUserId == creatorId &&
             (item.inspectionId == clientInspectionId ||
                 item.entityId == clientInspectionId ||
+                (item.entityType == 'manualHydrant' &&
+                    item.hydrantId == draft.hydrantId) ||
                 photoIds.contains(item.entityId))) {
           await queueBox.delete(entry.key);
         }

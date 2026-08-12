@@ -411,6 +411,45 @@ void main() {
     expect(repository.lastRestoreOffline, isTrue);
   });
 
+  test(
+    'restauración conserva sesión ante 401 sin código de revocación',
+    () async {
+      final storage = MemorySessionStorage()
+        ..value = const FieldSession(
+          sessionId: 'session',
+          userId: 'user',
+          accessToken: 'expired-access',
+          refreshToken: 'expired-refresh',
+          installationId: 'installation',
+        );
+      final adapter = FakeHttpAdapter(
+        (options) async => jsonResponse('{"title":"Unauthorized"}', 401),
+      );
+      final repository = FieldSessionRepository(
+        client: ApiClient(
+          config: AppConfig.fromEnvironment(
+            environmentOverride: 'test',
+            apiBaseUrlOverride: 'https://example.test/api/v1',
+          ),
+          sessionStorage: storage,
+          dio: Dio()..httpClientAdapter = adapter,
+        ),
+        storage: storage,
+        packageInfo: PackageInfo(
+          appName: 'DIAGNOSTICO HIDRANTES',
+          packageName: 'ddr001diag',
+          version: '0.2.0',
+          buildNumber: '3',
+        ),
+      );
+
+      expect(await repository.restore(), isNotNull);
+      expect(repository.lastRestoreOffline, isTrue);
+      expect(storage.value?.refreshToken, 'expired-refresh');
+      expect(storage.clearCalls, 0);
+    },
+  );
+
   test('refresh rotativo es único para solicitudes simultáneas', () async {
     final storage = MemorySessionStorage()
       ..installation = '9d025d12-bc54-4aa2-8237-e2fb1fa0d67a'
@@ -508,7 +547,7 @@ void main() {
     },
   );
 
-  test('401 genérico del refresh conserva la identidad local', () async {
+  test('401 genérico del refresh conserva credenciales recuperables', () async {
     final storage = MemorySessionStorage()
       ..value = const FieldSession(
         sessionId: 'session',
@@ -543,7 +582,6 @@ void main() {
     'USER_INACTIVE': 'desactivado',
     'DEVICE_BLOCKED': 'bloqueado',
     'DEVICE_BINDING_REVOKED': 'revocado',
-    'REFRESH_TOKEN_REUSE': 'seguridad',
   }.entries) {
     test('${entry.key} cierra credenciales con mensaje diferenciado', () async {
       final storage = MemorySessionStorage()
@@ -584,6 +622,33 @@ void main() {
       expect(translated.message, contains(entry.value));
     });
   }
+
+  test('reintento de refresh no se interpreta como cierre de sesión', () async {
+    final storage = MemorySessionStorage()
+      ..value = const FieldSession(
+        sessionId: 'session',
+        userId: 'user',
+        accessToken: 'expired',
+        refreshToken: 'refresh',
+        installationId: 'installation',
+      );
+    final adapter = FakeHttpAdapter(
+      (options) async =>
+          jsonResponse('{"code":"REFRESH_TOKEN_REUSE","detail":"retry"}', 401),
+    );
+    final client = ApiClient(
+      config: AppConfig.fromEnvironment(
+        environmentOverride: 'test',
+        apiBaseUrlOverride: 'https://example.test/api/v1',
+      ),
+      sessionStorage: storage,
+      dio: Dio()..httpClientAdapter = adapter,
+    );
+
+    await expectLater(client.refreshSession(), throwsA(isA<DioException>()));
+    expect(storage.value?.refreshToken, 'refresh');
+    expect(storage.clearCalls, 0);
+  });
 
   test(
     'reemplazar sesión cancela peticiones autenticadas pero no login',
@@ -635,7 +700,7 @@ void main() {
     },
   );
 
-  test('401 y error de conexión no se confunden con falta de interfaz', () {
+  test('401 genérico conserva sesión y permite seguir trabajando', () {
     final request = RequestOptions(path: '/private');
     final unauthorized = DioException(
       requestOptions: request,
@@ -648,9 +713,22 @@ void main() {
     );
     expect(
       ApiException.fromDio(unauthorized).message,
-      'Sin conexión. Puedes continuar trabajando; los cambios se sincronizarán después.',
+      'No fue posible verificar la sesión con el servidor. Puedes continuar trabajando y se intentará nuevamente.',
     );
     expect(ApiException.fromDio(offline).message, 'Servidor no disponible.');
+  });
+
+  test('500 se distingue de una falla de conectividad', () {
+    final request = RequestOptions(path: '/inspections/id/parcel-valves');
+    final failure = DioException(
+      requestOptions: request,
+      response: Response(requestOptions: request, statusCode: 500),
+    );
+
+    final translated = ApiException.fromDio(failure);
+    expect(translated.kind, ApiErrorKind.serverError);
+    expect(translated.message, contains('respondió con un error'));
+    expect(translated.message, isNot(contains('conexión')));
   });
 
   test('conflicto de teléfono explica cómo corregir el inicio de sesión', () {

@@ -103,9 +103,8 @@ class _HydrantsPageState extends State<HydrantsPage> {
     });
   }
 
-  bool matchesSearch(Hydrant h) => '${h.code} ${h.locality} ${h.parcel}'
-      .toLowerCase()
-      .contains(query.toLowerCase());
+  bool matchesSearch(Hydrant h) =>
+      h.code.toLowerCase().contains(query.toLowerCase());
 
   @override
   Widget build(BuildContext context) {
@@ -162,6 +161,7 @@ class _HydrantsPageState extends State<HydrantsPage> {
             child: ConnectionBadge(
               online: state.online,
               state: state.connectivityState,
+              transport: state.connectivityMonitor?.transport,
               pending: state.pendingCount > 0,
             ),
           ),
@@ -186,7 +186,7 @@ class _HydrantsPageState extends State<HydrantsPage> {
               onChanged: (v) => setState(() => query = v),
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.search),
-                hintText: 'Buscar código, localidad, parcela...',
+                hintText: 'Buscar número de cuenta...',
               ),
             ),
           ),
@@ -355,11 +355,6 @@ class HydrantCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 3),
-              Text(
-                '${hydrant.locality} · ${hydrant.parcel}',
-                style: const TextStyle(color: AppColors.muted, fontSize: 12),
-              ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 6,
@@ -374,10 +369,10 @@ class HydrantCard extends StatelessWidget {
                   StatusBadge(compactStatus, color: color),
                   StatusBadge(
                     hydrant.priority == PriorityLevel.high
-                        ? 'Alta'
+                        ? 'Prioridad alta'
                         : hydrant.priority == PriorityLevel.medium
-                        ? 'Media'
-                        : 'Baja',
+                        ? 'Prioridad media'
+                        : 'Prioridad baja',
                     color: AppColors.orange,
                   ),
                   if (reviewRemoval)
@@ -455,6 +450,10 @@ class HydrantDetailPage extends StatelessWidget {
     final h = state.hydrant(id);
     final functionalSummary = state.functionalSummary(id);
     final visualHistory = state.visualInspectionRepository.forHydrant(id);
+    final activeDraft = state.rvDraftRepository.activeFor(id);
+    final canDeleteLocalDraft =
+        activeDraft != null &&
+        state.canDeleteUnsyncedLocalDraft(activeDraft.clientInspectionId);
     final functionalHistory = state.functionalInspectionRepository.forHydrant(
       id,
     );
@@ -528,6 +527,20 @@ class HydrantDetailPage extends StatelessWidget {
             color: AppColors.teal,
             onPressed: () => _openInspection(context, state, h.f02a, 'a'),
           ),
+          if (canDeleteLocalDraft) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              key: const ValueKey('delete-local-rv'),
+              style: OutlinedButton.styleFrom(foregroundColor: AppColors.red),
+              onPressed: () => _deleteLocalDraft(
+                context,
+                state,
+                activeDraft.clientInspectionId,
+              ),
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Eliminar revisión local'),
+            ),
+          ],
           const SizedBox(height: 13),
           if (!AppConfig.rvOnly)
             DiagnosticCard(
@@ -626,6 +639,44 @@ class HydrantDetailPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _deleteLocalDraft(
+    BuildContext context,
+    AppState state,
+    String clientInspectionId,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Eliminar revisión local'),
+        content: const Text(
+          'Se eliminarán esta revisión no enviada y sus fotografías guardadas '
+          'en este dispositivo. Los reportes oficiales no se modifican. Esta '
+          'acción no se puede deshacer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await state.deleteUnsyncedLocalDraft(clientInspectionId);
+      if (context.mounted) context.go('/home');
+    } on StateError catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message.toString())));
+    }
   }
 
   Future<void> _createRevision(
@@ -735,6 +786,13 @@ class HydrantDetailPage extends StatelessWidget {
     InspectionSummary summary,
     String type,
   ) {
+    if (type == 'a' &&
+        (summary.status == InspectionStatus.completed ||
+            summary.status == InspectionStatus.validated)) {
+      final account = state.hydrant(id).code;
+      context.push('/visual-report/${Uri.encodeComponent(account)}');
+      return;
+    }
     if (state.editingRestricted &&
         summary.status != InspectionStatus.completed &&
         summary.status != InspectionStatus.inProgress &&
