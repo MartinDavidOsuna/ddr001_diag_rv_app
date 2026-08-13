@@ -276,7 +276,7 @@ class AppState extends ChangeNotifier {
         InspectionStatus.validated,
       }.contains(hydrant.f02a.status);
 
-  Future<void> initialize() async {
+  Future<void> initialize({bool startRemoteServices = true}) async {
     connectivityMonitor?.addListener(_onConnectivityChanged);
     _clearAccessScope();
     _replaceHydrantsFromCache();
@@ -293,8 +293,10 @@ class AppState extends ChangeNotifier {
     }
     initialized = true;
     notifyListeners();
-    unawaited(_completePendingLogout());
-    unawaited(_initializeRemoteServices());
+    if (startRemoteServices) {
+      unawaited(_completePendingLogout());
+      unawaited(_initializeRemoteServices());
+    }
   }
 
   Future<void> _initializeRemoteServices() async {
@@ -740,7 +742,21 @@ class AppState extends ChangeNotifier {
       ...hydrants,
       ...catalogHydrants,
     ].where((hydrant) => hydrant.id == draft.hydrantId).toList(growable: false);
-    return matching.any(_hasOfficialRvState) && !_hasActiveVersionWork(draft);
+    final hasOfficialState = matching.any(_hasOfficialRvState);
+    if (!hasOfficialState || _hasActiveVersionWork(draft)) return false;
+
+    // A response-lost submit can leave the exact same inspection in syncError
+    // while the server projection already reports it as official. Let that draft
+    // run once more so the coordinator can GET it and reconcile it to submitted.
+    // A different official inspection still supersedes this historical draft.
+    final serverInspectionId = draft.serverInspectionId;
+    if (serverInspectionId != null &&
+        matching.any(
+          (hydrant) => hydrant.officialInspectionId == serverInspectionId,
+        )) {
+      return false;
+    }
+    return true;
   }
 
   List<RvDraft> _pendingDraftsForSync() => rvDraftRepository

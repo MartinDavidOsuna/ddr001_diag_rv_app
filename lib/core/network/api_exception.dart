@@ -26,12 +26,15 @@ class ApiException implements Exception {
     this.field,
     this.errors = const [],
     this.takeoverToken,
+    this.originalRuntimeType,
+    this.originalMessage,
   });
   final ApiErrorKind kind;
   final String message;
   final int? statusCode;
   final String? requestId, problemType, problemTitle, domainCode, field;
   final String? takeoverToken;
+  final String? originalRuntimeType, originalMessage;
   final List<Map<String, dynamic>> errors;
 
   factory ApiException.fromDio(DioException error) {

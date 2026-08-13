@@ -1,0 +1,104 @@
+DDR001_RV_DIAGNOSTIC schema=1
+generatedAtUtc=2026-08-13T01:46:19.793719Z
+appVersion=0.2.35-controlled-diagnostic+55
+mode=ACTIVE_RECOVERY networkRequests=enabled
+privacy=no_tokens,no_coordinates,no_answer_values,no_photo_binary,no_local_paths
+
+[runEvents]
+2026-08-13T01:46:16.541174Z Cargando sesión y datos locales
+2026-08-13T01:46:16.541199Z Preparando la aplicación
+2026-08-13T01:46:16.542726Z Inicializando almacenamiento
+2026-08-13T01:46:16.734786Z Recuperando sesión y datos guardados
+2026-08-13T01:46:16.832940Z Esperando conexión con el servidor
+2026-08-13T01:46:16.832958Z Intentando subir todas las revisiones pendientes
+2026-08-13T01:46:16.834403Z Sincronizando cuenta 1497
+draftResult account=1497 status=syncError step=submit error=Sin conexión. Puedes continuar trabajando; los cambios se sincronizarán después.
+syncResult total=1 completed=1 warnings=1 conflicts=0
+2026-08-13T01:46:19.574798Z Actualizando estados del servidor
+2026-08-13T01:46:19.793574Z Recopilando estados y errores finales
+
+box.visual_inspections_v1.records=2
+box.active_inspection_index_v1.records=4
+box.inspection_photos_v1.records=12
+box.media_sync_queue.records=12
+box.media_work_queue_v1.records=12
+box.rv_dynamic_catalogs_v1.records=89
+box.local_hydrants_v1.records=1170
+box.trace_events.records=376
+
+invalidPhotoRecords=0
+invalidDraftRecords=0
+validDraftRecords=2
+
+[draft]
+accountNumber=1001
+hydrantId=5DB799EB-AC8A-F111-9422-0014224FF817
+clientInspectionId=5b9e0050-d8e5-4b5b-9c3b-69a71ffb48b6
+serverInspectionId=C8AEBB10-E8B9-4833-B6DE-8038AEC9FF76
+officialInspectionId=C8AEBB10-E8B9-4833-B6DE-8038AEC9FF76
+fieldSessionId=B6552ADD-C08A-F111-9422-0014224FF817
+checklistId=81E12AAB-775C-4966-9BC7-18438803C9AA
+checklistVersion=2
+createdAt=2026-08-08T23:01:45.552984Z
+updatedAt=2026-08-09T21:56:08.960574Z
+localStatus=submitted
+remoteStatus=submitted
+currentStep=verify
+answersStatus=synced
+photosStatus=synced
+locationStatus=synced
+signalStatus=synced
+submitStatus=synced
+lastAttemptAt=2026-08-09T21:47:11.677275Z
+nextRetryAt=-
+retryCount=0
+lastSyncError=-
+answerCount=59
+locationCaptured=true
+signalCaptured=true
+parcelValveConfigurationPresent=true
+parcelValveCount=4
+photoReferenceCount=12
+photoFilesPresent=12
+photoFilesMissing=0
+photoRecordsUnresolved=0
+photoSlots=front_closed:verified=1;left_side:verified=1;right_side:verified=1;back:verified=1;top:verified=1;front_open:verified=1;serial_plate:verified=1;flow_meter_pulse_cable:verified=1;flow_meter_open_cover:verified=1;flow_meter_closed_cover:verified=1;brand_illegible:E847A1A4-B786-F111-9422-0014224FF817:verified=1;general:83666a31-caee-43e0-9a98-e89b8614d39b:verified=1
+
+[draft]
+accountNumber=1497
+hydrantId=B31BBCA0-C186-F111-9422-0014224FF817
+clientInspectionId=d9fcb258-78b2-4164-bd42-a1d0b69d749a
+serverInspectionId=943A85DC-2BB6-41F9-96F9-1A664F2F2A77
+officialInspectionId=-
+fieldSessionId=B6552ADD-C08A-F111-9422-0014224FF817
+checklistId=81E12AAB-775C-4966-9BC7-18438803C9AA
+checklistVersion=2
+createdAt=2026-08-08T20:10:52.037356Z
+updatedAt=2026-08-13T01:46:17.515531Z
+localStatus=syncError
+remoteStatus=in_progress
+currentStep=submit
+answersStatus=synced
+photosStatus=pending
+locationStatus=notCaptured
+signalStatus=notCaptured
+submitStatus=notCaptured
+lastAttemptAt=2026-08-08T21:06:29.856615Z
+nextRetryAt=-
+retryCount=1
+lastSyncError=Sin conexión. Puedes continuar trabajando; los cambios se sincronizarán después.
+answerCount=0
+locationCaptured=false
+signalCaptured=false
+parcelValveConfigurationPresent=false
+parcelValveCount=0
+photoReferenceCount=0
+photoFilesPresent=0
+photoFilesMissing=0
+photoRecordsUnresolved=0
+photoSlots=
+
+summary.media_sync_queue=verified:12 invalidJson=12
+summary.media_work_queue_v1=pendingUpload:12 invalidJson=12
+summary.rv_dynamic_catalogs_v1=brand:79,diameter:3,pressureRange:7 invalidJson=0
+summary.trace_events=pending:376 invalidJson=0

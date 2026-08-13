@@ -32,7 +32,10 @@ import '../features/visual_reports/data/visual_report_repository.dart';
 
 typedef BootstrapStatusCallback = void Function(String status);
 
-Future<AppState> bootstrap({BootstrapStatusCallback? onStatus}) async {
+Future<AppState> bootstrap({
+  BootstrapStatusCallback? onStatus,
+  bool startRemoteServices = true,
+}) async {
   final total = Stopwatch()..start();
   var stage = Stopwatch()..start();
   onStatus?.call('Preparando la aplicación');
@@ -159,7 +162,7 @@ Future<AppState> bootstrap({BootstrapStatusCallback? onStatus}) async {
     dynamicCatalogRepository: dynamicCatalogRepository,
     connectivityMonitor: ConnectivityMonitor(apiClient.dio),
   );
-  await state.initialize();
+  await state.initialize(startRemoteServices: startRemoteServices);
   debugPrint('[PERF] bootstrap_total_ms=${total.elapsedMilliseconds}');
   return state;
 }
@@ -202,7 +205,11 @@ class _AppBootstrapShellState extends State<AppBootstrapShell> {
                   bootstrap(onStatus: report))
               .timeout(const Duration(seconds: 30));
       if (mounted) setState(() => _state = state);
-    } on Object catch (error) {
+    } on Object catch (error, stackTrace) {
+      debugPrint(
+        '[BOOTSTRAP] failure runtimeType=${error.runtimeType} error=$error\n'
+        '$stackTrace',
+      );
       if (mounted) setState(() => _error = error);
     } finally {
       if (mounted) setState(() => _running = false);

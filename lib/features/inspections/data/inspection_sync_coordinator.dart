@@ -33,10 +33,15 @@ class InspectionSyncCoordinator {
   RvAnswerPayloadBuilder get _payloadBuilder =>
       RvAnswerPayloadBuilder(validator: validator);
   final Set<String> _running = {};
+  final Map<String, Map<String, Object?>> failureDiagnostics = {};
 
   bool isRunning(String id) => _running.contains(id);
 
-  Future<RvDraft> synchronize(RvDraft initial, {bool submit = false}) async {
+  Future<RvDraft> synchronize(
+    RvDraft initial, {
+    bool submit = false,
+    bool forceRetry = false,
+  }) async {
     if (initial.localStatus == RvLocalStatus.conflict ||
         initial.localStatus == RvLocalStatus.versionConflict ||
         (initial.localStatus == RvLocalStatus.submitted &&
@@ -44,7 +49,8 @@ class InspectionSyncCoordinator {
         initial.localStatus == RvLocalStatus.cancelled) {
       return initial;
     }
-    if (initial.localStatus == RvLocalStatus.syncError &&
+    if (!forceRetry &&
+        initial.localStatus == RvLocalStatus.syncError &&
         initial.nextRetryAt == null &&
         initial.lastAttemptAt != null &&
         !initial.updatedAt.isAfter(initial.lastAttemptAt!)) {
@@ -60,6 +66,10 @@ class InspectionSyncCoordinator {
         return await _synchronizeVersion(draft);
       }
       draft = await _synchronizeCatalogs(draft);
+      if (draft.serverInspectionId != null) {
+        draft = await _reconcileRemoteInspection(draft);
+        if (draft.isReadOnly) return draft;
+      }
       draft = await _create(draft);
       draft = await _photos(draft);
       draft = await _reconcilePhotos(draft);
@@ -85,18 +95,73 @@ class InspectionSyncCoordinator {
         );
       }
       if (submit) draft = await _submit(draft);
+      if (draft.localStatus == RvLocalStatus.syncError) {
+        final validation = validator.validate(draft);
+        draft = await _save(
+          draft.copyWith(
+            localStatus: validation.isValid && draft.photosVerified
+                ? RvLocalStatus.readyToSubmit
+                : draft.photosVerified
+                ? RvLocalStatus.created
+                : RvLocalStatus.pendingPhotos,
+            clearError: true,
+            retryCount: 0,
+            clearNextRetryAt: true,
+          ),
+        );
+      }
       _debug(draft, 'fin', draft.localStatus.name);
       return draft;
-    } on ApiException catch (error) {
-      return _failure(draft, error);
-    } on Object {
+    } on ApiException catch (error, stackTrace) {
+      return _failure(draft, error, stackTrace: stackTrace);
+    } on Object catch (error, stackTrace) {
       return _failure(
         draft,
-        const ApiException(ApiErrorKind.unknown, 'Error desconocido.'),
+        ApiException(
+          ApiErrorKind.unknown,
+          'Ocurrió un error inesperado durante la sincronización.',
+          originalRuntimeType: error.runtimeType.toString(),
+          originalMessage: '$error',
+        ),
+        stackTrace: stackTrace,
       );
     } finally {
       _running.remove(initial.clientInspectionId);
     }
+  }
+
+  Future<RvDraft> _reconcileRemoteInspection(RvDraft draft) async {
+    final remoteInspection = await remote.get(draft.serverInspectionId!);
+    if (const {'submitted', 'validated'}.contains(remoteInspection.status)) {
+      return _save(
+        draft.copyWith(
+          localStatus: RvLocalStatus.submitted,
+          remoteStatus: remoteInspection.status,
+          officialInspectionId:
+              remoteInspection.officialInspectionId ?? remoteInspection.id,
+          lastStatusChangedAt: remoteInspection.lastStatusChangedAt,
+          submitStatus: RvPartStatus.synced,
+          currentStep: RvSyncStep.verify,
+          clearError: true,
+          retryCount: 0,
+          clearNextRetryAt: true,
+        ),
+      );
+    }
+    if (remoteInspection.status == 'conflict') {
+      return _save(
+        draft.copyWith(
+          localStatus: RvLocalStatus.conflict,
+          remoteStatus: 'conflict',
+          officialInspectionId: remoteInspection.officialInspectionId,
+          conflictId: remoteInspection.conflictId,
+          currentStep: RvSyncStep.verify,
+          clearError: true,
+          clearNextRetryAt: true,
+        ),
+      );
+    }
+    return draft;
   }
 
   Future<RvDraft> _synchronizeVersion(RvDraft draft) async {
@@ -517,7 +582,11 @@ class InspectionSyncCoordinator {
     );
   }
 
-  Future<RvDraft> _failure(RvDraft draft, ApiException error) {
+  Future<RvDraft> _failure(
+    RvDraft draft,
+    ApiException error, {
+    StackTrace? stackTrace,
+  }) {
     final retry = draft.retryCount + 1;
     final failedAt = DateTime.now().toUtc();
     final retryable = _retryable(error);
@@ -532,6 +601,21 @@ class InspectionSyncCoordinator {
       '${error.kind.name}; retryable=$retryable; intento=$retry '
           'requestId=${error.requestId ?? '-'} field=${error.field ?? '-'}',
     );
+    failureDiagnostics[draft.clientInspectionId] = {
+      'accountNumber': draft.accountNumber,
+      'clientInspectionId': draft.clientInspectionId,
+      'serverInspectionId': draft.serverInspectionId,
+      'step': draft.currentStep.name,
+      'kind': error.kind.name,
+      'statusCode': error.statusCode,
+      'requestId': error.requestId,
+      'domainCode': error.domainCode,
+      'field': error.field,
+      'runtimeType': error.originalRuntimeType ?? error.runtimeType.toString(),
+      'message': error.originalMessage ?? error.message,
+      'stackTrace': stackTrace?.toString(),
+      'timestampUtc': failedAt.toIso8601String(),
+    };
     return _save(
       draft.copyWith(
         localStatus: error.kind == ApiErrorKind.sessionRevoked

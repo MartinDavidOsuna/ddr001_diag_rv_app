@@ -1,0 +1,23 @@
+DDR001_RV_DIAGNOSTIC schema=1
+generatedAtUtc=2026-08-12T21:34:41.845593Z
+appVersion=0.2.35-diagnostic+49
+mode=READ_ONLY networkRequests=0
+privacy=no_tokens,no_coordinates,no_answer_values,no_photo_binary,no_local_paths
+
+box.visual_inspections_v1.records=2
+box.active_inspection_index_v1.records=4
+box.inspection_photos_v1.records=12
+box.media_sync_queue.records=12
+box.media_work_queue_v1.records=12
+box.rv_dynamic_catalogs_v1.records=86
+box.local_hydrants_v1.records=1170
+box.trace_events.records=366
+
+invalidPhotoRecords=0
+invalidDraftRecords=0
+validDraftRecords=0
+
+summary.media_sync_queue=verified:12 invalidJson=12
+summary.media_work_queue_v1=pendingUpload:12 invalidJson=12
+summary.rv_dynamic_catalogs_v1=brand:77,diameter:3,pressureRange:6 invalidJson=0
+summary.trace_events=pending:366 invalidJson=0
