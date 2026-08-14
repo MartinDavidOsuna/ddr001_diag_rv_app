@@ -91,7 +91,7 @@ void main() {
     expect(source, isNot(contains('Compartir')));
     expect(source, isNot(contains('Descargar')));
   });
-  test('navigation opens reports for unavailable hydrants', () {
+  test('map/history open reports while new survey permits repeated review', () {
     final map = File('lib/features/map/map_page.dart').readAsStringSync();
     final search = File(
       'lib/features/hydrants/new_survey_page.dart',
@@ -100,7 +100,9 @@ void main() {
       'lib/features/hydrants/hydrant_pages.dart',
     ).readAsStringSync();
     expect(map, contains('/visual-report/'));
-    expect(search, contains('/visual-report/'));
+    expect(search, isNot(contains('/visual-report/')));
+    expect(search, contains('_confirmAndStart(state, hydrant)'));
+    expect(search, contains('INGRESAR MANUALMENTE'));
     expect(history, contains('/visual-report/'));
     expect(map, contains('if (hydrant.availableForRv)'));
   });

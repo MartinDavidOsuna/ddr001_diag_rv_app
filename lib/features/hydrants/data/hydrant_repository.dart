@@ -480,6 +480,24 @@ class HydrantRepository {
     }
   }
 
+  Future<void> linkServerHydrantId(String localId, String serverId) async {
+    final records = cached()
+        .where((item) => item.hydrantId == localId)
+        .toList(growable: false);
+    if (records.isEmpty || records.every((item) => item.remoteId == serverId)) {
+      return;
+    }
+    for (final item in records) {
+      final linked = CachedHydrant.fromJson({
+        ...item.toJson(),
+        'remoteId': serverId,
+        'updatedAt': DateTime.now().toUtc().toIso8601String(),
+      });
+      await box.put(_key(item.scope, localId), jsonEncode(linked.toJson()));
+    }
+    _memoryCache.clear();
+  }
+
   Future<List<CachedHydrant>> refresh({
     String? search,
     int pageSize = 200,

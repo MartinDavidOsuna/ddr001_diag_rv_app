@@ -9,6 +9,7 @@ import 'package:ddr001diag/domain/models/app_models.dart';
 import 'package:ddr001diag/features/checklist/data/checklist_models.dart';
 import 'package:ddr001diag/features/auth/data/field_session_repository.dart';
 import 'package:ddr001diag/features/hydrants/data/hydrant_repository.dart';
+import 'package:ddr001diag/features/hydrants/new_survey_page.dart';
 import 'package:ddr001diag/features/checklist/data/checklist_repository.dart';
 import 'package:ddr001diag/features/inspections/data/inspection_remote_repository.dart';
 import 'package:ddr001diag/features/inspections/data/inspection_sync_coordinator.dart';
@@ -96,6 +97,24 @@ void main() {
   tearDown(() async {
     state.dispose();
     await environment.close();
+  });
+
+  testWidgets('Nueva revisión siempre muestra INGRESAR MANUALMENTE', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: NewSurveyPage()),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('INGRESAR MANUALMENTE'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('register-manual-hydrant')),
+      findsOneWidget,
+    );
   });
 
   test(

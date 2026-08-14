@@ -96,7 +96,7 @@ void main() {
     },
   );
 
-  test('uploadedUnverified no puede quedar verified en la cola', () async {
+  test('confirmación verified domina colas locales legacy', () async {
     final original = File('${files.path}/original.jpg')..writeAsBytesSync([1]);
     final thumbnail = File('${files.path}/thumb.jpg')..writeAsBytesSync([1]);
     final value = photo(
@@ -117,11 +117,58 @@ void main() {
       result.single.issues,
       contains(MediaReconciliationIssue.inconsistentStatus),
     );
-    expect(
-      Hive.box<String>('media_sync_queue').get(value.id),
-      'uploadedUnverified',
+    expect(Hive.box<String>('media_sync_queue').get(value.id), 'verified');
+    final repairedPhoto = InspectionPhoto.fromJson(
+      Map<String, dynamic>.from(
+        jsonDecode(Hive.box<String>('inspection_photos_v1').get(value.id)!)
+            as Map,
+      ),
     );
+    expect(repairedPhoto.syncStatus, MediaSyncStatus.verified);
+    final work = Map<String, dynamic>.from(
+      jsonDecode(Hive.box<String>('media_work_queue_v1').get(value.id)!) as Map,
+    );
+    expect(work['status'], 'verified');
     expect(original.existsSync(), isTrue);
+  });
+
+  test('343 trabajos legacy no resucitan 226 confirmaciones remotas', () async {
+    for (var index = 0; index < 343; index++) {
+      final original = File('${files.path}/$index.jpg')..writeAsBytesSync([1]);
+      final thumbnail = File('${files.path}/$index-thumb.jpg')
+        ..writeAsBytesSync([1]);
+      final value = photo(
+        id: 'photo-$index',
+        original: original.path,
+        thumbnail: thumbnail.path,
+      );
+      await Hive.box<String>(
+        'inspection_photos_v1',
+      ).put(value.id, jsonEncode(value.toJson()));
+      await Hive.box<String>(
+        'media_work_queue_v1',
+      ).put(value.id, 'pendingUpload');
+      if (index < 226) {
+        await Hive.box<String>('media_sync_queue').put(value.id, 'verified');
+      }
+    }
+
+    final service = MediaReconciliationService();
+    await service.reconcile();
+    await service.reconcile(); // restart/idempotency
+
+    var verifiedWork = 0;
+    var pendingWork = 0;
+    for (final raw in Hive.box<String>('media_work_queue_v1').values) {
+      final status = raw.startsWith('{')
+          ? (jsonDecode(raw) as Map)['status']
+          : raw;
+      if (status == 'verified') verifiedWork++;
+      if (status == 'pendingUpload') pendingWork++;
+    }
+    expect(verifiedWork, 226);
+    expect(pendingWork, 117);
+    expect(Hive.box<String>('inspection_photos_v1').length, 343);
   });
 
   test(

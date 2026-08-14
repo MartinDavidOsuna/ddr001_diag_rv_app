@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
@@ -16,19 +17,65 @@ import 'inspection_remote_repository.dart';
 import 'rv_answer_payload_builder.dart';
 import 'rv_draft_repository.dart';
 
+@visibleForTesting
+int matchingRemotePhotoIndex({
+  required List<RvPhotoReference> references,
+  required RemotePhoto remotePhoto,
+  required InspectionPhoto? Function(String id) localPhoto,
+}) {
+  final direct = references.indexWhere(
+    (reference) =>
+        reference.serverPhotoId == remotePhoto.id ||
+        reference.photoId == remotePhoto.id,
+  );
+  if (direct >= 0) return direct;
+
+  final hashMatches = <int>[];
+  for (var index = 0; index < references.length; index++) {
+    final local = localPhoto(references[index].photoId);
+    if (local == null) continue;
+    final localHashes = {
+      local.sha256.toLowerCase(),
+      if (local.remoteSha256 != null) local.remoteSha256!.toLowerCase(),
+    };
+    final remoteHashes = {
+      if (remotePhoto.clientSha256 != null)
+        remotePhoto.clientSha256!.toLowerCase(),
+      if (remotePhoto.sha256 != null) remotePhoto.sha256!.toLowerCase(),
+    };
+    if (localHashes.intersection(remoteHashes).isNotEmpty) {
+      hashMatches.add(index);
+    }
+  }
+  return hashMatches.length == 1 ? hashMatches.single : -1;
+}
+
 class InspectionSyncCoordinator {
   InspectionSyncCoordinator({
     required this.drafts,
     required this.remote,
     required this.photoBox,
     required this.mediaQueue,
+    this.mediaWorkQueue,
+    this.diagnosticsBox,
+    this.appVersion,
+    this.appBuild,
+    this.gitSha,
+    this.buildDateUtc,
     this.catalogs,
+    this.onHydrantResolved,
     this.validator = const RvValidator(),
   });
   final RvDraftRepository drafts;
   final InspectionRemoteRepository remote;
   final Box<String> photoBox, mediaQueue;
+  final Box<String>? mediaWorkQueue;
+  final Box<String>? diagnosticsBox;
+  final String? appVersion, appBuild;
+  final String? gitSha, buildDateUtc;
   final DynamicCatalogRepository? catalogs;
+  final Future<void> Function(String localId, String serverId)?
+  onHydrantResolved;
   final RvValidator validator;
   RvAnswerPayloadBuilder get _payloadBuilder =>
       RvAnswerPayloadBuilder(validator: validator);
@@ -67,7 +114,12 @@ class InspectionSyncCoordinator {
       }
       draft = await _synchronizeCatalogs(draft);
       if (draft.serverInspectionId != null) {
-        draft = await _reconcileRemoteInspection(draft);
+        final remoteInspection = await remote.get(draft.serverInspectionId!);
+        draft = await _reconcilePhotos(draft);
+        draft = await _reconcileRemoteInspection(
+          draft,
+          remoteInspection: remoteInspection,
+        );
         if (draft.isReadOnly) return draft;
       }
       draft = await _create(draft);
@@ -95,6 +147,13 @@ class InspectionSyncCoordinator {
         );
       }
       if (submit) draft = await _submit(draft);
+      if (draft.serverInspectionId != null && submit) {
+        final confirmed = await remote.get(draft.serverInspectionId!);
+        draft = await _reconcileRemoteInspection(
+          draft,
+          remoteInspection: confirmed,
+        );
+      }
       if (draft.localStatus == RvLocalStatus.syncError) {
         final validation = validator.validate(draft);
         draft = await _save(
@@ -130,8 +189,11 @@ class InspectionSyncCoordinator {
     }
   }
 
-  Future<RvDraft> _reconcileRemoteInspection(RvDraft draft) async {
-    final remoteInspection = await remote.get(draft.serverInspectionId!);
+  Future<RvDraft> _reconcileRemoteInspection(
+    RvDraft draft, {
+    RemoteInspection? remoteInspection,
+  }) async {
+    remoteInspection ??= await remote.get(draft.serverInspectionId!);
     if (const {'submitted', 'validated'}.contains(remoteInspection.status)) {
       return _save(
         draft.copyWith(
@@ -151,10 +213,11 @@ class InspectionSyncCoordinator {
     if (remoteInspection.status == 'conflict') {
       return _save(
         draft.copyWith(
-          localStatus: RvLocalStatus.conflict,
-          remoteStatus: 'conflict',
+          localStatus: RvLocalStatus.submitted,
+          remoteStatus: 'submitted',
           officialInspectionId: remoteInspection.officialInspectionId,
           conflictId: remoteInspection.conflictId,
+          submitStatus: RvPartStatus.synced,
           currentStep: RvSyncStep.verify,
           clearError: true,
           clearNextRetryAt: true,
@@ -303,10 +366,15 @@ class InspectionSyncCoordinator {
     // Repeating the same clientInspectionId is the only creation reconciliation
     // exposed by the API and returns the existing row without duplication.
     final created = await remote.create(draft);
+    final serverHydrantId = created.hydrantId;
+    if (serverHydrantId != null && serverHydrantId.isNotEmpty) {
+      await onHydrantResolved?.call(draft.hydrantId, serverHydrantId);
+    }
     _debug(draft, 'creación', 'confirmada');
     return _save(
       draft.copyWith(
         serverInspectionId: created.id,
+        serverHydrantId: serverHydrantId,
         remoteStatus: created.status,
         localStatus: RvLocalStatus.created,
         currentStep: RvSyncStep.answers,
@@ -452,7 +520,11 @@ class InspectionSyncCoordinator {
             order: ref.order,
             description: ref.description,
           );
-          await _markPhotoVerified(photo, uploaded.sha256);
+          await _markPhotoVerified(
+            photo,
+            uploaded.sha256,
+            serverPhotoId: uploaded.id,
+          );
           _debug(draft, 'fotografía', 'verificada slot=$slot');
         } on ApiException catch (error) {
           slotRefs[index] = RvPhotoReference(
@@ -490,8 +562,10 @@ class InspectionSyncCoordinator {
     final refs = <String, List<RvPhotoReference>>{...draft.photos};
     for (final remotePhoto in server) {
       final slotRefs = [...draft.photosFor(remotePhoto.slotCode)];
-      final index = slotRefs.indexWhere(
-        (photo) => photo.photoId == remotePhoto.id,
+      final index = matchingRemotePhotoIndex(
+        references: slotRefs,
+        remotePhoto: remotePhoto,
+        localPhoto: _photo,
       );
       if (index >= 0 && remotePhoto.status == 'verified') {
         final local = slotRefs[index];
@@ -506,7 +580,13 @@ class InspectionSyncCoordinator {
         );
         refs[remotePhoto.slotCode] = slotRefs;
         final photo = _photo(local.photoId);
-        if (photo != null) await _markPhotoVerified(photo, remotePhoto.sha256);
+        if (photo != null) {
+          await _markPhotoVerified(
+            photo,
+            remotePhoto.sha256,
+            serverPhotoId: remotePhoto.id,
+          );
+        }
       }
     }
     final complete = requiredRvPhotoSlots.every(
@@ -540,11 +620,15 @@ class InspectionSyncCoordinator {
     );
     final result = await remote.submit(draft.serverInspectionId!);
     if (result.result == 'conflict') {
-      _debug(draft, 'submit', 'conflicto persistido por servidor');
+      _debug(
+        draft,
+        'submit',
+        'enviado; conciliación administrativa persistida',
+      );
       return _save(
         draft.copyWith(
-          localStatus: RvLocalStatus.conflict,
-          remoteStatus: 'conflict',
+          localStatus: RvLocalStatus.submitted,
+          remoteStatus: 'submitted',
           submitStatus: RvPartStatus.synced,
           officialInspectionId: result.officialInspectionId,
           conflictId: result.conflictId,
@@ -586,15 +670,11 @@ class InspectionSyncCoordinator {
     RvDraft draft,
     ApiException error, {
     StackTrace? stackTrace,
-  }) {
+  }) async {
     final retry = draft.retryCount + 1;
     final failedAt = DateTime.now().toUtc();
     final retryable = _retryable(error);
-    final delay = switch (retry) {
-      1 => const Duration(seconds: 5),
-      2 => const Duration(seconds: 15),
-      _ => const Duration(seconds: 45),
-    };
+    final delay = error.retryAfter ?? _backoff(retry);
     _debug(
       draft,
       'error',
@@ -603,11 +683,16 @@ class InspectionSyncCoordinator {
     );
     failureDiagnostics[draft.clientInspectionId] = {
       'accountNumber': draft.accountNumber,
+      'hydrantId': draft.hydrantId,
       'clientInspectionId': draft.clientInspectionId,
       'serverInspectionId': draft.serverInspectionId,
       'step': draft.currentStep.name,
       'kind': error.kind.name,
       'statusCode': error.statusCode,
+      'httpMethod': error.httpMethod,
+      'logicalEndpoint': error.logicalEndpoint,
+      'retryAfterSeconds': error.retryAfter?.inSeconds,
+      'dioExceptionType': error.dioExceptionType,
       'requestId': error.requestId,
       'domainCode': error.domainCode,
       'field': error.field,
@@ -615,7 +700,18 @@ class InspectionSyncCoordinator {
       'message': error.originalMessage ?? error.message,
       'stackTrace': stackTrace?.toString(),
       'timestampUtc': failedAt.toIso8601String(),
+      'localStatusBefore': draft.localStatus.name,
+      'retryCount': retry,
+      'appVersion': appVersion,
+      'appBuild': appBuild,
+      'gitSha': gitSha,
+      'buildDateUtc': buildDateUtc,
     };
+    final diagnostic = failureDiagnostics[draft.clientInspectionId]!;
+    await diagnosticsBox?.put(
+      '${failedAt.microsecondsSinceEpoch}-${draft.clientInspectionId}',
+      jsonEncode(diagnostic),
+    );
     return _save(
       draft.copyWith(
         localStatus: error.kind == ApiErrorKind.sessionRevoked
@@ -634,6 +730,7 @@ class InspectionSyncCoordinator {
     ApiErrorKind.offline,
     ApiErrorKind.timeout,
     ApiErrorKind.serverUnavailable,
+    ApiErrorKind.rateLimited,
     ApiErrorKind.serverError,
   }.contains(error.kind);
 
@@ -644,10 +741,20 @@ class InspectionSyncCoordinator {
     ApiErrorKind.serverError =>
       'El servidor respondió con un error. La revisión quedó guardada '
           'en el dispositivo y se reintentará en segundo plano.',
+    ApiErrorKind.rateLimited =>
+      'El servidor pidió pausar temporalmente la sincronización. Tus datos '
+          'permanecen guardados. Código: RV-NET-429.',
     _ =>
       'No fue posible establecer comunicación con el servidor. La revisión '
           'quedó guardada en el dispositivo y se reintentará en segundo plano.',
   };
+
+  Duration _backoff(int attempt) {
+    final exponent = (attempt - 1).clamp(0, 10);
+    final baseSeconds = min(3600, 5 * (1 << exponent));
+    final jitter = Random().nextInt(max(1, baseSeconds ~/ 4));
+    return Duration(seconds: baseSeconds + jitter);
+  }
 
   bool _generalPhotosReady(RvDraft draft) => draft.generalPhotos.every(
     (photo) =>
@@ -669,20 +776,32 @@ class InspectionSyncCoordinator {
 
   Future<void> _markPhotoVerified(
     InspectionPhoto photo,
-    String? remoteHash,
-  ) async {
+    String? remoteHash, {
+    String? serverPhotoId,
+  }) async {
     final now = DateTime.now().toUtc();
     final updated = InspectionPhoto.fromJson({
       ...photo.toJson(),
       'syncStatus': MediaSyncStatus.verified.name,
       'verifiedAt': now.toIso8601String(),
       'uploadedAt': now.toIso8601String(),
-      'remoteObjectKey': photo.id,
+      'remoteObjectKey': serverPhotoId ?? photo.remoteObjectKey ?? photo.id,
       'remoteSha256': remoteHash,
       'updatedAt': now.toIso8601String(),
     });
     await photoBox.put(photo.id, jsonEncode(updated.toJson()));
     await mediaQueue.put(photo.id, MediaSyncStatus.verified.name);
+    await (mediaWorkQueue ?? Hive.box<String>('media_work_queue_v1')).put(
+      photo.id,
+      jsonEncode({
+        'photoId': photo.id,
+        'status': MediaSyncStatus.verified.name,
+        'serverPhotoId': serverPhotoId ?? photo.remoteObjectKey ?? photo.id,
+        'remoteSha256': remoteHash,
+        'reconciledAt': now.toIso8601String(),
+        'source': 'remote-confirmation',
+      }),
+    );
   }
 
   Future<RvDraft> _save(RvDraft value) async {

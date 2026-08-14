@@ -50,6 +50,9 @@ class MediaReconciliationService {
         final issues = <MediaReconciliationIssue>[];
         final actions = <String>[];
         final exists = File(photo.localPath).existsSync();
+        final remotelyVerified =
+            photo.syncStatus == MediaSyncStatus.verified ||
+            sync.get(photo.id) == MediaSyncStatus.verified.name;
         if (!exists) {
           issues.add(MediaReconciliationIssue.missingOriginal);
           actions.add(
@@ -74,7 +77,33 @@ class MediaReconciliationService {
             );
           }
         }
-        if (!work.containsKey(photo.id)) {
+        if (remotelyVerified) {
+          final now = DateTime.now().toUtc();
+          if (photo.syncStatus != MediaSyncStatus.verified) {
+            issues.add(MediaReconciliationIssue.inconsistentStatus);
+            final repaired = InspectionPhoto.fromJson({
+              ...photo.toJson(),
+              'syncStatus': MediaSyncStatus.verified.name,
+              'verifiedAt':
+                  photo.verifiedAt?.toIso8601String() ?? now.toIso8601String(),
+              'updatedAt': now.toIso8601String(),
+              'lastError': null,
+            });
+            await photos.put(photo.id, jsonEncode(repaired.toJson()));
+            actions.add('Documento local reconciliado a verified.');
+          }
+          await sync.put(photo.id, MediaSyncStatus.verified.name);
+          await work.put(
+            photo.id,
+            jsonEncode({
+              'photoId': photo.id,
+              'status': MediaSyncStatus.verified.name,
+              'reconciledAt': now.toIso8601String(),
+              'source': 'remote-confirmation',
+            }),
+          );
+          actions.add('Cola legacy reconciliada a verified.');
+        } else if (!work.containsKey(photo.id)) {
           issues.add(MediaReconciliationIssue.missingQueue);
           await work.put(
             photo.id,
@@ -85,12 +114,6 @@ class MediaReconciliationService {
             }),
           );
           actions.add('Trabajo de medios recreado.');
-        }
-        if (photo.syncStatus == MediaSyncStatus.uploadedUnverified &&
-            sync.get(photo.id) == MediaSyncStatus.verified.name) {
-          issues.add(MediaReconciliationIssue.inconsistentStatus);
-          await sync.put(photo.id, MediaSyncStatus.uploadedUnverified.name);
-          actions.add('Estado restaurado a uploadedUnverified.');
         }
         if (photo.syncStatus == MediaSyncStatus.verified && !exists) {
           issues.add(MediaReconciliationIssue.verifiedWithoutLocalFile);

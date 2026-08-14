@@ -48,6 +48,9 @@ Future<AppState> bootstrap({
   final syncBox = await Hive.openBox<String>('sync_queue');
   final mediaBox = await Hive.openBox<String>('media_sync_queue');
   final syncedTraceBox = await Hive.openBox<String>('synced_trace_ids');
+  final syncDiagnosticsBox = await Hive.openBox<String>(
+    'rv_sync_diagnostics_v1',
+  );
   final inspectionBox = await Hive.openBox<String>('visual_inspections_v1');
   final inspectionIndexBox = await Hive.openBox<String>(
     'active_inspection_index_v1',
@@ -125,12 +128,27 @@ Future<AppState> bootstrap({
     index: inspectionIndexBox,
   );
   final rvDraftRepository = RvDraftRepository(visualRepository);
+  await rvDraftRepository.reconcileVerifiedPhotoReferences(mediaBox);
+  final hydrantRepository = HydrantRepository(
+    client: apiClient,
+    box: hydrantBox,
+  );
   final inspectionSyncCoordinator = InspectionSyncCoordinator(
     drafts: rvDraftRepository,
     remote: InspectionRemoteRepository(apiClient),
     photoBox: Hive.box<String>('inspection_photos_v1'),
     mediaQueue: mediaBox,
+    mediaWorkQueue: Hive.box<String>('media_work_queue_v1'),
+    diagnosticsBox: syncDiagnosticsBox,
+    appVersion: packageInfo.version,
+    appBuild: packageInfo.buildNumber,
+    gitSha: const String.fromEnvironment('GIT_SHA', defaultValue: 'unknown'),
+    buildDateUtc: const String.fromEnvironment(
+      'BUILD_DATE_UTC',
+      defaultValue: 'unknown',
+    ),
     catalogs: dynamicCatalogRepository,
+    onHydrantResolved: hydrantRepository.linkServerHydrantId,
   );
   final state = AppState(
     preferences: preferences,
@@ -148,7 +166,7 @@ Future<AppState> bootstrap({
       index: functionalInspectionIndexBox,
     ),
     sessionRepository: sessionRepository,
-    hydrantRepository: HydrantRepository(client: apiClient, box: hydrantBox),
+    hydrantRepository: hydrantRepository,
     checklistRepository: ChecklistRepository(
       client: apiClient,
       box: checklistBox,

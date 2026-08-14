@@ -9,6 +9,7 @@ enum ApiErrorKind {
   sessionAlreadyActive,
   invalidData,
   serverUnavailable,
+  rateLimited,
   serverError,
   validation,
   unknown,
@@ -28,6 +29,10 @@ class ApiException implements Exception {
     this.takeoverToken,
     this.originalRuntimeType,
     this.originalMessage,
+    this.retryAfter,
+    this.httpMethod,
+    this.logicalEndpoint,
+    this.dioExceptionType,
   });
   final ApiErrorKind kind;
   final String message;
@@ -35,6 +40,8 @@ class ApiException implements Exception {
   final String? requestId, problemType, problemTitle, domainCode, field;
   final String? takeoverToken;
   final String? originalRuntimeType, originalMessage;
+  final Duration? retryAfter;
+  final String? httpMethod, logicalEndpoint, dioExceptionType;
   final List<Map<String, dynamic>> errors;
 
   factory ApiException.fromDio(DioException error) {
@@ -148,6 +155,31 @@ class ApiException implements Exception {
         domainCode: domainCode,
       );
     }
+    if (status == 404) {
+      const messages = <String, String>{
+        'HYDRANT_NOT_FOUND':
+            'El hidrante no está disponible en el catálogo del servidor.',
+        'INSPECTION_NOT_FOUND':
+            'La revisión remota no está disponible para continuar.',
+        'PHOTO_NOT_FOUND':
+            'La fotografía remota ya no está disponible y debe reconciliarse.',
+      };
+      return ApiException(
+        ApiErrorKind.invalidData,
+        messages[domainCode] ??
+            'El recurso solicitado no está disponible en el servidor.',
+        statusCode: status,
+        requestId: requestId,
+        problemType: problem['type']?.toString(),
+        problemTitle: problem['title']?.toString(),
+        domainCode: domainCode,
+        httpMethod: error.requestOptions.method,
+        logicalEndpoint: error.requestOptions.path,
+        dioExceptionType: error.type.name,
+        originalRuntimeType: error.runtimeType.toString(),
+        originalMessage: problem['detail']?.toString() ?? error.message,
+      );
+    }
     if (status == 422 || status == 400) {
       final validationMessage = _validationMessage(problem, problemErrors);
       return ApiException(
@@ -172,11 +204,18 @@ class ApiException implements Exception {
       );
     }
     if (status == 429) {
+      final retryAfter = _retryAfter(
+        error.response?.headers.value('retry-after'),
+      );
       return ApiException(
-        ApiErrorKind.serverUnavailable,
+        ApiErrorKind.rateLimited,
         'Demasiadas solicitudes.',
         statusCode: status,
         requestId: requestId,
+        retryAfter: retryAfter,
+        httpMethod: error.requestOptions.method,
+        logicalEndpoint: error.requestOptions.path,
+        dioExceptionType: error.type.name,
       );
     }
     if (status != null && status >= 500) {
@@ -189,15 +228,31 @@ class ApiException implements Exception {
     }
     return ApiException(
       ApiErrorKind.unknown,
-      'Error desconocido.',
+      'No fue posible completar la sincronización. Tus datos permanecen '
+      'guardados. Código: RV-HTTP-${status ?? 'DIO'}.',
       statusCode: status,
       requestId: requestId,
       domainCode: domainCode,
+      httpMethod: error.requestOptions.method,
+      logicalEndpoint: error.requestOptions.path,
+      dioExceptionType: error.type.name,
+      originalRuntimeType: error.runtimeType.toString(),
+      originalMessage: error.message,
     );
   }
 
   @override
   String toString() => message;
+}
+
+Duration? _retryAfter(String? value) {
+  if (value == null) return null;
+  final seconds = int.tryParse(value.trim());
+  if (seconds != null) return Duration(seconds: seconds.clamp(1, 86400));
+  final date = DateTime.tryParse(value)?.toUtc();
+  if (date == null) return null;
+  final delay = date.difference(DateTime.now().toUtc());
+  return delay.isNegative ? Duration.zero : delay;
 }
 
 String _validationMessage(

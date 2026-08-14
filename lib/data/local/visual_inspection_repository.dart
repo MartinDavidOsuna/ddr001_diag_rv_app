@@ -95,24 +95,10 @@ class VisualInspectionRepository {
     if (existingId != null) {
       final raw = documents.get(existingId);
       if (raw != null) {
-        return VisualInspection.fromJson(
+        final existing = VisualInspection.fromJson(
           VersionedJsonCodec.decode(raw).payload,
         );
-      }
-    }
-    if (hydrant.f02a.status == InspectionStatus.completed) {
-      for (final raw in documents.values) {
-        try {
-          final candidate = VisualInspection.fromJson(
-            VersionedJsonCodec.decode(raw).payload,
-          );
-          if (candidate.hydrantId == hydrant.id &&
-              candidate.status == InspectionStatus.completed) {
-            return candidate;
-          }
-        } on FormatException {
-          continue;
-        }
+        if (existing.status != InspectionStatus.completed) return existing;
       }
     }
     final now = DateTime.now().toUtc();

@@ -302,6 +302,7 @@ class RvDraft {
     required this.createdAt,
     required this.updatedAt,
     this.serverInspectionId,
+    this.serverHydrantId,
     this.officialInspectionId,
     this.conflictId,
     this.visualReportId,
@@ -345,6 +346,7 @@ class RvDraft {
       fieldSessionId,
       checklistId;
   final String? serverInspectionId,
+      serverHydrantId,
       officialInspectionId,
       conflictId,
       visualReportId,
@@ -416,6 +418,7 @@ class RvDraft {
 
   RvDraft copyWith({
     String? serverInspectionId,
+    String? serverHydrantId,
     String? officialInspectionId,
     String? conflictId,
     String? visualReportId,
@@ -461,6 +464,7 @@ class RvDraft {
   }) => RvDraft(
     clientInspectionId: clientInspectionId,
     serverInspectionId: serverInspectionId ?? this.serverInspectionId,
+    serverHydrantId: serverHydrantId ?? this.serverHydrantId,
     officialInspectionId: officialInspectionId ?? this.officialInspectionId,
     conflictId: conflictId ?? this.conflictId,
     visualReportId: visualReportId ?? this.visualReportId,
@@ -522,6 +526,7 @@ class RvDraft {
   Map<String, dynamic> toJson() => {
     'clientInspectionId': clientInspectionId,
     'serverInspectionId': serverInspectionId,
+    'serverHydrantId': serverHydrantId,
     'officialInspectionId': officialInspectionId,
     'conflictId': conflictId,
     'visualReportId': visualReportId,
@@ -574,6 +579,7 @@ class RvDraft {
   factory RvDraft.fromJson(Map<String, dynamic> json) => RvDraft(
     clientInspectionId: json['clientInspectionId'] as String,
     serverInspectionId: json['serverInspectionId'] as String?,
+    serverHydrantId: json['serverHydrantId'] as String?,
     officialInspectionId: json['officialInspectionId'] as String?,
     conflictId: json['conflictId'] as String?,
     visualReportId: json['visualReportId'] as String?,

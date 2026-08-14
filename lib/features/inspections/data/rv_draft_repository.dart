@@ -13,6 +13,7 @@ import '../domain/rv_draft.dart';
 import '../domain/rv_sync_state.dart';
 import '../../../domain/integrity/operation_journal.dart';
 import '../../../domain/media/inspection_photo.dart';
+import '../../../domain/media/media_sync_status.dart';
 import '../../../domain/sync/sync_queue_item.dart';
 
 class RvDraftRepository {
@@ -235,6 +236,54 @@ class RvDraftRepository {
         ),
       );
     }
+  }
+
+  /// Repairs legacy duplicate state using only a persisted remote confirmation.
+  /// It never infers verification from file presence or queue membership.
+  Future<int> reconcileVerifiedPhotoReferences(Box<String> mediaSyncBox) async {
+    var repaired = 0;
+    for (final draft in all()) {
+      var changed = false;
+      final photos = <String, List<RvPhotoReference>>{};
+      for (final entry in draft.photos.entries) {
+        photos[entry.key] = [
+          for (final reference in entry.value)
+            if (mediaSyncBox.get(reference.photoId) ==
+                    MediaSyncStatus.verified.name &&
+                reference.status != RvPhotoUploadStatus.verified)
+              () {
+                changed = true;
+                repaired++;
+                return RvPhotoReference(
+                  photoId: reference.photoId,
+                  serverPhotoId: reference.serverPhotoId,
+                  slotCode: reference.slotCode,
+                  status: RvPhotoUploadStatus.verified,
+                  retryCount: reference.retryCount,
+                  order: reference.order,
+                  description: reference.description,
+                );
+              }()
+            else
+              reference,
+        ];
+      }
+      if (changed) {
+        final complete = requiredRvPhotoSlots.every(
+          (slot) => (photos[slot] ?? const []).any(
+            (photo) => photo.status == RvPhotoUploadStatus.verified,
+          ),
+        );
+        await save(
+          draft.copyWith(
+            photos: photos,
+            photosStatus: complete ? RvPartStatus.synced : RvPartStatus.pending,
+            updatedAt: DateTime.now().toUtc(),
+          ),
+        );
+      }
+    }
+    return repaired;
   }
 
   Future<int> reconcileOrphanedInspectionQueue({

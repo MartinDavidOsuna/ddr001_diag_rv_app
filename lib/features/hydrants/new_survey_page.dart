@@ -110,18 +110,17 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
                 ],
               ),
             ),
-          if (matches.isEmpty || normalized.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 12, bottom: 8),
-              child: FilledButton.icon(
-                key: const ValueKey('register-manual-hydrant'),
-                onPressed: startingId == null
-                    ? () => _registerManual(state)
-                    : null,
-                icon: const Icon(Icons.add_location_alt_outlined),
-                label: const Text('Registrar hidrante no encontrado'),
-              ),
+          Padding(
+            padding: const EdgeInsets.only(top: 12, bottom: 8),
+            child: FilledButton.icon(
+              key: const ValueKey('register-manual-hydrant'),
+              onPressed: startingId == null
+                  ? () => _registerManual(state)
+                  : null,
+              icon: const Icon(Icons.add_location_alt_outlined),
+              label: const Text('INGRESAR MANUALMENTE'),
             ),
+          ),
           for (final hydrant in matches)
             Card(
               child: ListTile(
@@ -138,11 +137,7 @@ class _NewSurveyPageState extends State<NewSurveyPage> {
                       )
                     : const Icon(Icons.chevron_right),
                 onTap: startingId == null
-                    ? () => hydrant.availableForRv
-                          ? _confirmAndStart(state, hydrant)
-                          : context.push(
-                              '/visual-report/${Uri.encodeComponent(hydrant.code)}',
-                            )
+                    ? () => _confirmAndStart(state, hydrant)
                     : null,
               ),
             ),

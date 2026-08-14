@@ -49,6 +49,7 @@ enum GlobalSyncStage {
   projections,
   completed,
   completedWithWarnings,
+  paused,
 }
 
 class ProfileTodayStats {
@@ -126,6 +127,7 @@ class AppState extends ChangeNotifier {
   GlobalSyncStage syncStage = GlobalSyncStage.idle;
   int syncTotal = 0, syncCompleted = 0, syncWarnings = 0, syncConflicts = 0;
   String? syncingReport;
+  String? syncPauseMessage;
   Future<void>? _activeSync;
   UpdateInfo? updateInfo;
   AssignmentSyncScenario assignmentScenario = AssignmentSyncScenario.noChanges;
@@ -1010,6 +1012,7 @@ class AppState extends ChangeNotifier {
     syncCompleted = 0;
     syncWarnings = 0;
     syncConflicts = 0;
+    syncPauseMessage = null;
     notifyListeners();
     await trace('sync_execute', 'Ejecución de sincronización iniciada');
     try {
@@ -1037,6 +1040,8 @@ class AppState extends ChangeNotifier {
         syncCompleted++;
       }
       syncStage = GlobalSyncStage.reports;
+      var consecutiveSystemicFailures = 0;
+      var paused = false;
       for (var index = 0; index < drafts.length; index++) {
         syncingReport = drafts[index].accountNumber;
         final result = await inspectionSyncCoordinator.synchronize(
@@ -1053,16 +1058,48 @@ class AppState extends ChangeNotifier {
         } else if (result.lastSyncError != null) {
           syncWarnings++;
         }
+        final failure = inspectionSyncCoordinator
+            .failureDiagnostics[result.clientInspectionId];
+        final kind = failure?['kind']?.toString();
+        final systemic = const {
+          'offline',
+          'timeout',
+          'serverUnavailable',
+          'serverError',
+          'rateLimited',
+        }.contains(kind);
+        consecutiveSystemicFailures = systemic
+            ? consecutiveSystemicFailures + 1
+            : 0;
         syncCompleted++;
         syncProgress = syncTotal == 0 ? 1 : syncCompleted / syncTotal;
         notifyListeners();
+        if (kind == 'rateLimited' || consecutiveSystemicFailures >= 2) {
+          paused = true;
+          syncPauseMessage = switch (kind) {
+            'rateLimited' =>
+              'Sincronización pausada por límite temporal del servidor. Tus datos están guardados.',
+            'offline' =>
+              'Sincronización pausada: sin conexión estable. Tus datos están guardados.',
+            'timeout' =>
+              'Sincronización pausada: la conexión agotó el tiempo de espera. Tus datos están guardados.',
+            'serverUnavailable' || 'serverError' =>
+              'Sincronización pausada: servidor temporalmente no disponible. Tus datos están guardados.',
+            _ =>
+              'Sincronización pausada temporalmente. Tus datos están guardados.',
+          };
+          syncStage = GlobalSyncStage.paused;
+          break;
+        }
       }
-      syncStage = GlobalSyncStage.projections;
-      await synchronizeAssignments();
-      syncStage = syncWarnings > 0 || syncConflicts > 0
-          ? GlobalSyncStage.completedWithWarnings
-          : GlobalSyncStage.completed;
-      syncProgress = 1;
+      if (!paused) {
+        syncStage = GlobalSyncStage.projections;
+        await synchronizeAssignments();
+        syncStage = pendingCount > 0 || syncWarnings > 0 || syncConflicts > 0
+            ? GlobalSyncStage.completedWithWarnings
+            : GlobalSyncStage.completed;
+        syncProgress = 1;
+      }
     } finally {
       syncing = false;
       syncingReport = null;
@@ -1071,6 +1108,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> retryMedia(String id) async {
+    if (mediaBox.get(id) == MediaSyncStatus.verified.name) return;
     await mediaBox.put(id, MediaSyncStatus.pendingUpload.name);
     notifyListeners();
     await synchronize();

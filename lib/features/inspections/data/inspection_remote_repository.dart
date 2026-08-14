@@ -14,6 +14,7 @@ class RemoteInspection {
   const RemoteInspection({
     required this.id,
     required this.status,
+    this.hydrantId,
     this.result,
     this.officialInspectionId,
     this.conflictId,
@@ -21,7 +22,7 @@ class RemoteInspection {
     this.lastStatusChangedAt,
   });
   final String id, status;
-  final String? result, officialInspectionId, conflictId, rvStatus;
+  final String? hydrantId, result, officialInspectionId, conflictId, rvStatus;
   final DateTime? lastStatusChangedAt;
 }
 
@@ -31,9 +32,10 @@ class RemotePhoto {
     required this.slotCode,
     required this.status,
     this.sha256,
+    this.clientSha256,
   });
   final String id, slotCode, status;
-  final String? sha256;
+  final String? sha256, clientSha256;
 }
 
 class InspectionRemoteRepository {
@@ -343,6 +345,8 @@ class InspectionRemoteRepository {
                           data['server_sha256'] ??
                           data['sha256'])
                       ?.toString(),
+              clientSha256: (data['client_sha256'] ?? data['clientSha256'])
+                  ?.toString(),
             );
           })
           .toList();
@@ -405,6 +409,7 @@ class InspectionRemoteRepository {
     return RemoteInspection(
       id: id,
       status: '${data['status'] ?? 'draft'}',
+      hydrantId: (data['hydrant_id'] ?? data['hydrantId'])?.toString(),
       result: data['result']?.toString(),
       officialInspectionId: data['officialInspectionId']?.toString(),
       conflictId: data['conflictId']?.toString(),

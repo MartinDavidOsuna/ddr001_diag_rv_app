@@ -367,14 +367,6 @@ class HydrantCard extends StatelessWidget {
                     color: color,
                   ),
                   StatusBadge(compactStatus, color: color),
-                  StatusBadge(
-                    hydrant.priority == PriorityLevel.high
-                        ? 'Prioridad alta'
-                        : hydrant.priority == PriorityLevel.medium
-                        ? 'Prioridad media'
-                        : 'Prioridad baja',
-                    color: AppColors.orange,
-                  ),
                   if (reviewRemoval)
                     const StatusBadge(
                       'Retirada · revisar',

@@ -98,6 +98,30 @@ void main() {
     );
   });
 
+  test(
+    'una revisión terminada conserva historial y permite una nueva',
+    () async {
+      inspections.setAccessScope(scope('user-a', 'crew-a'));
+      final first = await inspections.openOrCreate(hydrant, userA);
+      await inspections.save(
+        first.copyWith(
+          status: InspectionStatus.completed,
+          completedAt: DateTime.utc(2026, 8, 13),
+        ),
+      );
+
+      final second = await inspections.openOrCreate(hydrant, userA);
+
+      expect(second.id, isNot(first.id));
+      expect(
+        inspections.findById(first.id)?.status,
+        InspectionStatus.completed,
+      );
+      expect(inspections.forHydrant(hydrant.id), hasLength(2));
+      expect(inspections.hasLocalInspection(hydrant.id), isTrue);
+    },
+  );
+
   test('sólo el creador puede eliminar su borrador local', () async {
     inspections.setAccessScope(scope('user-a', 'crew-a'));
     final draft = await inspections.openOrCreate(hydrant, userA);

@@ -213,6 +213,17 @@ class _SyncPageState extends State<SyncPage> {
                 textAlign: TextAlign.center,
               ),
             ],
+            if (state.syncPauseMessage != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                state.syncPauseMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.orange,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: state.allSynchronized || !state.online || state.syncing
@@ -244,6 +255,7 @@ class _SyncPageState extends State<SyncPage> {
     GlobalSyncStage.projections => 'Actualizando hidrantes',
     GlobalSyncStage.completed => 'Completado',
     GlobalSyncStage.completedWithWarnings => 'Completado con advertencias',
+    GlobalSyncStage.paused => 'Pausado por red',
   };
 }
 
