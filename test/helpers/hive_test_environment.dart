@@ -17,6 +17,8 @@ const stage4BoxNames = <String>[
   'quarantine_v1',
   'sync_queue',
   'rv_sync_diagnostics_v1',
+  'rv_recovery_v1',
+  'rv_recovery_snapshots_v1',
   'trace_events',
   'synced_trace_ids',
   'functional_eligibility_v1',

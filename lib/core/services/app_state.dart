@@ -34,6 +34,7 @@ import '../../features/inspections/domain/rv_draft.dart';
 import '../../features/inspections/domain/rv_sync_state.dart';
 import '../../features/catalogs/dynamic_catalog_repository.dart';
 import '../../features/visual_reports/data/visual_report_repository.dart';
+import '../../features/diagnostics/rv_diagnostic_export_service.dart';
 import '../config/app_config.dart';
 import '../network/api_exception.dart';
 import '../network/connectivity_monitor.dart';
@@ -82,6 +83,7 @@ class AppState extends ChangeNotifier {
     required this.checklistRepository,
     required this.rvDraftRepository,
     required this.inspectionSyncCoordinator,
+    this.diagnosticExportService,
     this.visualReportRepository,
     this.dynamicCatalogRepository,
     this.connectivityMonitor,
@@ -97,6 +99,7 @@ class AppState extends ChangeNotifier {
   final ChecklistRepository checklistRepository;
   final RvDraftRepository rvDraftRepository;
   final InspectionSyncCoordinator inspectionSyncCoordinator;
+  final RvDiagnosticExportService? diagnosticExportService;
   final VisualReportRepository? visualReportRepository;
   final DynamicCatalogRepository? dynamicCatalogRepository;
   final ConnectivityMonitor? connectivityMonitor;
@@ -194,6 +197,19 @@ class AppState extends ChangeNotifier {
   int get verifiedPhotos => accessiblePhotoIds
       .where((id) => mediaBox.get(id) == MediaSyncStatus.verified.name)
       .length;
+
+  String? photoSyncError(String id) {
+    final raw = Hive.box<String>('inspection_photos_v1').get(id);
+    if (raw == null) return null;
+    try {
+      return InspectionPhoto.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+      ).lastError;
+    } on Object {
+      return 'El registro local de esta evidencia no se pudo interpretar.';
+    }
+  }
+
   int get pendingTrace {
     if (!authenticated) return 0;
     var count = 0;
@@ -227,6 +243,39 @@ class AppState extends ChangeNotifier {
   int get pendingCount => pendingDiagnostics + pendingPhotos;
   bool get allSynchronized =>
       pendingDiagnostics == 0 && pendingPhotos == 0 && syncErrors == 0;
+
+  Future<RvDiagnosticExportResult> exportSyncDiagnostic({
+    DiagnosticProgress? onProgress,
+  }) {
+    final exporter = diagnosticExportService;
+    if (exporter == null) {
+      throw StateError('El exportador de diagnóstico no está disponible.');
+    }
+    final groups = RvWorkDashboardProjection.byHydrant(
+      drafts: rvDraftRepository.all(),
+      hydrants: [...hydrants, ...catalogHydrants],
+    );
+    return exporter.export(
+      onProgress: onProgress,
+      hydrants: [...hydrants, ...catalogHydrants],
+      screenSummary: {
+        'home': {
+          'inProgress': groups[RvWorkGroup.inProgress]!.length,
+          'pendingSync': groups[RvWorkGroup.pendingSync]!.length,
+          'sent': groups[RvWorkGroup.submitted]!.length,
+          'validated': groups[RvWorkGroup.validated]!.length,
+          'returned': groups[RvWorkGroup.returned]!.length,
+          'conflicts': groups[RvWorkGroup.conflicts]!.length,
+        },
+        'syncPage': {
+          'pendingDiagnostics': pendingDiagnostics,
+          'pendingPhotos': pendingPhotos,
+          'verifiedPhotos': verifiedPhotos,
+          'errorCount': syncErrors,
+        },
+      },
+    );
+  }
 
   Future<void> deleteUnsyncedLocalDraft(String clientInspectionId) async {
     final draft = rvDraftRepository.find(clientInspectionId);

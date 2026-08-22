@@ -198,6 +198,7 @@ class _SyncPageState extends State<SyncPage> {
                       PhotoRow(
                         id: id,
                         status: mediaSyncStatusForUi(state.mediaBox.get(id)),
+                        error: state.photoSyncError(id),
                         onRetry: () => state.retryMedia(id),
                       ),
                   ],
@@ -321,10 +322,12 @@ class PhotoRow extends StatelessWidget {
   const PhotoRow({
     required this.id,
     required this.status,
+    this.error,
     required this.onRetry,
     super.key,
   });
   final String id, status;
+  final String? error;
   final VoidCallback onRetry;
   @override
   Widget build(BuildContext context) {
@@ -335,7 +338,13 @@ class PhotoRow extends StatelessWidget {
         status == MediaSyncStatus.remoteMissing.name;
     return ListTile(
       title: Text(id, style: const TextStyle(fontWeight: FontWeight.w700)),
-      subtitle: Text(failed ? '$status · Requiere atención' : status),
+      subtitle: Text(
+        failed
+            ? error?.trim().isNotEmpty == true
+                  ? '$status · $error'
+                  : '$status · Requiere atención'
+            : status,
+      ),
       trailing: failed
           ? TextButton(onPressed: onRetry, child: const Text('Reintentar'))
           : const StatusBadge('Pendiente', color: AppColors.orange),

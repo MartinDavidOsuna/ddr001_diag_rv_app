@@ -1,6 +1,7 @@
 import '../../checklist/data/checklist_models.dart';
 import 'rv_sync_state.dart';
 import 'parcel_valve_configuration.dart';
+import 'hydrant_account_identity.dart';
 
 const requiredRvPhotoSlots = <String>[
   'front_closed',
@@ -301,6 +302,18 @@ class RvDraft {
     required this.checklistSnapshot,
     required this.createdAt,
     required this.updatedAt,
+    String? originalAccountNumber,
+    String? effectiveAccountNumber,
+    this.serverAccountNumber,
+    this.accountTransformation = AccountTransformation.none,
+    this.accountTransformationVersion,
+    this.accountTransformedAt,
+    this.accountResolutionState = AccountResolutionState.original,
+    this.accountResolutionAttempts = const [],
+    this.supersededBy,
+    this.canonicalReason,
+    this.recoveryStatus,
+    this.legacyMissingFields = const [],
     this.serverInspectionId,
     this.serverHydrantId,
     this.officialInspectionId,
@@ -339,12 +352,21 @@ class RvDraft {
     this.lastAttemptAt,
     this.nextRetryAt,
     this.generalObservations,
-  });
+  }) : originalAccountNumber = originalAccountNumber ?? accountNumber,
+       effectiveAccountNumber = effectiveAccountNumber ?? accountNumber;
   final String clientInspectionId,
       hydrantId,
       accountNumber,
       fieldSessionId,
       checklistId;
+  final String originalAccountNumber, effectiveAccountNumber;
+  final String? serverAccountNumber;
+  final AccountTransformation accountTransformation;
+  final int? accountTransformationVersion;
+  final DateTime? accountTransformedAt;
+  final AccountResolutionState accountResolutionState;
+  final List<String> accountResolutionAttempts;
+  final List<String> legacyMissingFields;
   final String? serverInspectionId,
       serverHydrantId,
       officialInspectionId,
@@ -356,7 +378,10 @@ class RvDraft {
       serverValidationStatus,
       versionConflictId,
       proposedVersionId,
-      lastSyncError;
+      lastSyncError,
+      supersededBy,
+      canonicalReason,
+      recoveryStatus;
   final String? generalObservations;
   final int checklistVersion, retryCount, activeFormStep;
   final int? baseVersionNumber;
@@ -417,6 +442,18 @@ class RvDraft {
   );
 
   RvDraft copyWith({
+    String? originalAccountNumber,
+    String? effectiveAccountNumber,
+    String? serverAccountNumber,
+    AccountTransformation? accountTransformation,
+    int? accountTransformationVersion,
+    DateTime? accountTransformedAt,
+    AccountResolutionState? accountResolutionState,
+    List<String>? accountResolutionAttempts,
+    String? supersededBy,
+    String? canonicalReason,
+    String? recoveryStatus,
+    List<String>? legacyMissingFields,
     String? serverInspectionId,
     String? serverHydrantId,
     String? officialInspectionId,
@@ -481,7 +518,25 @@ class RvDraft {
     proposedVersionId: proposedVersionId ?? this.proposedVersionId,
     lastStatusChangedAt: lastStatusChangedAt ?? this.lastStatusChangedAt,
     hydrantId: hydrantId,
-    accountNumber: accountNumber,
+    accountNumber: effectiveAccountNumber ?? this.effectiveAccountNumber,
+    originalAccountNumber:
+        originalAccountNumber ?? this.originalAccountNumber,
+    effectiveAccountNumber:
+        effectiveAccountNumber ?? this.effectiveAccountNumber,
+    serverAccountNumber: serverAccountNumber ?? this.serverAccountNumber,
+    accountTransformation:
+        accountTransformation ?? this.accountTransformation,
+    accountTransformationVersion:
+        accountTransformationVersion ?? this.accountTransformationVersion,
+    accountTransformedAt: accountTransformedAt ?? this.accountTransformedAt,
+    accountResolutionState:
+        accountResolutionState ?? this.accountResolutionState,
+    accountResolutionAttempts:
+        accountResolutionAttempts ?? this.accountResolutionAttempts,
+    supersededBy: supersededBy ?? this.supersededBy,
+    canonicalReason: canonicalReason ?? this.canonicalReason,
+    recoveryStatus: recoveryStatus ?? this.recoveryStatus,
+    legacyMissingFields: legacyMissingFields ?? this.legacyMissingFields,
     fieldSessionId: fieldSessionId,
     checklistId: checklistId,
     checklistVersion: checklistVersion,
@@ -542,6 +597,20 @@ class RvDraft {
     'lastStatusChangedAt': lastStatusChangedAt?.toUtc().toIso8601String(),
     'hydrantId': hydrantId,
     'accountNumber': accountNumber,
+    'originalAccountNumber': originalAccountNumber,
+    'effectiveAccountNumber': effectiveAccountNumber,
+    'serverAccountNumber': serverAccountNumber,
+    'accountTransformation': accountTransformation == AccountTransformation.none
+        ? null
+        : 'hyphen_to_000',
+    'accountTransformationVersion': accountTransformationVersion,
+    'accountTransformedAt': accountTransformedAt?.toUtc().toIso8601String(),
+    'accountResolutionState': accountResolutionState.name,
+    'accountResolutionAttempts': accountResolutionAttempts,
+    'supersededBy': supersededBy,
+    'canonicalReason': canonicalReason,
+    'recoveryStatus': recoveryStatus,
+    'legacyMissingFields': legacyMissingFields,
     'fieldSessionId': fieldSessionId,
     'checklistId': checklistId,
     'checklistVersion': checklistVersion,
@@ -601,7 +670,37 @@ class RvDraft {
       json['lastStatusChangedAt'] as String? ?? '',
     )?.toUtc(),
     hydrantId: json['hydrantId'] as String,
-    accountNumber: json['accountNumber'] as String,
+    accountNumber:
+        (json['effectiveAccountNumber'] ?? json['accountNumber']) as String,
+    originalAccountNumber:
+        (json['originalAccountNumber'] ?? json['accountNumber']) as String,
+    effectiveAccountNumber:
+        (json['effectiveAccountNumber'] ?? json['accountNumber']) as String,
+    serverAccountNumber: json['serverAccountNumber'] as String?,
+    accountTransformation:
+        json['accountTransformation'] == 'hyphen_to_000'
+        ? AccountTransformation.hyphenTo000
+        : AccountTransformation.none,
+    accountTransformationVersion:
+        json['accountTransformationVersion'] as int?,
+    accountTransformedAt: DateTime.tryParse(
+      json['accountTransformedAt'] as String? ?? '',
+    )?.toUtc(),
+    accountResolutionState: _enum(
+      AccountResolutionState.values,
+      json['accountResolutionState'],
+      AccountResolutionState.original,
+    ),
+    accountResolutionAttempts:
+        (json['accountResolutionAttempts'] as List? ?? const [])
+            .map((value) => '$value')
+            .toList(growable: false),
+    supersededBy: json['supersededBy'] as String?,
+    canonicalReason: json['canonicalReason'] as String?,
+    recoveryStatus: json['recoveryStatus'] as String?,
+    legacyMissingFields: (json['legacyMissingFields'] as List? ?? const [])
+        .map((value) => '$value')
+        .toList(growable: false),
     fieldSessionId: json['fieldSessionId'] as String,
     checklistId: json['checklistId'] as String,
     checklistVersion: json['checklistVersion'] as int,

@@ -20,6 +20,7 @@ import '../data/local/operation_journal_repository.dart';
 import '../data/local/quarantine_repository.dart';
 import '../data/local/recovery_coordinator.dart';
 import '../data/local/media_reconciliation_service.dart';
+import '../data/local/sync_queue_repository.dart';
 import '../features/auth/data/field_session_repository.dart';
 import '../features/auth/data/session_secure_storage.dart';
 import '../features/hydrants/data/hydrant_repository.dart';
@@ -29,6 +30,8 @@ import '../features/inspections/data/inspection_sync_coordinator.dart';
 import '../features/inspections/data/rv_draft_repository.dart';
 import '../features/catalogs/dynamic_catalog_repository.dart';
 import '../features/visual_reports/data/visual_report_repository.dart';
+import '../features/diagnostics/rv_diagnostic_export_service.dart';
+import '../features/inspections/data/rv_recovery_coordinator.dart';
 
 typedef BootstrapStatusCallback = void Function(String status);
 
@@ -51,12 +54,16 @@ Future<AppState> bootstrap({
   final syncDiagnosticsBox = await Hive.openBox<String>(
     'rv_sync_diagnostics_v1',
   );
+  final rvRecoveryBox = await Hive.openBox<String>('rv_recovery_v1');
+  final rvRecoverySnapshotBox = await Hive.openBox<String>(
+    'rv_recovery_snapshots_v1',
+  );
   final inspectionBox = await Hive.openBox<String>('visual_inspections_v1');
   final inspectionIndexBox = await Hive.openBox<String>(
     'active_inspection_index_v1',
   );
   await Hive.openBox<String>('damage_records_v1');
-  await Hive.openBox<String>('inspection_photos_v1');
+  final photoBox = await Hive.openBox<String>('inspection_photos_v1');
   await Hive.openBox<String>('hydrant_configurations_v1');
   await Hive.openBox<String>('local_hydrants_v1');
   final hydrantBox = Hive.box<String>('local_hydrants_v1');
@@ -128,6 +135,23 @@ Future<AppState> bootstrap({
     index: inspectionIndexBox,
   );
   final rvDraftRepository = RvDraftRepository(visualRepository);
+  onStatus?.call('Verificando revisiones guardadas…');
+  final rvRecovery = await RvRecoveryCoordinator(
+    visualRepository: visualRepository,
+    drafts: rvDraftRepository,
+    recoveryBox: rvRecoveryBox,
+    snapshotBox: rvRecoverySnapshotBox,
+    indexBox: inspectionIndexBox,
+    syncQueueBox: syncBox,
+    photoBox: photoBox,
+    mediaQueueBox: mediaBox,
+  ).runLocal();
+  if (rvRecovery.supersededEmptyDrafts > 0 ||
+      rvRecovery.retryStormsStopped > 0) {
+    onStatus?.call(
+      'Se encontraron revisiones guardadas y se están preparando para sincronización.',
+    );
+  }
   await rvDraftRepository.reconcileVerifiedPhotoReferences(mediaBox);
   final hydrantRepository = HydrantRepository(
     client: apiClient,
@@ -136,7 +160,7 @@ Future<AppState> bootstrap({
   final inspectionSyncCoordinator = InspectionSyncCoordinator(
     drafts: rvDraftRepository,
     remote: InspectionRemoteRepository(apiClient),
-    photoBox: Hive.box<String>('inspection_photos_v1'),
+    photoBox: photoBox,
     mediaQueue: mediaBox,
     mediaWorkQueue: Hive.box<String>('media_work_queue_v1'),
     diagnosticsBox: syncDiagnosticsBox,
@@ -149,6 +173,20 @@ Future<AppState> bootstrap({
     ),
     catalogs: dynamicCatalogRepository,
     onHydrantResolved: hydrantRepository.linkServerHydrantId,
+  );
+  final diagnosticExportService = RvDiagnosticExportService(
+    config: config,
+    packageInfo: packageInfo,
+    sessionStorage: sessionStorage,
+    visualRepository: visualRepository,
+    drafts: rvDraftRepository,
+    syncQueue: SyncQueueRepository(syncBox),
+    hydrantBox: hydrantBox,
+    activeIndexBox: inspectionIndexBox,
+    photoBox: Hive.box<String>('inspection_photos_v1'),
+    mediaSyncBox: mediaBox,
+    mediaWorkBox: Hive.box<String>('media_work_queue_v1'),
+    diagnosticsBox: syncDiagnosticsBox,
   );
   final state = AppState(
     preferences: preferences,
@@ -173,6 +211,7 @@ Future<AppState> bootstrap({
     ),
     rvDraftRepository: rvDraftRepository,
     inspectionSyncCoordinator: inspectionSyncCoordinator,
+    diagnosticExportService: diagnosticExportService,
     visualReportRepository: VisualReportRepository(
       client: apiClient,
       cache: visualReportCache,

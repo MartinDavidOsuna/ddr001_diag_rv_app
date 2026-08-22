@@ -3,6 +3,29 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('415 preserves photo endpoint and technical cause', () {
+    final request = RequestOptions(
+      path: '/inspections/id/photos',
+      method: 'POST',
+    );
+    final exception = ApiException.fromDio(
+      DioException(
+        requestOptions: request,
+        type: DioExceptionType.badResponse,
+        response: Response<dynamic>(
+          requestOptions: request,
+          statusCode: 415,
+          data: {'detail': 'Declared MIME does not match decoded image.'},
+        ),
+      ),
+    );
+
+    expect(exception.kind, ApiErrorKind.unsupportedMedia);
+    expect(exception.statusCode, 415);
+    expect(exception.logicalEndpoint, '/inspections/id/photos');
+    expect(exception.originalMessage, contains('MIME'));
+  });
+
   test('429 conserva Retry-After y contexto HTTP', () {
     final options = RequestOptions(
       path: '/inspections/id/photos',

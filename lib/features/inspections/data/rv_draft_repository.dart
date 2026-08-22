@@ -11,6 +11,7 @@ import '../../../domain/models/app_models.dart';
 import '../../checklist/data/checklist_models.dart';
 import '../domain/rv_draft.dart';
 import '../domain/rv_sync_state.dart';
+import '../domain/rv_recovery_policy.dart';
 import '../../../domain/integrity/operation_journal.dart';
 import '../../../domain/media/inspection_photo.dart';
 import '../../../domain/media/media_sync_status.dart';
@@ -26,6 +27,25 @@ class RvDraftRepository {
     required AppUser user,
     required DynamicChecklist checklist,
   }) async {
+    final normalizedAccount = hydrant.code.trim().toUpperCase();
+    final recovered = all().where((draft) {
+      if (draft.isReadOnly || draft.supersededBy != null) return false;
+      final inspection = visualRepository.findById(draft.clientInspectionId);
+      final owned = inspection == null ||
+          inspection.createdBy == user.id ||
+          inspection.inspectorId == user.id;
+      return owned &&
+          {
+            draft.originalAccountNumber.trim().toUpperCase(),
+            draft.effectiveAccountNumber.trim().toUpperCase(),
+          }.contains(normalizedAccount);
+    }).toList(growable: false);
+    if (recovered.isNotEmpty) {
+      final existing = selectCanonicalDraft(recovered);
+      final upgraded = upgradeDraftChecklist(existing, checklist);
+      if (!identical(upgraded, existing)) await save(upgraded);
+      return upgraded;
+    }
     final inspection = await visualRepository.openOrCreate(hydrant, user);
     final existing = fromInspection(inspection);
     if (existing != null) {
@@ -54,7 +74,9 @@ class RvDraftRepository {
   RvDraft? activeFor(String hydrantId) {
     for (final inspection in visualRepository.forHydrant(hydrantId)) {
       final draft = fromInspection(inspection);
-      if (draft != null && !draft.isReadOnly) return draft;
+      if (draft != null && !draft.isReadOnly && draft.supersededBy == null) {
+        return draft;
+      }
     }
     return null;
   }
@@ -63,7 +85,9 @@ class RvDraftRepository {
     final values = <RvDraft>[];
     for (final inspection in visualRepository.accessible()) {
       final value = fromInspection(inspection);
-      if (value != null && !value.isReadOnly) values.add(value);
+      if (value != null && !value.isReadOnly && value.supersededBy == null) {
+        values.add(value);
+      }
     }
     return values;
   }

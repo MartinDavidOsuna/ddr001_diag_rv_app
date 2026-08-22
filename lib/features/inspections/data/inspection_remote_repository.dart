@@ -38,9 +38,37 @@ class RemotePhoto {
   final String? sha256, clientSha256;
 }
 
+class RemoteHydrantIdentity {
+  const RemoteHydrantIdentity({required this.id, required this.accountNumber});
+  final String id, accountNumber;
+}
+
 class InspectionRemoteRepository {
   InspectionRemoteRepository(this.client);
   final ApiClient client;
+
+  Future<RemoteHydrantIdentity?> findHydrantByAccount(String account) async {
+    try {
+      final response = await client.dio.get<Map<String, dynamic>>(
+        '/hydrants/${Uri.encodeComponent(account.trim())}',
+      );
+      final data = response.data ?? const {};
+      final id = (data['hydrant_id'] ?? data['hydrantId'] ?? data['id'])
+          ?.toString();
+      final number = (data['account_number'] ?? data['accountNumber'])
+          ?.toString();
+      if (id == null || number == null) {
+        throw const ApiException(
+          ApiErrorKind.invalidData,
+          'Respuesta de identidad de hidrante inválida.',
+        );
+      }
+      return RemoteHydrantIdentity(id: id, accountNumber: number);
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 404) return null;
+      throw ApiException.fromDio(error);
+    }
+  }
 
   Future<RvVersionResult> createVersion(RvDraft draft) async {
     final reportId = draft.visualReportId;

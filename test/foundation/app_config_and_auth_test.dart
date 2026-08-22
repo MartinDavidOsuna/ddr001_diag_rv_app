@@ -715,7 +715,10 @@ void main() {
       ApiException.fromDio(unauthorized).message,
       'No fue posible verificar la sesión con el servidor. Puedes continuar trabajando y se intentará nuevamente.',
     );
-    expect(ApiException.fromDio(offline).message, 'Servidor no disponible.');
+    expect(
+      ApiException.fromDio(offline).message,
+      'No fue posible conectar con el servidor. Revisa la red e intenta nuevamente.',
+    );
   });
 
   test('500 se distingue de una falla de conectividad', () {

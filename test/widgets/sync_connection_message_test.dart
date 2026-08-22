@@ -1,4 +1,5 @@
 import 'package:ddr001diag/features/sync/sync_page.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ddr001diag/domain/media/media_sync_status.dart';
@@ -16,5 +17,29 @@ void main() {
 
   test('una foto sin proyección Hive permanece pendiente y no rompe la UI', () {
     expect(mediaSyncStatusForUi(null), MediaSyncStatus.pendingUpload.name);
+  });
+
+  testWidgets('muestra la causa exacta por evidencia y permite reintentar', (
+    tester,
+  ) async {
+    var retried = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PhotoRow(
+            id: 'photo-1',
+            status: MediaSyncStatus.failedPermanent.name,
+            error:
+                'El formato no es compatible. (HTTP 415 · /inspections/id/photos · requestId=req-1)',
+            onRetry: () => retried = true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('HTTP 415'), findsOneWidget);
+    expect(find.textContaining('requestId=req-1'), findsOneWidget);
+    await tester.tap(find.text('Reintentar'));
+    expect(retried, isTrue);
   });
 }

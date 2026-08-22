@@ -8,6 +8,7 @@ enum ApiErrorKind {
   sessionRevoked,
   sessionAlreadyActive,
   invalidData,
+  unsupportedMedia,
   serverUnavailable,
   rateLimited,
   serverError,
@@ -71,9 +72,15 @@ class ApiException implements Exception {
       );
     }
     if (error.type == DioExceptionType.connectionError) {
-      return const ApiException(
+      return ApiException(
         ApiErrorKind.serverUnavailable,
-        'Servidor no disponible.',
+        'No fue posible conectar con el servidor. Revisa la red e intenta nuevamente.',
+        httpMethod: error.requestOptions.method,
+        logicalEndpoint: error.requestOptions.path,
+        dioExceptionType: error.type.name,
+        originalRuntimeType:
+            error.error?.runtimeType.toString() ?? error.runtimeType.toString(),
+        originalMessage: error.error?.toString() ?? error.message,
       );
     }
     if (status == 401 || status == 403) {
@@ -193,6 +200,22 @@ class ApiException implements Exception {
         problemTitle: problem['title']?.toString(),
         field: field,
         errors: problemErrors,
+      );
+    }
+    if (status == 415) {
+      return ApiException(
+        ApiErrorKind.unsupportedMedia,
+        'El formato de la fotografía no es compatible. Vuelve a capturarla e intenta nuevamente.',
+        statusCode: status,
+        requestId: requestId,
+        problemType: problem['type']?.toString(),
+        problemTitle: problem['title']?.toString(),
+        domainCode: domainCode,
+        httpMethod: error.requestOptions.method,
+        logicalEndpoint: error.requestOptions.path,
+        dioExceptionType: error.type.name,
+        originalRuntimeType: error.runtimeType.toString(),
+        originalMessage: problem['detail']?.toString() ?? error.message,
       );
     }
     if (status == 408) {

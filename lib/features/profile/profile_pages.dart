@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
 import '../home/rv_work_dashboard.dart';
+import '../diagnostics/rv_diagnostic_export_service.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -137,6 +139,11 @@ class ProfilePage extends StatelessWidget {
                   onTap: () => context.push('/sync'),
                 ),
                 _Menu(
+                  icon: Icons.file_download_outlined,
+                  title: 'Exportar diagnóstico',
+                  onTap: () => _exportDiagnostic(context),
+                ),
+                _Menu(
                   icon: Icons.menu_book_outlined,
                   title: 'Manual de uso',
                   onTap: () {
@@ -188,6 +195,83 @@ class ProfilePage extends StatelessWidget {
 
   static void _openWorkGroup(BuildContext context, RvWorkGroup group) =>
       context.go('/hydrants?workGroup=${group.name}');
+
+  static Future<void> _exportDiagnostic(BuildContext context) async {
+    final state = context.read<AppState>();
+    String progress = 'Recopilando estado local...';
+    RvDiagnosticExportResult? result;
+    Object? failure;
+    var started = false;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) {
+          if (!started) {
+            started = true;
+            state
+                .exportSyncDiagnostic(
+                  onProgress: (message) {
+                    if (dialogContext.mounted) {
+                      setState(() => progress = message);
+                    }
+                  },
+                )
+                .then((value) {
+                  if (dialogContext.mounted) setState(() => result = value);
+                })
+                .catchError((Object error) {
+                  if (dialogContext.mounted) setState(() => failure = error);
+                });
+          }
+          return AlertDialog(
+            title: const Text('Exportar diagnóstico de sincronización'),
+            content: result == null && failure == null
+                ? Row(
+                    children: [
+                      const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(child: Text(progress)),
+                    ],
+                  )
+                : failure != null
+                ? const Text(
+                    'No fue posible generar el diagnóstico. Tus revisiones no fueron modificadas.',
+                  )
+                : Text(
+                    result!.remoteSnapshotComplete
+                        ? 'Diagnóstico generado correctamente.'
+                        : 'El diagnóstico se generó con información local. Algunas consultas al servidor no pudieron completarse.',
+                  ),
+            actions: [
+              if (failure != null || result != null)
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cerrar'),
+                ),
+              if (result != null)
+                FilledButton.icon(
+                  onPressed: () async {
+                    await SharePlus.instance.share(
+                      ShareParams(
+                        files: [XFile(result!.file.path)],
+                        text: 'Diagnóstico técnico DDR001 RV',
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.share_outlined),
+                  label: const Text('Compartir archivo'),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 }
 
 class _StatMetric extends StatelessWidget {

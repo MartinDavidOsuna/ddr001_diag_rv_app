@@ -13,6 +13,7 @@ import '../domain/rv_draft.dart';
 import '../domain/rv_sync_state.dart';
 import '../domain/rv_versioning.dart';
 import '../domain/rv_validator.dart';
+import '../domain/hydrant_account_identity.dart';
 import 'inspection_remote_repository.dart';
 import 'rv_answer_payload_builder.dart';
 import 'rv_draft_repository.dart';
@@ -194,6 +195,16 @@ class InspectionSyncCoordinator {
     RemoteInspection? remoteInspection,
   }) async {
     remoteInspection ??= await remote.get(draft.serverInspectionId!);
+    if (draft.serverHydrantId == null &&
+        remoteInspection.hydrantId?.isNotEmpty == true) {
+      await onHydrantResolved?.call(draft.hydrantId, remoteInspection.hydrantId!);
+      draft = await _save(
+        draft.copyWith(
+          serverHydrantId: remoteInspection.hydrantId,
+          recoveryStatus: 'remote_hydrant_backfilled',
+        ),
+      );
+    }
     if (const {'submitted', 'validated'}.contains(remoteInspection.status)) {
       return _save(
         draft.copyWith(
@@ -365,7 +376,49 @@ class InspectionSyncCoordinator {
     );
     // Repeating the same clientInspectionId is the only creation reconciliation
     // exposed by the API and returns the existing row without duplication.
-    final created = await remote.create(draft);
+    late final RemoteInspection created;
+    try {
+      created = await remote.create(draft);
+    } on ApiException catch (error) {
+      if (!_isObjectiveHyphenIncompatibility(draft, error)) rethrow;
+      final alias = transformLegacyHyphenAccount(draft.originalAccountNumber);
+      final collision = await remote.findHydrantByAccount(alias);
+      if (collision != null) {
+        await _save(
+          draft.copyWith(
+            accountResolutionState:
+                AccountResolutionState.unresolvedAccountCollision,
+            recoveryStatus: 'accountAliasCollision',
+            accountResolutionAttempts: [
+              ...draft.accountResolutionAttempts,
+              'create_original:hyphen_incompatible',
+              'lookup_alias:collision',
+            ],
+          ),
+        );
+        throw const ApiException(
+          ApiErrorKind.validation,
+          'La cuenta alternativa coincide con otro hidrante. Tus datos se conservaron para conciliación.',
+          domainCode: 'ACCOUNT_ALIAS_COLLISION',
+        );
+      }
+      final transformed = draft.copyWith(
+        effectiveAccountNumber: alias,
+        accountTransformation: AccountTransformation.hyphenTo000,
+        accountTransformationVersion: 1,
+        accountTransformedAt: DateTime.now().toUtc(),
+        accountResolutionState: AccountResolutionState.transformed,
+        accountResolutionAttempts: [
+          ...draft.accountResolutionAttempts,
+          'create_original:hyphen_incompatible',
+          'lookup_alias:not_found',
+          'create_alias:attempt',
+        ],
+      );
+      await _save(transformed);
+      created = await remote.create(transformed);
+      draft = transformed;
+    }
     final serverHydrantId = created.hydrantId;
     if (serverHydrantId != null && serverHydrantId.isNotEmpty) {
       await onHydrantResolved?.call(draft.hydrantId, serverHydrantId);
@@ -381,6 +434,17 @@ class InspectionSyncCoordinator {
         clearError: true,
       ),
     );
+  }
+
+  bool _isObjectiveHyphenIncompatibility(
+    RvDraft draft,
+    ApiException error,
+  ) {
+    if (!draft.originalAccountNumber.contains('-')) return false;
+    return const {
+      'ACCOUNT_HYPHEN_UNSUPPORTED',
+      'INVALID_ACCOUNT_FORMAT_HYPHEN',
+    }.contains(error.domainCode);
   }
 
   Future<RvDraft> _answers(RvDraft draft) async {
@@ -475,15 +539,25 @@ class InspectionSyncCoordinator {
         if (ref.status == RvPhotoUploadStatus.verified) continue;
         final photo = _photo(ref.photoId);
         if (photo == null || !await File(photo.localPath).exists()) {
+          const message =
+              'No se encontró el archivo local; no fue posible consultar/subir esta evidencia.';
           slotRefs[index] = RvPhotoReference(
             photoId: ref.photoId,
             slotCode: slot,
             status: RvPhotoUploadStatus.missingLocal,
             retryCount: ref.retryCount,
-            lastError: 'El archivo local no existe.',
+            lastError: message,
             order: ref.order,
             description: ref.description,
           );
+          if (photo != null) {
+            await _markPhotoFailure(
+              photo,
+              message,
+              retryable: false,
+              attempt: ref.retryCount + 1,
+            );
+          }
           refs[slot] = slotRefs;
           continue;
         }
@@ -527,16 +601,22 @@ class InspectionSyncCoordinator {
           );
           _debug(draft, 'fotografía', 'verificada slot=$slot');
         } on ApiException catch (error) {
+          final technicalError = _photoErrorDetail(error);
           slotRefs[index] = RvPhotoReference(
             photoId: ref.photoId,
             slotCode: slot,
             status: RvPhotoUploadStatus.error,
             retryCount: ref.retryCount + 1,
-            lastError: error.message,
+            lastError: technicalError,
             order: ref.order,
             description: ref.description,
           );
-          if (!_retryable(error)) rethrow;
+          await _markPhotoFailure(
+            photo,
+            technicalError,
+            retryable: _retryable(error),
+            attempt: ref.retryCount + 1,
+          );
         }
         refs[slot] = slotRefs;
         draft = await _save(draft.copyWith(photos: refs));
@@ -671,10 +751,12 @@ class InspectionSyncCoordinator {
     ApiException error, {
     StackTrace? stackTrace,
   }) async {
-    final retry = draft.retryCount + 1;
+    const retryCap = 8;
+    final retry = min(draft.retryCount + 1, retryCap);
     final failedAt = DateTime.now().toUtc();
     final retryable = _retryable(error);
     final delay = error.retryAfter ?? _backoff(retry);
+    final retryScheduled = retryable && retry < retryCap;
     _debug(
       draft,
       'error',
@@ -721,7 +803,12 @@ class InspectionSyncCoordinator {
         retryCount: retry,
         lastAttemptAt: failedAt,
         updatedAt: failedAt,
-        nextRetryAt: retryable ? DateTime.now().toUtc().add(delay) : null,
+        nextRetryAt: retryScheduled
+            ? DateTime.now().toUtc().add(delay)
+            : null,
+        recoveryStatus: retryable && !retryScheduled
+            ? 'requiresRemoteReconciliation'
+            : draft.recoveryStatus,
       ),
     );
   }
@@ -800,6 +887,49 @@ class InspectionSyncCoordinator {
         'remoteSha256': remoteHash,
         'reconciledAt': now.toIso8601String(),
         'source': 'remote-confirmation',
+      }),
+    );
+  }
+
+  String _photoErrorDetail(ApiException error) {
+    final context = <String>[
+      if (error.statusCode != null) 'HTTP ${error.statusCode}',
+      if (error.domainCode?.isNotEmpty == true) error.domainCode!,
+      if (error.logicalEndpoint?.isNotEmpty == true) error.logicalEndpoint!,
+      if (error.requestId?.isNotEmpty == true) 'requestId=${error.requestId}',
+    ];
+    return context.isEmpty
+        ? error.message
+        : '${error.message} (${context.join(' · ')})';
+  }
+
+  Future<void> _markPhotoFailure(
+    InspectionPhoto photo,
+    String error, {
+    required bool retryable,
+    required int attempt,
+  }) async {
+    final now = DateTime.now().toUtc();
+    final status = retryable
+        ? MediaSyncStatus.failedRetryable
+        : MediaSyncStatus.failedPermanent;
+    final updated = InspectionPhoto.fromJson({
+      ...photo.toJson(),
+      'syncStatus': status.name,
+      'uploadAttempts': attempt,
+      'lastError': error,
+      'updatedAt': now.toIso8601String(),
+    });
+    await photoBox.put(photo.id, jsonEncode(updated.toJson()));
+    await mediaQueue.put(photo.id, status.name);
+    await (mediaWorkQueue ?? Hive.box<String>('media_work_queue_v1')).put(
+      photo.id,
+      jsonEncode({
+        'photoId': photo.id,
+        'status': status.name,
+        'retryCount': attempt,
+        'lastError': error,
+        'lastAttemptAt': now.toIso8601String(),
       }),
     );
   }

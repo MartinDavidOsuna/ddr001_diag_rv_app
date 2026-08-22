@@ -59,6 +59,45 @@ class VisualInspectionRepository {
     return values;
   }
 
+  /// Removes only index entries that cannot represent active work anymore.
+  /// Inspection documents are deliberately preserved for recovery/history.
+  Future<int> reconcileActiveIndex() async {
+    final staleKeys = <Object>[];
+    for (final entry in index.toMap().entries) {
+      final id = entry.value;
+      if (id.isEmpty) {
+        staleKeys.add(entry.key);
+        continue;
+      }
+      final raw = documents.get(id);
+      if (raw == null) {
+        staleKeys.add(entry.key);
+        continue;
+      }
+      try {
+        final inspection = VisualInspection.fromJson(
+          VersionedJsonCodec.decode(raw).payload,
+        );
+        if (inspection.status == InspectionStatus.completed ||
+            entry.key != _indexKey(inspection.hydrantId)) {
+          staleKeys.add(entry.key);
+        }
+      } on Object {
+        // Keep ambiguous/corrupt entries for the integrity audit and quarantine.
+      }
+    }
+    if (staleKeys.isNotEmpty) await index.deleteAll(staleKeys);
+    return staleKeys.length;
+  }
+
+  Future<void> replaceActiveVisualIndex(Map<String, String> canonicalByKey) async {
+    final ownedKeys = index.keys
+        .where((key) => '$key'.endsWith(':f02A') || '$key'.endsWith('/f02A'))
+        .toList(growable: false);
+    if (ownedKeys.isNotEmpty) await index.deleteAll(ownedKeys);
+    await index.putAll(canonicalByKey);
+  }
+
   bool hasLocalInspection(String hydrantId) {
     final id = index.get(_indexKey(hydrantId));
     return id != null && findById(id) != null;
@@ -191,6 +230,10 @@ class VisualInspectionRepository {
       throw StateError('No fue posible confirmar la escritura del borrador.');
     }
     VersionedJsonCodec.decode(confirmed);
+    if (inspection.status == InspectionStatus.completed) {
+      final key = _indexKey(inspection.hydrantId);
+      if (index.get(key) == inspection.id) await index.delete(key);
+    }
   }
 
   Future<void> deleteLocalDraft(String id, {required String creatorId}) async {
