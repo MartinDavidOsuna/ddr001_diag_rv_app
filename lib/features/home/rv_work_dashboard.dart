@@ -24,6 +24,19 @@ extension RvWorkGroupLabel on RvWorkGroup {
 }
 
 abstract final class RvWorkDashboardProjection {
+  static bool isEmptyLegacySyncShell(RvDraft draft) =>
+      draft.serverInspectionId != null &&
+      draft.remoteStatus == 'in_progress' &&
+      draft.answers.isEmpty &&
+      draft.answersStatus == RvPartStatus.synced &&
+      draft.photos.values.expand((items) => items).isEmpty &&
+      draft.submitStatus == RvPartStatus.notCaptured &&
+      const {
+        RvLocalStatus.pendingAnswers,
+        RvLocalStatus.pendingLocation,
+        RvLocalStatus.pendingSignal,
+      }.contains(draft.localStatus);
+
   static List<Hydrant> personalWorkHydrants({
     required List<Hydrant> assigned,
     required List<Hydrant> catalog,
@@ -145,9 +158,19 @@ abstract final class RvWorkDashboardProjection {
     for (final hydrant in hydrants) {
       final local = [...?byHydrant[hydrant.id]]
         ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      final hasSubmittedRevision = local.any(
+        (draft) => draft.localStatus == RvLocalStatus.submitted,
+      );
+      final visible = local
+          .where(
+            (draft) =>
+                !isEmptyLegacySyncShell(draft) &&
+                !(hasSubmittedRevision && draft.remoteStatus == 'conflict'),
+          )
+          .toList(growable: false);
       final current =
-          local.where((draft) => !draft.isReadOnly).firstOrNull ??
-          local.firstOrNull;
+          visible.where((draft) => !draft.isReadOnly).firstOrNull ??
+          visible.firstOrNull;
       final hasOfficialRemoteState =
           hydrant.officialInspectionId != null ||
           const {
@@ -155,20 +178,11 @@ abstract final class RvWorkDashboardProjection {
             InspectionStatus.validated,
             InspectionStatus.returned,
           }.contains(hydrant.f02a.status);
-      final hasActiveVersionWork =
-          current != null &&
-          (current.hasPendingChanges ||
-              current.pendingVersionClientId != null ||
-              current.localStatus == RvLocalStatus.pendingVersion ||
-              current.localStatus == RvLocalStatus.syncingVersion ||
-              current.localStatus == RvLocalStatus.versionConflict);
       if (current == null && !hydrant.hasConflict && !hasOfficialRemoteState) {
         continue;
       }
       final group = hydrant.hasConflict
           ? RvWorkGroup.conflicts
-          : hasOfficialRemoteState && !hasActiveVersionWork
-          ? forRemote(hydrant.f02a.status)
           : current != null
           ? forDraft(current)
           : forRemote(hydrant.f02a.status);

@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../domain/media/inspection_photo.dart';
@@ -90,7 +91,8 @@ class InspectionSyncCoordinator {
     bool submit = false,
     bool forceRetry = false,
   }) async {
-    if (initial.localStatus == RvLocalStatus.conflict ||
+    if ((initial.localStatus == RvLocalStatus.conflict &&
+            initial.serverInspectionId == null) ||
         initial.localStatus == RvLocalStatus.versionConflict ||
         (initial.localStatus == RvLocalStatus.submitted &&
             !initial.hasPendingChanges) ||
@@ -108,8 +110,35 @@ class InspectionSyncCoordinator {
     if (!_running.add(initial.clientInspectionId))
       return drafts.find(initial.clientInspectionId) ?? initial;
     var draft = drafts.find(initial.clientInspectionId) ?? initial;
+    final retryingLegacyConflict =
+        draft.serverInspectionId != null &&
+        draft.conflictId != null &&
+        draft.remoteStatus == 'conflict';
+    if (draft.localStatus == RvLocalStatus.conflict &&
+        draft.serverInspectionId != null) {
+      // Conflicts created by the former one-review-per-hydrant rule are
+      // retryable submissions now that every clientInspectionId represents an
+      // independent revision.
+      draft = await _save(
+        draft.copyWith(
+          localStatus: RvLocalStatus.submitPending,
+          submitStatus: RvPartStatus.pending,
+          clearError: true,
+          clearNextRetryAt: true,
+        ),
+      );
+    }
     _debug(draft, 'inicio', submit ? 'submit solicitado' : 'sincronización');
     try {
+      if (retryingLegacyConflict) {
+        // The legacy server row is permanently locked. Preserve it as history,
+        // clone the complete local capture under a fresh clientInspectionId and
+        // submit that clone as an independent additional revision.
+        final revision = await drafts.migrateConflictToAdditionalRevision(
+          draft,
+        );
+        return synchronize(revision, submit: true, forceRetry: true);
+      }
       if (draft.visualReportId != null && draft.hasPendingChanges) {
         return await _synchronizeVersion(draft);
       }
@@ -197,7 +226,10 @@ class InspectionSyncCoordinator {
     remoteInspection ??= await remote.get(draft.serverInspectionId!);
     if (draft.serverHydrantId == null &&
         remoteInspection.hydrantId?.isNotEmpty == true) {
-      await onHydrantResolved?.call(draft.hydrantId, remoteInspection.hydrantId!);
+      await onHydrantResolved?.call(
+        draft.hydrantId,
+        remoteInspection.hydrantId!,
+      );
       draft = await _save(
         draft.copyWith(
           serverHydrantId: remoteInspection.hydrantId,
@@ -224,12 +256,12 @@ class InspectionSyncCoordinator {
     if (remoteInspection.status == 'conflict') {
       return _save(
         draft.copyWith(
-          localStatus: RvLocalStatus.submitted,
-          remoteStatus: 'submitted',
+          localStatus: RvLocalStatus.readyToSubmit,
+          remoteStatus: 'conflict',
           officialInspectionId: remoteInspection.officialInspectionId,
           conflictId: remoteInspection.conflictId,
-          submitStatus: RvPartStatus.synced,
-          currentStep: RvSyncStep.verify,
+          submitStatus: RvPartStatus.pending,
+          currentStep: RvSyncStep.submit,
           clearError: true,
           clearNextRetryAt: true,
         ),
@@ -436,10 +468,7 @@ class InspectionSyncCoordinator {
     );
   }
 
-  bool _isObjectiveHyphenIncompatibility(
-    RvDraft draft,
-    ApiException error,
-  ) {
+  bool _isObjectiveHyphenIncompatibility(RvDraft draft, ApiException error) {
     if (!draft.originalAccountNumber.contains('-')) return false;
     return const {
       'ACCOUNT_HYPHEN_UNSUPPORTED',
@@ -535,9 +564,38 @@ class InspectionSyncCoordinator {
     for (final slot in refs.keys.toList()) {
       final slotRefs = [...draft.photosFor(slot)];
       for (var index = 0; index < slotRefs.length; index++) {
-        final ref = slotRefs[index];
+        var ref = slotRefs[index];
         if (ref.status == RvPhotoUploadStatus.verified) continue;
-        final photo = _photo(ref.photoId);
+        var photo = _photo(ref.photoId);
+        if (photo != null && photo.inspectionId != draft.clientInspectionId) {
+          final newPhotoId = const Uuid().v4();
+          final clonedJson = Map<String, dynamic>.from(photo.toJson())
+            ..['id'] = newPhotoId
+            ..['inspectionId'] = draft.clientInspectionId
+            ..['syncStatus'] = MediaSyncStatus.pendingUpload.name
+            ..['uploadAttempts'] = 0
+            ..['uploadedAt'] = null
+            ..['verifiedAt'] = null
+            ..['remoteObjectKey'] = null
+            ..['remoteSha256'] = null
+            ..['remoteFileSize'] = null
+            ..['lastError'] = null
+            ..['updatedAt'] = DateTime.now().toUtc().toIso8601String();
+          photo = InspectionPhoto.fromJson(clonedJson);
+          await photoBox.put(newPhotoId, jsonEncode(photo.toJson()));
+          await mediaQueue.put(newPhotoId, MediaSyncStatus.pendingUpload.name);
+          ref = RvPhotoReference(
+            photoId: newPhotoId,
+            slotCode: ref.slotCode,
+            status: RvPhotoUploadStatus.pending,
+            retryCount: 0,
+            order: ref.order,
+            description: ref.description,
+          );
+          slotRefs[index] = ref;
+          refs[slot] = slotRefs;
+          draft = await _save(draft.copyWith(photos: refs));
+        }
         if (photo == null || !await File(photo.localPath).exists()) {
           const message =
               'No se encontró el archivo local; no fue posible consultar/subir esta evidencia.';
@@ -794,23 +852,29 @@ class InspectionSyncCoordinator {
       '${failedAt.microsecondsSinceEpoch}-${draft.clientInspectionId}',
       jsonEncode(diagnostic),
     );
-    return _save(
-      draft.copyWith(
-        localStatus: error.kind == ApiErrorKind.sessionRevoked
-            ? RvLocalStatus.requiresAuthentication
-            : RvLocalStatus.syncError,
-        lastSyncError: retryable ? _retryMessage(error) : error.message,
-        retryCount: retry,
-        lastAttemptAt: failedAt,
-        updatedAt: failedAt,
-        nextRetryAt: retryScheduled
-            ? DateTime.now().toUtc().add(delay)
-            : null,
-        recoveryStatus: retryable && !retryScheduled
-            ? 'requiresRemoteReconciliation'
-            : draft.recoveryStatus,
-      ),
+    final failedDraft = draft.copyWith(
+      localStatus: error.kind == ApiErrorKind.sessionRevoked
+          ? RvLocalStatus.requiresAuthentication
+          : RvLocalStatus.syncError,
+      lastSyncError: retryable ? _retryMessage(error) : error.message,
+      retryCount: retry,
+      lastAttemptAt: failedAt,
+      updatedAt: failedAt,
+      nextRetryAt: retryScheduled ? DateTime.now().toUtc().add(delay) : null,
+      recoveryStatus: retryable && !retryScheduled
+          ? 'requiresRemoteReconciliation'
+          : draft.recoveryStatus,
     );
+    try {
+      return await _save(failedDraft);
+    } on StateError catch (saveError) {
+      // A remote submit may have completed while the client timed out. The
+      // local visual document is then immutable by design. Diagnostics above
+      // are already durable; do not abort the remaining synchronization queue
+      // merely because failure metadata cannot be embedded in that document.
+      if ('$saveError'.contains('finalizado es inmutable')) return failedDraft;
+      rethrow;
+    }
   }
 
   bool _retryable(ApiException error) => const {

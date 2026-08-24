@@ -28,18 +28,23 @@ class RvDraftRepository {
     required DynamicChecklist checklist,
   }) async {
     final normalizedAccount = hydrant.code.trim().toUpperCase();
-    final recovered = all().where((draft) {
-      if (draft.isReadOnly || draft.supersededBy != null) return false;
-      final inspection = visualRepository.findById(draft.clientInspectionId);
-      final owned = inspection == null ||
-          inspection.createdBy == user.id ||
-          inspection.inspectorId == user.id;
-      return owned &&
-          {
-            draft.originalAccountNumber.trim().toUpperCase(),
-            draft.effectiveAccountNumber.trim().toUpperCase(),
-          }.contains(normalizedAccount);
-    }).toList(growable: false);
+    final recovered = all()
+        .where((draft) {
+          if (draft.isReadOnly || draft.supersededBy != null) return false;
+          final inspection = visualRepository.findById(
+            draft.clientInspectionId,
+          );
+          final owned =
+              inspection == null ||
+              inspection.createdBy == user.id ||
+              inspection.inspectorId == user.id;
+          return owned &&
+              {
+                draft.originalAccountNumber.trim().toUpperCase(),
+                draft.effectiveAccountNumber.trim().toUpperCase(),
+              }.contains(normalizedAccount);
+        })
+        .toList(growable: false);
     if (recovered.isNotEmpty) {
       final existing = selectCanonicalDraft(recovered);
       final upgraded = upgradeDraftChecklist(existing, checklist);
@@ -143,6 +148,14 @@ class RvDraftRepository {
     final submitted =
         draft.localStatus == RvLocalStatus.submitted &&
         const {'submitted', 'validated'}.contains(draft.remoteStatus);
+    if (inspection.status == InspectionStatus.completed) {
+      await visualRepository.saveCompletedSyncMetadata(
+        inspectionId: inspection.id,
+        storageKey: storageKey,
+        metadata: draft.toJson(),
+      );
+      return;
+    }
     await visualRepository.save(
       inspection.copyWith(
         status: submitted ? InspectionStatus.completed : inspection.status,
@@ -156,6 +169,77 @@ class RvDraftRepository {
         },
       ),
     );
+  }
+
+  Future<RvDraft> migrateConflictToAdditionalRevision(RvDraft legacy) async {
+    final source = visualRepository.findById(legacy.clientInspectionId);
+    if (source == null) {
+      throw StateError('No existe la captura local del conflicto.');
+    }
+    final now = DateTime.now().toUtc();
+    final newId = const Uuid().v4();
+    final draftJson = Map<String, dynamic>.from(legacy.toJson())
+      ..['clientInspectionId'] = newId
+      ..remove('serverInspectionId')
+      ..remove('serverHydrantId')
+      ..remove('officialInspectionId')
+      ..remove('conflictId')
+      ..remove('visualReportId')
+      ..remove('currentVersionId')
+      ..remove('baseVersionId')
+      ..remove('versionConflictId')
+      ..remove('proposedVersionId')
+      ..['localStatus'] = RvLocalStatus.pendingCreate.name
+      ..['remoteStatus'] = null
+      ..['answersStatus'] = RvPartStatus.pending.name
+      ..['locationStatus'] = RvPartStatus.pending.name
+      ..['signalStatus'] = RvPartStatus.pending.name
+      ..['photosStatus'] = RvPartStatus.pending.name
+      ..['submitStatus'] = RvPartStatus.pending.name
+      ..['currentStep'] = RvSyncStep.create.name
+      ..['retryCount'] = 0
+      ..['lastSyncError'] = null
+      ..['nextRetryAt'] = null
+      ..['createdAt'] = now.toIso8601String()
+      ..['updatedAt'] = now.toIso8601String();
+    final photoGroups = Map<String, dynamic>.from(
+      draftJson['photos'] as Map? ?? const {},
+    );
+    draftJson['photos'] = photoGroups.map(
+      (slot, rawItems) => MapEntry(
+        slot,
+        (rawItems as List).map((raw) {
+          return Map<String, dynamic>.from(raw as Map)
+            ..['status'] = RvPhotoUploadStatus.pending.name
+            ..remove('serverPhotoId')
+            ..['retryCount'] = 0
+            ..remove('lastError');
+        }).toList(),
+      ),
+    );
+    final revisionDraft = RvDraft.fromJson(draftJson);
+    final inspectionJson = Map<String, dynamic>.from(source.toJson())
+      ..['id'] = newId
+      ..['status'] = InspectionStatus.inProgress.name
+      ..['completedAt'] = null
+      ..['startedAt'] = now.toIso8601String()
+      ..['createdAt'] = now.toIso8601String()
+      ..['updatedAt'] = now.toIso8601String()
+      ..['revisionOfReportId'] = source.id
+      ..['previousRevisionId'] = source.id
+      ..['revisionNumber'] = source.revisionNumber + 1
+      ..['revisionReason'] = 'Migración de conflicto a revisión adicional'
+      ..[storageKey] = revisionDraft.toJson();
+    await visualRepository.createRevisionClone(
+      VisualInspection.fromJson(inspectionJson),
+    );
+    await save(
+      legacy.copyWith(
+        supersededBy: newId,
+        recoveryStatus: 'legacyConflictMigratedToAdditionalRevision',
+      ),
+    );
+    return revisionDraft;
   }
 
   Future<void> deleteUnsyncedLocal({

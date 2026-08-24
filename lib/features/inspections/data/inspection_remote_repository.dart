@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_exception.dart';
@@ -45,7 +48,63 @@ class RemoteHydrantIdentity {
 
 class InspectionRemoteRepository {
   InspectionRemoteRepository(this.client);
+  static const _androidFiles = MethodChannel(
+    'com.aquafim.ddr001diag/app_files',
+  );
   final ApiClient client;
+
+  Future<({List<int> sourceBytes, String? uploadPath})> _readPhotoPayload(
+    File file,
+  ) async {
+    if (Platform.isAndroid) {
+      try {
+        // Android stages a non-destructive cache copy and returns its small path
+        // instead of transferring the complete image on the platform UI thread.
+        final staged = await _androidFiles
+            .invokeMapMethod<String, String>('stage', {'path': file.path})
+            .timeout(const Duration(seconds: 30));
+        final sourcePath = staged?['sourcePath'];
+        final uploadPath = staged?['uploadPath'];
+        if (sourcePath == null || uploadPath == null) {
+          throw const ApiException(
+            ApiErrorKind.invalidData,
+            'Android no pudo preparar la fotografía local.',
+          );
+        }
+        final stagedBytes = await File(
+          sourcePath,
+        ).readAsBytes().timeout(const Duration(seconds: 10));
+        // File I/O may expose an externally backed Uint8List. Detach it before
+        // Dio creates the multipart stream so the request body remains valid
+        // until the server has consumed every byte.
+        return (
+          sourceBytes: Uint8List.fromList(stagedBytes),
+          uploadPath: uploadPath,
+        );
+      } on PlatformException catch (error) {
+        throw ApiException(
+          ApiErrorKind.invalidData,
+          'Android no pudo preparar la fotografía local (${error.code}).',
+        );
+      } on TimeoutException {
+        throw const ApiException(
+          ApiErrorKind.invalidData,
+          'La fotografía local permanece bloqueada y no pudo recuperarse.',
+        );
+      }
+    }
+    try {
+      final bytes = await file.readAsBytes().timeout(
+        const Duration(seconds: 10),
+      );
+      return (sourceBytes: bytes, uploadPath: null);
+    } on TimeoutException {
+      throw const ApiException(
+        ApiErrorKind.invalidData,
+        'La fotografía local tardó demasiado en leerse.',
+      );
+    }
+  }
 
   Future<RemoteHydrantIdentity?> findHydrantByAccount(String account) async {
     try {
@@ -328,20 +387,50 @@ class InspectionRemoteRepository {
       );
     }
     try {
+      // Materialize the complete file before constructing the multipart body.
+      // Streaming directly from Android storage can leave an HTTP request open
+      // when the underlying file stream stalls, even for a small valid image.
+      final payload = await _readPhotoPayload(file);
+      final bytes = payload.sourceBytes;
+      if (bytes.isEmpty) {
+        throw const ApiException(
+          ApiErrorKind.invalidData,
+          'El archivo de fotografía está vacío.',
+        );
+      }
+      final actualSha256 = sha256.convert(bytes).toString();
+      if (photo.sha256.isNotEmpty &&
+          actualSha256.toLowerCase() != photo.sha256.toLowerCase()) {
+        throw const ApiException(
+          ApiErrorKind.invalidData,
+          'La fotografía local no coincide con su huella de integridad.',
+        );
+      }
+      final uploadBytes = payload.uploadPath == null
+          ? bytes
+          : await File(payload.uploadPath!).readAsBytes();
+      final uploadSha256 = sha256.convert(uploadBytes).toString();
+      final multipart = payload.uploadPath == null
+          ? MultipartFile.fromBytes(bytes, filename: photo.normalizedFilename)
+          : await MultipartFile.fromFile(
+              payload.uploadPath!,
+              filename: photo.normalizedFilename,
+            );
       final response = await client.dio.post<Map<String, dynamic>>(
         '/inspections/$id/photos',
         data: FormData.fromMap({
-          'photo': await MultipartFile.fromFile(
-            photo.localPath,
-            filename: photo.normalizedFilename,
-          ),
+          'photo': multipart,
           'photoId': photo.id,
           'slotCode': slotCode,
-          'clientSha256': photo.sha256,
+          'clientSha256': uploadSha256,
           'capturedAt': photo.capturedAt.toUtc().toIso8601String(),
           'metadata':
               '{"questionId":${photo.evidenceRequirementId == null ? 'null' : '"${photo.evidenceRequirementId}"'}}',
         }),
+        options: Options(
+          sendTimeout: const Duration(minutes: 2),
+          receiveTimeout: const Duration(minutes: 2),
+        ),
       );
       final data = response.data ?? const {};
       return RemotePhoto(

@@ -263,8 +263,16 @@ class RvDiagnosticExportService {
       'errors': errors,
     };
     onProgress?.call('Generando archivo...');
-    final directory =
-        await (directoryProvider?.call() ?? getApplicationDocumentsDirectory());
+    late final Directory directory;
+    if (directoryProvider != null) {
+      directory = await directoryProvider!();
+    } else if (Platform.isAndroid) {
+      directory =
+          await getExternalStorageDirectory() ??
+          await getApplicationDocumentsDirectory();
+    } else {
+      directory = await getApplicationDocumentsDirectory();
+    }
     final stamp = now
         .toIso8601String()
         .replaceAll(RegExp(r'[-:]'), '')

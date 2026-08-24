@@ -14,6 +14,7 @@ import 'package:ddr001diag/features/checklist/data/checklist_repository.dart';
 import 'package:ddr001diag/features/inspections/data/inspection_remote_repository.dart';
 import 'package:ddr001diag/features/inspections/data/inspection_sync_coordinator.dart';
 import 'package:ddr001diag/features/inspections/data/rv_draft_repository.dart';
+import 'package:ddr001diag/features/inspections/domain/rv_sync_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_ce/hive.dart';
@@ -165,7 +166,7 @@ void main() {
   });
 
   test(
-    'estado oficial prevalece sobre borrador y traza local obsoletos',
+    'una revisión local adicional no se omite por una revisión oficial previa',
     () async {
       const official = Hydrant(
         id: 'hydrant-1497',
@@ -192,7 +193,7 @@ void main() {
         availableForRv: false,
       );
       state.hydrants.add(official);
-      await state.rvDraftRepository.openOrCreate(
+      final additional = await state.rvDraftRepository.openOrCreate(
         hydrant: official.copyWith(
           f02a: const InspectionSummary(
             type: InspectionType.f02A,
@@ -213,15 +214,24 @@ void main() {
       );
       await state.trace('legacy_event', 'Traza previa', hydrantId: official.id);
 
-      expect(state.pendingDiagnostics, 0);
-      expect(
-        state.hydrantsForFilter(HydrantListFilter.synchronizationPending),
-        isEmpty,
-      );
-      expect(state.hydrantsForFilter(HydrantListFilter.pendingToday), isEmpty);
+      expect(state.pendingDiagnostics, 1);
+      expect(state.hydrantsForFilter(HydrantListFilter.inProgress), [official]);
       expect(state.profileTodayStats.pending, 0);
-      expect(state.profileTodayStats.unsynced, 0);
-      expect(state.profileTodayStats.submitted, 1);
+      expect(state.profileTodayStats.unsynced, 1);
+      expect(state.profileTodayStats.submitted, 0);
+
+      await state.rvDraftRepository.save(
+        additional.copyWith(
+          localStatus: RvLocalStatus.submitted,
+          remoteStatus: 'submitted',
+          officialInspectionId: 'additional-official-report',
+        ),
+      );
+      expect(
+        state.pendingDiagnostics,
+        0,
+        reason: 'la misma revisión ya confirmada no debe reingresar a la cola',
+      );
     },
   );
 

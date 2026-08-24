@@ -191,7 +191,31 @@ class AppState extends ChangeNotifier {
     return ids;
   }
 
-  int get pendingPhotos => accessiblePhotoIds
+  Set<String> get pendingPhotoIds {
+    if (!authenticated) return const {};
+    final pendingInspectionIds = _pendingDraftsForSync()
+        .map((draft) => draft.clientInspectionId)
+        .toSet();
+    final ids = <String>{};
+    final photos = Hive.box<String>('inspection_photos_v1');
+    for (final raw in photos.values) {
+      try {
+        final photo = InspectionPhoto.fromJson(
+          Map<String, dynamic>.from(jsonDecode(raw) as Map),
+        );
+        if (photo.capturedByUserId == user.id &&
+            pendingInspectionIds.contains(photo.inspectionId) &&
+            mediaBox.get(photo.id) != MediaSyncStatus.verified.name) {
+          ids.add(photo.id);
+        }
+      } on Object {
+        continue;
+      }
+    }
+    return ids;
+  }
+
+  int get pendingPhotos => pendingPhotoIds
       .where((id) => mediaBox.get(id) != MediaSyncStatus.verified.name)
       .length;
   int get verifiedPhotos => accessiblePhotoIds
@@ -229,7 +253,7 @@ class AppState extends ChangeNotifier {
     return count;
   }
 
-  int get syncErrors => accessiblePhotoIds
+  int get syncErrors => pendingPhotoIds
       .map(mediaBox.get)
       .where(
         (v) => {
@@ -304,11 +328,6 @@ class AppState extends ChangeNotifier {
   bool canDeleteUnsyncedLocalDraft(String clientInspectionId) {
     final draft = rvDraftRepository.find(clientInspectionId);
     if (draft == null) return false;
-    final matching = [
-      ...hydrants,
-      ...catalogHydrants,
-    ].where((item) => item.id == draft.hydrantId).toList(growable: false);
-    if (matching.any(_hasOfficialRvState)) return false;
     return rvDraftRepository.canDeleteUnsyncedLocal(
       clientInspectionId: clientInspectionId,
       creatorId: user.id,
@@ -677,11 +696,12 @@ class AppState extends ChangeNotifier {
     );
     final eligibility = functionalEligibilityRepository.find(hydrant.id);
     final activeDraft = rvDraftRepository.activeFor(hydrant.id);
-    final officialWithoutVersionWork =
-        _hasOfficialRvState(hydrant) &&
-        (activeDraft == null || !_hasActiveVersionWork(activeDraft));
+    // The official state describes one historical review. Any distinct active
+    // draft is additional work for the same hydrant and must stay visible.
+    final officialWithoutActiveReview =
+        _hasOfficialRvState(hydrant) && activeDraft == null;
     final visualInProgress =
-        !officialWithoutVersionWork &&
+        !officialWithoutActiveReview &&
         (hydrant.f02a.status == InspectionStatus.inProgress ||
             activeDraft != null);
     final functionalInProgress =
@@ -708,7 +728,7 @@ class AppState extends ChangeNotifier {
       visualCompleted: hydrant.f02a.status == InspectionStatus.completed,
       functionalCompleted: functionalCompleted,
       unsynchronized:
-          !officialWithoutVersionWork && _hasUnsynchronizedData(hydrant),
+          !officialWithoutActiveReview && _hasUnsynchronizedData(hydrant),
       visualPending: hydrant.f02a.status == InspectionStatus.pending,
       functionalPending: functional.status == InspectionStatus.pending,
       functionalRequired:
@@ -730,7 +750,7 @@ class AppState extends ChangeNotifier {
             isToday(value.completedAt!),
       ),
       visualPendingToday:
-          !officialWithoutVersionWork &&
+          !officialWithoutActiveReview &&
           visualHistory.any(
             (value) =>
                 value.status != InspectionStatus.completed &&
@@ -779,41 +799,41 @@ class AppState extends ChangeNotifier {
     return false;
   }
 
-  bool _hasActiveVersionWork(RvDraft draft) =>
-      draft.hasPendingChanges ||
-      draft.pendingVersionClientId != null ||
-      const {
-        RvLocalStatus.pendingVersion,
-        RvLocalStatus.syncingVersion,
-        RvLocalStatus.versionConflict,
-      }.contains(draft.localStatus);
-
   bool _isSupersededByOfficialState(RvDraft draft) {
-    final matching = [
-      ...hydrants,
-      ...catalogHydrants,
-    ].where((hydrant) => hydrant.id == draft.hydrantId).toList(growable: false);
-    final hasOfficialState = matching.any(_hasOfficialRvState);
-    if (!hasOfficialState || _hasActiveVersionWork(draft)) return false;
-
-    // A response-lost submit can leave the exact same inspection in syncError
-    // while the server projection already reports it as official. Let that draft
-    // run once more so the coordinator can GET it and reconcile it to submitted.
-    // A different official inspection still supersedes this historical draft.
-    final serverInspectionId = draft.serverInspectionId;
-    if (serverInspectionId != null &&
-        matching.any(
-          (hydrant) => hydrant.officialInspectionId == serverInspectionId,
-        )) {
-      return false;
-    }
-    return true;
+    // An official inspection belongs to one review, not to the hydrant as a
+    // whole. A different local clientInspectionId is an additional review and
+    // must remain eligible for synchronization. Explicit local recovery marks
+    // true duplicates with supersededBy; RvDraftRepository.pending() already
+    // excludes those records.
+    return false;
   }
 
-  List<RvDraft> _pendingDraftsForSync() => rvDraftRepository
-      .pending()
-      .where((draft) => !_isSupersededByOfficialState(draft))
-      .toList(growable: false);
+  List<RvDraft> _pendingDraftsForSync() {
+    final all = rvDraftRepository.all();
+    final submittedHydrants = all
+        .where((draft) => draft.localStatus == RvLocalStatus.submitted)
+        .map((draft) => draft.hydrantId)
+        .toSet();
+    return all
+        .where(
+          (draft) =>
+              (draft.supersededBy == null) &&
+              !RvWorkDashboardProjection.isEmptyLegacySyncShell(draft) &&
+              !(draft.remoteStatus == 'conflict' &&
+                  submittedHydrants.contains(draft.hydrantId)) &&
+              (!draft.isReadOnly ||
+                  (draft.localStatus == RvLocalStatus.conflict &&
+                      draft.serverInspectionId != null)) &&
+              !_isSupersededByOfficialState(draft) &&
+              (draft.localStatus != RvLocalStatus.conflict ||
+                  draft.serverInspectionId != null) &&
+              draft.localStatus != RvLocalStatus.versionConflict &&
+              draft.localStatus != RvLocalStatus.cancelled &&
+              (draft.localStatus != RvLocalStatus.submitted ||
+                  draft.hasPendingChanges),
+        )
+        .toList(growable: false);
+  }
 
   Hydrant hydrant(String id) =>
       [...hydrants, ...catalogHydrants].firstWhere((item) => item.id == id);
@@ -1067,7 +1087,16 @@ class AppState extends ChangeNotifier {
     try {
       await _completePendingLogout();
       syncStage = GlobalSyncStage.catalogs;
-      await dynamicCatalogRepository?.synchronizePending();
+      try {
+        await dynamicCatalogRepository?.synchronizePending();
+      } on Object catch (error) {
+        syncWarnings++;
+        await trace(
+          'sync_catalog_warning',
+          'La sincronización de catálogos falló; se continuará con los reportes',
+          reason: error.toString(),
+        );
+      }
       final manual = syncQueueRepository
           .ready()
           .where((value) => value.entityType == 'manualHydrant')
@@ -1089,66 +1118,56 @@ class AppState extends ChangeNotifier {
         syncCompleted++;
       }
       syncStage = GlobalSyncStage.reports;
-      var consecutiveSystemicFailures = 0;
-      var paused = false;
       for (var index = 0; index < drafts.length; index++) {
         syncingReport = drafts[index].accountNumber;
-        final result = await inspectionSyncCoordinator.synchronize(
-          drafts[index],
-          submit:
-              drafts[index].localStatus == RvLocalStatus.submitPending ||
-              drafts[index].localStatus == RvLocalStatus.readyToSubmit ||
-              drafts[index].submitStatus == RvPartStatus.pending ||
-              drafts[index].submitStatus == RvPartStatus.syncing,
-        );
-        if (result.localStatus == RvLocalStatus.conflict ||
-            result.localStatus == RvLocalStatus.versionConflict) {
-          syncConflicts++;
-        } else if (result.lastSyncError != null) {
+        try {
+          final result = await inspectionSyncCoordinator.synchronize(
+            drafts[index],
+            forceRetry: true,
+            submit:
+                drafts[index].localStatus == RvLocalStatus.submitPending ||
+                drafts[index].localStatus == RvLocalStatus.readyToSubmit ||
+                drafts[index].submitStatus == RvPartStatus.pending ||
+                drafts[index].submitStatus == RvPartStatus.syncing,
+          );
+          if (result.localStatus == RvLocalStatus.conflict ||
+              result.localStatus == RvLocalStatus.versionConflict) {
+            syncConflicts++;
+          } else if (result.lastSyncError != null) {
+            syncWarnings++;
+          }
+        } on Object catch (error) {
           syncWarnings++;
-        }
-        final failure = inspectionSyncCoordinator
-            .failureDiagnostics[result.clientInspectionId];
-        final kind = failure?['kind']?.toString();
-        final systemic = const {
-          'offline',
-          'timeout',
-          'serverUnavailable',
-          'serverError',
-          'rateLimited',
-        }.contains(kind);
-        consecutiveSystemicFailures = systemic
-            ? consecutiveSystemicFailures + 1
-            : 0;
-        syncCompleted++;
-        syncProgress = syncTotal == 0 ? 1 : syncCompleted / syncTotal;
-        notifyListeners();
-        if (kind == 'rateLimited' || consecutiveSystemicFailures >= 2) {
-          paused = true;
-          syncPauseMessage = switch (kind) {
-            'rateLimited' =>
-              'Sincronización pausada por límite temporal del servidor. Tus datos están guardados.',
-            'offline' =>
-              'Sincronización pausada: sin conexión estable. Tus datos están guardados.',
-            'timeout' =>
-              'Sincronización pausada: la conexión agotó el tiempo de espera. Tus datos están guardados.',
-            'serverUnavailable' || 'serverError' =>
-              'Sincronización pausada: servidor temporalmente no disponible. Tus datos están guardados.',
-            _ =>
-              'Sincronización pausada temporalmente. Tus datos están guardados.',
-          };
-          syncStage = GlobalSyncStage.paused;
-          break;
+          await trace(
+            'sync_report_isolated_failure',
+            'Un reporte falló de forma aislada; se continuará con el siguiente',
+            reason: error.toString(),
+            metadata: {
+              'clientInspectionId': drafts[index].clientInspectionId,
+              'accountNumber': drafts[index].accountNumber,
+            },
+          );
+        } finally {
+          syncCompleted++;
+          syncProgress = syncTotal == 0 ? 1 : syncCompleted / syncTotal;
+          notifyListeners();
         }
       }
-      if (!paused) {
-        syncStage = GlobalSyncStage.projections;
+      syncStage = GlobalSyncStage.projections;
+      try {
         await synchronizeAssignments();
-        syncStage = pendingCount > 0 || syncWarnings > 0 || syncConflicts > 0
-            ? GlobalSyncStage.completedWithWarnings
-            : GlobalSyncStage.completed;
-        syncProgress = 1;
+      } on Object catch (error) {
+        syncWarnings++;
+        await trace(
+          'sync_projection_warning',
+          'La actualización de asignaciones falló después de procesar los reportes',
+          reason: error.toString(),
+        );
       }
+      syncStage = pendingCount > 0 || syncWarnings > 0 || syncConflicts > 0
+          ? GlobalSyncStage.completedWithWarnings
+          : GlobalSyncStage.completed;
+      syncProgress = 1;
     } finally {
       syncing = false;
       syncingReport = null;

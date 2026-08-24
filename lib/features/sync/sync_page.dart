@@ -45,9 +45,7 @@ class _SyncPageState extends State<SyncPage> {
         status: item.status.name,
       ));
     }
-    final photos = state.accessiblePhotoIds
-        .where((id) => state.mediaBox.get(id) != MediaSyncStatus.verified.name)
-        .toList();
+    final photos = state.pendingPhotoIds.toList();
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {

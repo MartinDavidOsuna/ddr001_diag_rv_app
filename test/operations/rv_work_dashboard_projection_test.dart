@@ -118,13 +118,13 @@ void main() {
     },
   );
 
-  test('an official report wins over an obsolete local pending projection', () {
+  test('an additional local review remains pending over an official report', () {
     final grouped = RvWorkDashboardProjection.byHydrant(
-      drafts: [draft('stale', 'done', RvLocalStatus.pendingAnswers)],
+      drafts: [draft('additional', 'done', RvLocalStatus.pendingAnswers)],
       hydrants: [hydrant('done', status: InspectionStatus.completed)],
     );
-    expect(grouped[RvWorkGroup.submitted], {'done'});
-    expect(grouped[RvWorkGroup.pendingSync], isEmpty);
+    expect(grouped[RvWorkGroup.submitted], isEmpty);
+    expect(grouped[RvWorkGroup.pendingSync], {'done'});
   });
 
   test('authorized version work remains pending over an official report', () {

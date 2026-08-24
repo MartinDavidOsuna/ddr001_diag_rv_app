@@ -90,7 +90,9 @@ class VisualInspectionRepository {
     return staleKeys.length;
   }
 
-  Future<void> replaceActiveVisualIndex(Map<String, String> canonicalByKey) async {
+  Future<void> replaceActiveVisualIndex(
+    Map<String, String> canonicalByKey,
+  ) async {
     final ownedKeys = index.keys
         .where((key) => '$key'.endsWith(':f02A') || '$key'.endsWith('/f02A'))
         .toList(growable: false);
@@ -234,6 +236,44 @@ class VisualInspectionRepository {
       final key = _indexKey(inspection.hydrantId);
       if (index.get(key) == inspection.id) await index.delete(key);
     }
+  }
+
+  /// Updates only the embedded RV synchronization envelope of a completed
+  /// report. Technical answers, evidence references and completion timestamps
+  /// remain exactly as originally persisted.
+  Future<void> saveCompletedSyncMetadata({
+    required String inspectionId,
+    required String storageKey,
+    required Object metadata,
+  }) async {
+    final stored = findById(inspectionId);
+    if (stored == null || stored.status != InspectionStatus.completed) {
+      throw StateError('El documento no es un REPORTE VISUAL finalizado.');
+    }
+    final updated = stored.copyWith(
+      unknownFields: {...stored.unknownFields, storageKey: metadata},
+    );
+    await documents.put(
+      inspectionId,
+      VersionedJsonCodec.encode(
+        schemaVersion: updated.schemaVersion,
+        payload: updated.toJson(),
+      ),
+    );
+  }
+
+  Future<void> createRevisionClone(VisualInspection revision) async {
+    if (documents.containsKey(revision.id)) {
+      throw StateError('La revisión local ya existe.');
+    }
+    await documents.put(
+      revision.id,
+      VersionedJsonCodec.encode(
+        schemaVersion: revision.schemaVersion,
+        payload: revision.toJson(),
+      ),
+    );
+    await index.put(_indexKey(revision.hydrantId), revision.id);
   }
 
   Future<void> deleteLocalDraft(String id, {required String creatorId}) async {
