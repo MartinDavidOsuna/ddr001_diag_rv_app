@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
-import '../../domain/media/media_sync_status.dart';
 import '../../domain/sync/sync_queue_item.dart';
 
 String syncConnectionMessage(bool online) => online
@@ -14,7 +13,16 @@ String syncConnectionMessage(bool online) => online
 
 @visibleForTesting
 String mediaSyncStatusForUi(String? persistedStatus) =>
-    persistedStatus ?? MediaSyncStatus.pendingUpload.name;
+    switch (persistedStatus) {
+      'verified' => 'Sincronizado',
+      'uploading' => 'Sincronizando',
+      'requiresReview' => 'Requiere revisión',
+      'failedRetryable' ||
+      'failedPermanent' ||
+      'missingLocal' ||
+      'remoteMissing' => 'Requiere reintento',
+      _ => 'Información pendiente',
+    };
 
 class SyncPage extends StatefulWidget {
   const SyncPage({required this.returnLocation, super.key});
@@ -235,7 +243,7 @@ class _SyncPageState extends State<SyncPage> {
             ),
             const SizedBox(height: 12),
             const Text(
-              'Solo MediaSyncStatus.verified cuenta como fotografía sincronizada. uploadedUnverified permanece pendiente.',
+              'Una fotografía cuenta como sincronizada únicamente después de la confirmación del servidor.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11, color: AppColors.muted),
             ),
@@ -330,16 +338,16 @@ class PhotoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final failed =
-        status == MediaSyncStatus.failedRetryable.name ||
-        status == MediaSyncStatus.failedPermanent.name ||
-        status == MediaSyncStatus.missingLocal.name ||
-        status == MediaSyncStatus.remoteMissing.name;
+        status == 'Requiere reintento' || status == 'Requiere revisión';
     return ListTile(
-      title: Text(id, style: const TextStyle(fontWeight: FontWeight.w700)),
+      title: const Text(
+        'Fotografía',
+        style: TextStyle(fontWeight: FontWeight.w700),
+      ),
       subtitle: Text(
         failed
             ? error?.trim().isNotEmpty == true
-                  ? '$status · $error'
+                  ? error!
                   : '$status · Requiere atención'
             : status,
       ),

@@ -1,7 +1,7 @@
 name: ddr001diag
 description: "Aplicación móvil para diagnóstico de hidrantes del Distrito de Riego 001."
 publish_to: 'none'
-version: 1.0.0+100
+version: 1.0.1+101
 
 environment:
   sdk: ^3.12.2

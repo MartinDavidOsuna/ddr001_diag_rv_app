@@ -1,4 +1,5 @@
 import 'media_sync_status.dart';
+import 'photo_integrity_status.dart';
 
 enum PhotoSource { camera, deviceLibrary }
 
@@ -44,9 +45,18 @@ class InspectionPhoto {
     this.remoteSha256,
     this.remoteFileSize,
     this.lastError,
+    this.integrityStatus = PhotoIntegrityStatus.serverConfirmationPending,
+    this.mappingStatus = PhotoMappingStatus.unknown,
+    this.originalPresent,
+    this.thumbnailPresent,
+    this.integrityRetryable,
+    this.integrityRepairable,
+    this.integrityAttempts = 0,
+    this.integrityCheckedAt,
+    this.nextIntegrityRetryAt,
     required this.createdAt,
     required this.updatedAt,
-    this.schemaVersion = 1,
+    this.schemaVersion = 2,
     this.deletedAt,
   });
   final String id,
@@ -81,7 +91,15 @@ class InspectionPhoto {
   final String? remoteObjectKey, remoteSha256, lastError;
   final int? remoteFileSize;
   final MediaSyncStatus syncStatus;
-  bool get isSynchronized => syncStatus.isSynchronized;
+  final PhotoIntegrityStatus integrityStatus;
+  final PhotoMappingStatus mappingStatus;
+  final bool? originalPresent,
+      thumbnailPresent,
+      integrityRetryable,
+      integrityRepairable;
+  final int integrityAttempts;
+  final DateTime? integrityCheckedAt, nextIntegrityRetryAt;
+  bool get isSynchronized => integrityStatus.isConfirmed;
   bool get isDeleted => deletedAt != null;
 
   Map<String, dynamic> toJson() => {
@@ -125,6 +143,15 @@ class InspectionPhoto {
     'remoteSha256': remoteSha256,
     'remoteFileSize': remoteFileSize,
     'lastError': lastError,
+    'integrityStatus': integrityStatus.name,
+    'mappingStatus': mappingStatus.name,
+    'originalPresent': originalPresent,
+    'thumbnailPresent': thumbnailPresent,
+    'integrityRetryable': integrityRetryable,
+    'integrityRepairable': integrityRepairable,
+    'integrityAttempts': integrityAttempts,
+    'integrityCheckedAt': integrityCheckedAt?.toUtc().toIso8601String(),
+    'nextIntegrityRetryAt': nextIntegrityRetryAt?.toUtc().toIso8601String(),
     'createdAt': createdAt.toUtc().toIso8601String(),
     'updatedAt': updatedAt.toUtc().toIso8601String(),
     'schemaVersion': schemaVersion,
@@ -177,6 +204,22 @@ class InspectionPhoto {
     remoteSha256: j['remoteSha256'] as String?,
     remoteFileSize: j['remoteFileSize'] as int?,
     lastError: j['lastError'] as String?,
+    integrityStatus: PhotoIntegrityStatus.fromPersisted(j['integrityStatus']),
+    mappingStatus: PhotoMappingStatus.values.firstWhere(
+      (value) => value.name == j['mappingStatus'],
+      orElse: () => PhotoMappingStatus.unknown,
+    ),
+    originalPresent: j['originalPresent'] as bool?,
+    thumbnailPresent: j['thumbnailPresent'] as bool?,
+    integrityRetryable: j['integrityRetryable'] as bool?,
+    integrityRepairable: j['integrityRepairable'] as bool?,
+    integrityAttempts: j['integrityAttempts'] as int? ?? 0,
+    integrityCheckedAt: DateTime.tryParse(
+      j['integrityCheckedAt'] as String? ?? '',
+    )?.toUtc(),
+    nextIntegrityRetryAt: DateTime.tryParse(
+      j['nextIntegrityRetryAt'] as String? ?? '',
+    )?.toUtc(),
     createdAt: _date(j['createdAt']),
     updatedAt: _date(j['updatedAt']),
     schemaVersion: j['schemaVersion'] as int? ?? 1,

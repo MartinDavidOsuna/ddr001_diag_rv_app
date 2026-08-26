@@ -6,6 +6,7 @@ import 'package:ddr001diag/core/config/app_config.dart';
 import 'package:ddr001diag/core/network/api_client.dart';
 import 'package:ddr001diag/core/network/api_exception.dart';
 import 'package:ddr001diag/domain/media/inspection_photo.dart';
+import 'package:ddr001diag/domain/media/photo_integrity_status.dart';
 import 'package:ddr001diag/features/inspections/data/inspection_remote_repository.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -70,6 +71,64 @@ void main() {
       ),
     );
     expect(adapter.requests, isEmpty);
+  });
+
+  test(
+    'verify-batch interpreta confirmación y reparación server-side',
+    () async {
+      final adapter = FakeHttpAdapter((options) async {
+        expect(options.path, endsWith('/photos/verify-batch'));
+        return jsonResponse(
+          '{"items":['
+          '{"photoId":"a","status":"confirmed","originalPresent":true,'
+          '"thumbnailPresent":true,"storageVerified":true,"mapped":true,'
+          '"mappingStatus":"mapped","retryable":false,"repairable":false},'
+          '{"photoId":"b","status":"mapping_conflict","originalPresent":true,'
+          '"thumbnailPresent":true,"storageVerified":true,"mapped":false,'
+          '"mappingStatus":"conflict","retryable":false,"repairable":false}'
+          ']}',
+          200,
+        );
+      });
+
+      final result = await _repository(
+        Dio()..httpClientAdapter = adapter,
+      ).verifyPhotosBatch(['a', 'b']);
+
+      expect(result.first.status, PhotoIntegrityStatus.confirmed);
+      expect(result.first.mappingStatus, PhotoMappingStatus.mapped);
+      expect(result.last.status, PhotoIntegrityStatus.mappingConflict);
+      expect(result.last.retryable, isFalse);
+    },
+  );
+
+  test('verify-batch limita cada lote a cien identificadores', () async {
+    final repository = _repository(Dio());
+    await expectLater(
+      repository.verifyPhotosBatch(List.generate(101, (index) => '$index')),
+      throwsA(isA<ApiException>()),
+    );
+  });
+
+  test('verify-batch legacy 404 conserva señal de capability', () async {
+    final adapter = FakeHttpAdapter(
+      (_) async => jsonResponse(
+        '{"title":"Not found","detail":"route unavailable"}',
+        404,
+      ),
+    );
+    await expectLater(
+      _repository(
+        Dio()..httpClientAdapter = adapter,
+      ).verifyPhotosBatch(['photo-1']),
+      throwsA(
+        isA<ApiException>().having(
+          (error) => error.statusCode,
+          'statusCode',
+          404,
+        ),
+      ),
+    );
   });
 }
 

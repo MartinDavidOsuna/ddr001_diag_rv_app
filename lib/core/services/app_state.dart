@@ -11,6 +11,7 @@ import '../../data/local/visual_inspection_repository.dart';
 import '../../data/local/functional_repositories.dart';
 import '../../data/local/sync_queue_repository.dart';
 import '../../domain/media/media_sync_status.dart';
+import '../../domain/media/photo_integrity_status.dart';
 import '../../domain/media/inspection_photo.dart';
 import '../../domain/enums/app_enums.dart';
 import '../../domain/enums/hydrant_list_filter.dart';
@@ -205,7 +206,7 @@ class AppState extends ChangeNotifier {
         );
         if (photo.capturedByUserId == user.id &&
             pendingInspectionIds.contains(photo.inspectionId) &&
-            mediaBox.get(photo.id) != MediaSyncStatus.verified.name) {
+            !photo.isSynchronized) {
           ids.add(photo.id);
         }
       } on Object {
@@ -215,20 +216,41 @@ class AppState extends ChangeNotifier {
     return ids;
   }
 
-  int get pendingPhotos => pendingPhotoIds
-      .where((id) => mediaBox.get(id) != MediaSyncStatus.verified.name)
-      .length;
-  int get verifiedPhotos => accessiblePhotoIds
-      .where((id) => mediaBox.get(id) == MediaSyncStatus.verified.name)
-      .length;
+  int get pendingPhotos => pendingPhotoIds.length;
+  int get verifiedPhotos =>
+      accessiblePhotoIds.where(_photoIntegrityConfirmed).length;
+
+  bool _photoIntegrityConfirmed(String id) {
+    final raw = Hive.box<String>('inspection_photos_v1').get(id);
+    if (raw == null) return false;
+    try {
+      return InspectionPhoto.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+      ).isSynchronized;
+    } on Object {
+      return false;
+    }
+  }
 
   String? photoSyncError(String id) {
     final raw = Hive.box<String>('inspection_photos_v1').get(id);
     if (raw == null) return null;
     try {
-      return InspectionPhoto.fromJson(
+      final photo = InspectionPhoto.fromJson(
         Map<String, dynamic>.from(jsonDecode(raw) as Map),
-      ).lastError;
+      );
+      if (photo.integrityStatus == PhotoIntegrityStatus.mappingConflict) {
+        return 'Esta evidencia requiere revisión.';
+      }
+      if (photo.syncStatus == MediaSyncStatus.missingLocal ||
+          photo.originalPresent == false &&
+              photo.integrityStatus == PhotoIntegrityStatus.missingOriginal) {
+        return 'El archivo no está disponible en este dispositivo.';
+      }
+      if (photo.syncStatus == MediaSyncStatus.failedRetryable) {
+        return 'No fue posible completar la sincronización. Intenta nuevamente.';
+      }
+      return null;
     } on Object {
       return 'El registro local de esta evidencia no se pudo interpretar.';
     }
@@ -253,17 +275,24 @@ class AppState extends ChangeNotifier {
     return count;
   }
 
-  int get syncErrors => pendingPhotoIds
-      .map(mediaBox.get)
-      .where(
-        (v) => {
-          MediaSyncStatus.failedRetryable.name,
-          MediaSyncStatus.failedPermanent.name,
-          MediaSyncStatus.missingLocal.name,
-          MediaSyncStatus.remoteMissing.name,
-        }.contains(v),
-      )
-      .length;
+  int get syncErrors => pendingPhotoIds.where((id) {
+    final raw = Hive.box<String>('inspection_photos_v1').get(id);
+    if (raw == null) return true;
+    try {
+      final photo = InspectionPhoto.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+      );
+      return photo.integrityStatus.requiresReview ||
+          {
+            MediaSyncStatus.failedRetryable,
+            MediaSyncStatus.failedPermanent,
+            MediaSyncStatus.missingLocal,
+            MediaSyncStatus.remoteMissing,
+          }.contains(photo.syncStatus);
+    } on Object {
+      return true;
+    }
+  }).length;
   int get pendingCount => pendingDiagnostics + pendingPhotos;
   bool get allSynchronized =>
       pendingDiagnostics == 0 && pendingPhotos == 0 && syncErrors == 0;
@@ -789,7 +818,7 @@ class AppState extends ChangeNotifier {
         );
         if (photo.capturedByUserId == user.id &&
             photo.hydrantId == hydrant.id &&
-            mediaBox.get(photo.id) != MediaSyncStatus.verified.name) {
+            !photo.isSynchronized) {
           return true;
         }
       } on Object {
@@ -830,9 +859,29 @@ class AppState extends ChangeNotifier {
               draft.localStatus != RvLocalStatus.versionConflict &&
               draft.localStatus != RvLocalStatus.cancelled &&
               (draft.localStatus != RvLocalStatus.submitted ||
-                  draft.hasPendingChanges),
+                  draft.hasPendingChanges ||
+                  _draftHasUnconfirmedEvidence(draft)),
         )
         .toList(growable: false);
+  }
+
+  bool _draftHasUnconfirmedEvidence(RvDraft draft) {
+    final photos = Hive.box<String>('inspection_photos_v1');
+    for (final reference in draft.photos.values.expand((items) => items)) {
+      final raw = photos.get(reference.photoId);
+      if (raw == null) return true;
+      try {
+        final photo = InspectionPhoto.fromJson(
+          Map<String, dynamic>.from(jsonDecode(raw) as Map),
+        );
+        if (photo.integrityStatus != PhotoIntegrityStatus.confirmed) {
+          return true;
+        }
+      } on Object {
+        return true;
+      }
+    }
+    return false;
   }
 
   Hydrant hydrant(String id) =>
@@ -1176,8 +1225,8 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> retryMedia(String id) async {
-    if (mediaBox.get(id) == MediaSyncStatus.verified.name) return;
-    await mediaBox.put(id, MediaSyncStatus.pendingUpload.name);
+    if (_photoIntegrityConfirmed(id)) return;
+    await mediaBox.put(id, 'verify');
     notifyListeners();
     await synchronize();
   }

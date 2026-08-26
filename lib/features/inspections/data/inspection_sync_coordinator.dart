@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../domain/media/inspection_photo.dart';
 import '../../../domain/media/media_sync_status.dart';
+import '../../../domain/media/photo_integrity_status.dart';
 import '../../catalogs/dynamic_catalog_repository.dart';
 import '../domain/rv_draft.dart';
 import '../domain/rv_sync_state.dart';
@@ -50,6 +51,38 @@ int matchingRemotePhotoIndex({
     }
   }
   return hashMatches.length == 1 ? hashMatches.single : -1;
+}
+
+@visibleForTesting
+bool shouldReuploadForIntegrity(RemotePhotoIntegrity result) =>
+    result.status == PhotoIntegrityStatus.notFound ||
+    (const {
+          PhotoIntegrityStatus.missingOriginal,
+          PhotoIntegrityStatus.hashMismatch,
+          PhotoIntegrityStatus.notVerified,
+        }.contains(result.status) &&
+        result.retryable);
+
+class EvidenceReconciliationSummary {
+  const EvidenceReconciliationSummary({
+    required this.draft,
+    required this.total,
+    required this.confirmed,
+    required this.pending,
+    required this.missingServer,
+    required this.missingMapping,
+    required this.retryRequired,
+    required this.failed,
+  });
+
+  final RvDraft draft;
+  final int total,
+      confirmed,
+      pending,
+      missingServer,
+      missingMapping,
+      retryRequired,
+      failed;
 }
 
 class InspectionSyncCoordinator {
@@ -95,7 +128,8 @@ class InspectionSyncCoordinator {
             initial.serverInspectionId == null) ||
         initial.localStatus == RvLocalStatus.versionConflict ||
         (initial.localStatus == RvLocalStatus.submitted &&
-            !initial.hasPendingChanges) ||
+            !initial.hasPendingChanges &&
+            !_hasUnconfirmedEvidence(initial)) ||
         initial.localStatus == RvLocalStatus.cancelled) {
       return initial;
     }
@@ -145,7 +179,7 @@ class InspectionSyncCoordinator {
       draft = await _synchronizeCatalogs(draft);
       if (draft.serverInspectionId != null) {
         final remoteInspection = await remote.get(draft.serverInspectionId!);
-        draft = await _reconcilePhotos(draft);
+        draft = (await reconcileInspectionEvidence(draft)).draft;
         draft = await _reconcileRemoteInspection(
           draft,
           remoteInspection: remoteInspection,
@@ -154,7 +188,7 @@ class InspectionSyncCoordinator {
       }
       draft = await _create(draft);
       draft = await _photos(draft);
-      draft = await _reconcilePhotos(draft);
+      draft = (await reconcileInspectionEvidence(draft)).draft;
       if (_generalPhotosReady(draft)) {
         await remote.saveGeneralContent(draft);
       }
@@ -567,6 +601,14 @@ class InspectionSyncCoordinator {
         var ref = slotRefs[index];
         if (ref.status == RvPhotoUploadStatus.verified) continue;
         var photo = _photo(ref.photoId);
+        if (photo != null &&
+            (photo.syncStatus == MediaSyncStatus.uploadedUnverified ||
+                photo.syncStatus == MediaSyncStatus.verified)) {
+          // A prior server receipt must be cross-checked before deciding that
+          // bytes need to be sent again. This protects legacy evidence and the
+          // capability-fallback rollout from mass reuploads.
+          continue;
+        }
         if (photo != null && photo.inspectionId != draft.clientInspectionId) {
           final newPhotoId = const Uuid().v4();
           final clonedJson = Map<String, dynamic>.from(photo.toJson())
@@ -647,17 +689,21 @@ class InspectionSyncCoordinator {
             photoId: ref.photoId,
             serverPhotoId: uploaded.id,
             slotCode: slot,
-            status: RvPhotoUploadStatus.verified,
+            status: RvPhotoUploadStatus.pending,
             retryCount: ref.retryCount,
             order: ref.order,
             description: ref.description,
           );
-          await _markPhotoVerified(
+          await _markPhotoUploadedUnverified(
             photo,
             uploaded.sha256,
             serverPhotoId: uploaded.id,
           );
-          _debug(draft, 'fotografía', 'verificada slot=$slot');
+          _debug(
+            draft,
+            'fotografía',
+            'recibida; confirmación pendiente slot=$slot',
+          );
         } on ApiException catch (error) {
           final technicalError = _photoErrorDetail(error);
           slotRefs[index] = RvPhotoReference(
@@ -680,11 +726,15 @@ class InspectionSyncCoordinator {
         draft = await _save(draft.copyWith(photos: refs));
       }
     }
-    final complete = requiredRvPhotoSlots.every(
-      (slot) => (refs[slot] ?? const []).any(
-        (photo) => photo.status == RvPhotoUploadStatus.verified,
-      ),
-    );
+    final complete =
+        requiredRvPhotoSlots.every(
+          (slot) => (refs[slot] ?? const []).any(
+            (photo) => photo.status == RvPhotoUploadStatus.verified,
+          ),
+        ) &&
+        refs.values
+            .expand((items) => items)
+            .every((photo) => photo.status == RvPhotoUploadStatus.verified);
     return _save(
       draft.copyWith(
         photos: refs,
@@ -694,52 +744,166 @@ class InspectionSyncCoordinator {
     );
   }
 
+  Future<EvidenceReconciliationSummary> reconcileInspectionEvidence(
+    RvDraft draft,
+  ) async {
+    final reconciled = await _reconcilePhotos(draft);
+    final photos = reconciled.photos.values
+        .expand((items) => items)
+        .map((reference) => _photo(reference.photoId))
+        .whereType<InspectionPhoto>()
+        .toList(growable: false);
+    int count(PhotoIntegrityStatus status) =>
+        photos.where((photo) => photo.integrityStatus == status).length;
+    final confirmed = count(PhotoIntegrityStatus.confirmed);
+    final failed = photos
+        .where((photo) => photo.integrityStatus.requiresReview)
+        .length;
+    return EvidenceReconciliationSummary(
+      draft: reconciled,
+      total: photos.length,
+      confirmed: confirmed,
+      pending: photos.length - confirmed - failed,
+      missingServer:
+          count(PhotoIntegrityStatus.notFound) +
+          count(PhotoIntegrityStatus.missingOriginal),
+      missingMapping: count(PhotoIntegrityStatus.missingMapping),
+      retryRequired: photos
+          .where((photo) => photo.integrityRetryable == true)
+          .length,
+      failed: failed,
+    );
+  }
+
   Future<RvDraft> _reconcilePhotos(RvDraft draft) async {
-    final server = await remote.photos(draft.serverInspectionId!);
-    _debug(draft, 'reconciliación', '${server.length} fotos remotas');
     final refs = <String, List<RvPhotoReference>>{...draft.photos};
-    for (final remotePhoto in server) {
-      final slotRefs = [...draft.photosFor(remotePhoto.slotCode)];
-      final index = matchingRemotePhotoIndex(
-        references: slotRefs,
-        remotePhoto: remotePhoto,
-        localPhoto: _photo,
-      );
-      if (index >= 0 && remotePhoto.status == 'verified') {
-        final local = slotRefs[index];
-        slotRefs[index] = RvPhotoReference(
-          photoId: local.photoId,
-          serverPhotoId: remotePhoto.id,
-          slotCode: local.slotCode,
-          status: RvPhotoUploadStatus.verified,
-          retryCount: local.retryCount,
-          order: local.order,
-          description: local.description,
+    final allRefs = refs.values.expand((items) => items).toList();
+    final now = DateTime.now().toUtc();
+    final dueRefs = allRefs.where((ref) {
+      final photo = _photo(ref.photoId);
+      if (photo?.integrityStatus.isConfirmed == true) return false;
+      if (photo?.integrityStatus.requiresReview == true) return false;
+      final retryAt = photo?.nextIntegrityRetryAt;
+      return retryAt == null || !retryAt.isAfter(now);
+    }).toList();
+    final byServerId = {
+      for (final ref in dueRefs) ref.serverPhotoId ?? ref.photoId: ref,
+    };
+    final results = <RemotePhotoIntegrity>[];
+    try {
+      final ids = byServerId.keys.toList();
+      for (var start = 0; start < ids.length; start += 100) {
+        final end = min(start + 100, ids.length);
+        results.addAll(await remote.verifyPhotosBatch(ids.sublist(start, end)));
+      }
+    } on ApiException catch (error) {
+      if (error.statusCode == 404 || error.statusCode == 405) {
+        await _markIntegrityCapabilityUnavailable(dueRefs);
+        _debug(
+          draft,
+          'verificación',
+          'capability no disponible; evidencia conservada',
         );
-        refs[remotePhoto.slotCode] = slotRefs;
-        final photo = _photo(local.photoId);
-        if (photo != null) {
-          await _markPhotoVerified(
-            photo,
-            remotePhoto.sha256,
-            serverPhotoId: remotePhoto.id,
-          );
-        }
+        return _save(
+          draft.copyWith(photos: _pendingUnconfirmedReferences(refs)),
+        );
+      }
+      rethrow;
+    }
+    final returned = <String>{};
+    for (final result in results) {
+      returned.add(result.photoId);
+      final ref = byServerId[result.photoId];
+      if (ref == null) continue;
+      var effective = result;
+      final local = _photo(ref.photoId);
+      if (shouldReuploadForIntegrity(result) &&
+          local != null &&
+          !local.isDeleted &&
+          await File(local.localPath).exists()) {
+        final uploaded = await remote.uploadPhoto(
+          draft.serverInspectionId!,
+          ref.slotCode,
+          local,
+        );
+        await _markPhotoUploadedUnverified(
+          local,
+          uploaded.sha256,
+          serverPhotoId: uploaded.id,
+        );
+        final verified = await remote.verifyPhotosBatch([uploaded.id]);
+        if (verified.isNotEmpty) effective = verified.single;
+      }
+      await _applyIntegrityResult(ref.photoId, effective);
+      final slotRefs = <RvPhotoReference>[
+        ...(refs[ref.slotCode] ?? const <RvPhotoReference>[]),
+      ];
+      final index = slotRefs.indexWhere((item) => item.photoId == ref.photoId);
+      if (index >= 0) {
+        slotRefs[index] = RvPhotoReference(
+          photoId: ref.photoId,
+          serverPhotoId: result.photoId,
+          slotCode: ref.slotCode,
+          status: effective.status.isConfirmed
+              ? RvPhotoUploadStatus.verified
+              : RvPhotoUploadStatus.pending,
+          retryCount: ref.retryCount,
+          lastError: effective.status.requiresReview
+              ? 'Esta evidencia requiere revisión.'
+              : null,
+          order: ref.order,
+          description: ref.description,
+        );
+        refs[ref.slotCode] = slotRefs;
       }
     }
-    final complete = requiredRvPhotoSlots.every(
-      (slot) => (refs[slot] ?? const []).any(
-        (photo) => photo.status == RvPhotoUploadStatus.verified,
-      ),
-    );
+    for (final entry in byServerId.entries) {
+      if (!returned.contains(entry.key)) {
+        await _markIntegrityRetryRequired(entry.value.photoId);
+      }
+    }
+    final complete =
+        requiredRvPhotoSlots.every(
+          (slot) => (refs[slot] ?? const []).any(
+            (photo) => photo.status == RvPhotoUploadStatus.verified,
+          ),
+        ) &&
+        refs.values
+            .expand((items) => items)
+            .every((photo) => photo.status == RvPhotoUploadStatus.verified);
     return _save(
       draft.copyWith(
         photos: refs,
         photosStatus: complete ? RvPartStatus.synced : RvPartStatus.pending,
-        currentStep: RvSyncStep.submit,
+        currentStep: draft.isReadOnly ? draft.currentStep : RvSyncStep.submit,
       ),
     );
   }
+
+  bool _hasUnconfirmedEvidence(RvDraft draft) => draft.photos.values
+      .expand((items) => items)
+      .any((reference) => _photo(reference.photoId)?.isSynchronized != true);
+
+  Map<String, List<RvPhotoReference>> _pendingUnconfirmedReferences(
+    Map<String, List<RvPhotoReference>> refs,
+  ) => {
+    for (final entry in refs.entries)
+      entry.key: [
+        for (final ref in entry.value)
+          RvPhotoReference(
+            photoId: ref.photoId,
+            serverPhotoId: ref.serverPhotoId,
+            slotCode: ref.slotCode,
+            status: _photo(ref.photoId)?.integrityStatus.isConfirmed == true
+                ? RvPhotoUploadStatus.verified
+                : RvPhotoUploadStatus.pending,
+            retryCount: ref.retryCount,
+            lastError: ref.lastError,
+            order: ref.order,
+            description: ref.description,
+          ),
+      ],
+  };
 
   Future<RvDraft> _submit(RvDraft draft) async {
     final validation = validator.validate(draft, requireSynced: true);
@@ -925,7 +1089,7 @@ class InspectionSyncCoordinator {
     }
   }
 
-  Future<void> _markPhotoVerified(
+  Future<void> _markPhotoUploadedUnverified(
     InspectionPhoto photo,
     String? remoteHash, {
     String? serverPhotoId,
@@ -933,26 +1097,123 @@ class InspectionSyncCoordinator {
     final now = DateTime.now().toUtc();
     final updated = InspectionPhoto.fromJson({
       ...photo.toJson(),
-      'syncStatus': MediaSyncStatus.verified.name,
-      'verifiedAt': now.toIso8601String(),
+      'syncStatus': MediaSyncStatus.uploadedUnverified.name,
+      'integrityStatus': PhotoIntegrityStatus.serverConfirmationPending.name,
+      'integrityCheckedAt': null,
+      'verifiedAt': null,
       'uploadedAt': now.toIso8601String(),
       'remoteObjectKey': serverPhotoId ?? photo.remoteObjectKey ?? photo.id,
       'remoteSha256': remoteHash,
       'updatedAt': now.toIso8601String(),
     });
     await photoBox.put(photo.id, jsonEncode(updated.toJson()));
-    await mediaQueue.put(photo.id, MediaSyncStatus.verified.name);
+    await mediaQueue.put(photo.id, MediaSyncStatus.uploadedUnverified.name);
     await (mediaWorkQueue ?? Hive.box<String>('media_work_queue_v1')).put(
       photo.id,
       jsonEncode({
         'photoId': photo.id,
-        'status': MediaSyncStatus.verified.name,
+        'status': 'verify',
         'serverPhotoId': serverPhotoId ?? photo.remoteObjectKey ?? photo.id,
         'remoteSha256': remoteHash,
         'reconciledAt': now.toIso8601String(),
-        'source': 'remote-confirmation',
+        'source': 'upload-response',
       }),
     );
+  }
+
+  Future<void> _applyIntegrityResult(
+    String localPhotoId,
+    RemotePhotoIntegrity result,
+  ) async {
+    final photo = _photo(localPhotoId);
+    if (photo == null) return;
+    final now = DateTime.now().toUtc();
+    final confirmed = result.status.isConfirmed;
+    final attempts = confirmed ? 0 : photo.integrityAttempts + 1;
+    final retryAt = !confirmed && result.retryable
+        ? now.add(_backoff(attempts))
+        : null;
+    final updated = InspectionPhoto.fromJson({
+      ...photo.toJson(),
+      'schemaVersion': 2,
+      'syncStatus': confirmed
+          ? MediaSyncStatus.verified.name
+          : MediaSyncStatus.uploadedUnverified.name,
+      'integrityStatus': result.status.name,
+      'mappingStatus': result.mappingStatus.name,
+      'originalPresent': result.originalPresent,
+      'thumbnailPresent': result.thumbnailPresent,
+      'integrityRetryable': result.retryable,
+      'integrityRepairable': result.repairable,
+      'integrityAttempts': attempts,
+      'integrityCheckedAt': now.toIso8601String(),
+      'nextIntegrityRetryAt': retryAt?.toIso8601String(),
+      'verifiedAt': confirmed ? now.toIso8601String() : null,
+      'remoteSha256': result.serverSha256 ?? photo.remoteSha256,
+      'lastError': result.status.requiresReview
+          ? 'Esta evidencia requiere revisión.'
+          : null,
+      'updatedAt': now.toIso8601String(),
+    });
+    await photoBox.put(localPhotoId, jsonEncode(updated.toJson()));
+    await mediaQueue.put(
+      localPhotoId,
+      confirmed ? MediaSyncStatus.verified.name : 'verify',
+    );
+    await (mediaWorkQueue ?? Hive.box<String>('media_work_queue_v1')).put(
+      localPhotoId,
+      jsonEncode({
+        'photoId': localPhotoId,
+        'status': confirmed
+            ? MediaSyncStatus.verified.name
+            : result.status.requiresReview
+            ? 'requiresReview'
+            : 'verify',
+        'integrityStatus': result.status.name,
+        'retryCount': attempts,
+        'lastAttemptAt': now.toIso8601String(),
+        'nextRetryAt': retryAt?.toIso8601String(),
+      }),
+    );
+  }
+
+  Future<void> _markIntegrityCapabilityUnavailable(
+    Iterable<RvPhotoReference> references,
+  ) async {
+    for (final reference in references) {
+      final photo = _photo(reference.photoId);
+      if (photo == null || photo.integrityStatus.isConfirmed) continue;
+      final now = DateTime.now().toUtc();
+      final updated = InspectionPhoto.fromJson({
+        ...photo.toJson(),
+        'schemaVersion': 2,
+        'integrityStatus': PhotoIntegrityStatus.capabilityUnavailable.name,
+        'integrityCheckedAt': now.toIso8601String(),
+        'nextIntegrityRetryAt': now
+            .add(const Duration(hours: 6))
+            .toIso8601String(),
+        'updatedAt': now.toIso8601String(),
+      });
+      await photoBox.put(photo.id, jsonEncode(updated.toJson()));
+      await mediaQueue.put(photo.id, 'verify');
+    }
+  }
+
+  Future<void> _markIntegrityRetryRequired(String photoId) async {
+    final photo = _photo(photoId);
+    if (photo == null || photo.integrityStatus.isConfirmed) return;
+    final now = DateTime.now().toUtc();
+    final attempts = photo.integrityAttempts + 1;
+    final updated = InspectionPhoto.fromJson({
+      ...photo.toJson(),
+      'integrityStatus': PhotoIntegrityStatus.retryRequired.name,
+      'integrityAttempts': attempts,
+      'integrityCheckedAt': now.toIso8601String(),
+      'nextIntegrityRetryAt': now.add(_backoff(attempts)).toIso8601String(),
+      'updatedAt': now.toIso8601String(),
+    });
+    await photoBox.put(photoId, jsonEncode(updated.toJson()));
+    await mediaQueue.put(photoId, 'verify');
   }
 
   String _photoErrorDetail(ApiException error) {

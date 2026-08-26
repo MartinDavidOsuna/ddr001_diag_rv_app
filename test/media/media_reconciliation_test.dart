@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:ddr001diag/data/local/media_reconciliation_service.dart';
 import 'package:ddr001diag/domain/media/inspection_photo.dart';
 import 'package:ddr001diag/domain/media/media_sync_status.dart';
+import 'package:ddr001diag/domain/media/photo_integrity_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 
@@ -52,6 +53,7 @@ void main() {
       brigadeId: 'brigade',
       deviceId: 'device',
       syncStatus: status,
+      schemaVersion: 1,
       createdAt: now,
       updatedAt: now,
       deletedAt: deletedAt,
@@ -96,7 +98,7 @@ void main() {
     },
   );
 
-  test('confirmación verified domina colas locales legacy', () async {
+  test('verified legacy se adopta sin asumir confirmación fuerte', () async {
     final original = File('${files.path}/original.jpg')..writeAsBytesSync([1]);
     final thumbnail = File('${files.path}/thumb.jpg')..writeAsBytesSync([1]);
     final value = photo(
@@ -125,10 +127,15 @@ void main() {
       ),
     );
     expect(repairedPhoto.syncStatus, MediaSyncStatus.verified);
+    expect(
+      repairedPhoto.integrityStatus,
+      PhotoIntegrityStatus.serverConfirmationPending,
+    );
+    expect(repairedPhoto.schemaVersion, 2);
     final work = Map<String, dynamic>.from(
       jsonDecode(Hive.box<String>('media_work_queue_v1').get(value.id)!) as Map,
     );
-    expect(work['status'], 'verified');
+    expect(work['status'], 'verify');
     expect(original.existsSync(), isTrue);
   });
 
@@ -157,16 +164,16 @@ void main() {
     await service.reconcile();
     await service.reconcile(); // restart/idempotency
 
-    var verifiedWork = 0;
+    var verifyWork = 0;
     var pendingWork = 0;
     for (final raw in Hive.box<String>('media_work_queue_v1').values) {
       final status = raw.startsWith('{')
           ? (jsonDecode(raw) as Map)['status']
           : raw;
-      if (status == 'verified') verifiedWork++;
+      if (status == 'verify') verifyWork++;
       if (status == 'pendingUpload') pendingWork++;
     }
-    expect(verifiedWork, 226);
+    expect(verifyWork, 226);
     expect(pendingWork, 117);
     expect(Hive.box<String>('inspection_photos_v1').length, 343);
   });
@@ -199,4 +206,40 @@ void main() {
       expect(box.containsKey(deleted.id), isTrue);
     },
   );
+
+  test('migración schema 1 es aditiva e idempotente', () async {
+    final original = File('${files.path}/legacy.jpg')..writeAsBytesSync([1]);
+    final thumbnail = File('${files.path}/legacy-thumb.jpg')
+      ..writeAsBytesSync([1]);
+    final legacy =
+        photo(
+            id: 'legacy',
+            original: original.path,
+            thumbnail: thumbnail.path,
+            status: MediaSyncStatus.verified,
+          ).toJson()
+          ..remove('integrityStatus')
+          ..remove('mappingStatus')
+          ..['schemaVersion'] = 1;
+    final box = Hive.box<String>('inspection_photos_v1');
+    await box.put('legacy', jsonEncode(legacy));
+    await Hive.box<String>('media_sync_queue').put('legacy', 'verified');
+
+    final service = MediaReconciliationService();
+    await service.reconcile();
+    final once = box.get('legacy');
+    await service.reconcile();
+    final twice = box.get('legacy');
+
+    expect(twice, once);
+    final migrated = InspectionPhoto.fromJson(
+      Map<String, dynamic>.from(jsonDecode(twice!) as Map),
+    );
+    expect(migrated.schemaVersion, 2);
+    expect(migrated.syncStatus, MediaSyncStatus.verified);
+    expect(migrated.integrityStatus.isConfirmed, isFalse);
+    expect(migrated.localPath, original.path);
+    expect(migrated.sha256, 'hash-legacy');
+    expect(original.existsSync(), isTrue);
+  });
 }

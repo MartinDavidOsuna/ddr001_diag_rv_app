@@ -5,6 +5,7 @@ import 'package:hive_ce/hive.dart';
 
 import '../../domain/media/inspection_photo.dart';
 import '../../domain/media/media_sync_status.dart';
+import '../../domain/media/photo_integrity_status.dart';
 import 'thumbnail_regeneration_service.dart';
 
 enum MediaReconciliationIssue {
@@ -13,6 +14,7 @@ enum MediaReconciliationIssue {
   missingQueue,
   inconsistentStatus,
   verifiedWithoutLocalFile,
+  legacyConfirmationPending,
 }
 
 class MediaReconciliationResult {
@@ -43,10 +45,20 @@ class MediaReconciliationService {
     final results = <MediaReconciliationResult>[];
     for (final entry in photos.toMap().entries) {
       try {
-        final photo = InspectionPhoto.fromJson(
+        var photo = InspectionPhoto.fromJson(
           Map<String, dynamic>.from(jsonDecode(entry.value) as Map),
         );
         if (photo.isDeleted) continue;
+        final legacySchema = photo.schemaVersion < 2;
+        if (legacySchema) {
+          photo = InspectionPhoto.fromJson({
+            ...photo.toJson(),
+            'schemaVersion': 2,
+            'integrityStatus':
+                PhotoIntegrityStatus.serverConfirmationPending.name,
+          });
+          await photos.put(photo.id, jsonEncode(photo.toJson()));
+        }
         final issues = <MediaReconciliationIssue>[];
         final actions = <String>[];
         final exists = File(photo.localPath).existsSync();
@@ -79,13 +91,20 @@ class MediaReconciliationService {
         }
         if (remotelyVerified) {
           final now = DateTime.now().toUtc();
-          if (photo.syncStatus != MediaSyncStatus.verified) {
+          final needsAdoption = legacySchema;
+          if (photo.syncStatus != MediaSyncStatus.verified || needsAdoption) {
             issues.add(MediaReconciliationIssue.inconsistentStatus);
+            if (needsAdoption) {
+              issues.add(MediaReconciliationIssue.legacyConfirmationPending);
+            }
             final repaired = InspectionPhoto.fromJson({
               ...photo.toJson(),
+              // Preserve the legacy value for rollback. Strong confirmation is
+              // represented independently by integrityStatus.
               'syncStatus': MediaSyncStatus.verified.name,
-              'verifiedAt':
-                  photo.verifiedAt?.toIso8601String() ?? now.toIso8601String(),
+              'integrityStatus':
+                  PhotoIntegrityStatus.serverConfirmationPending.name,
+              'schemaVersion': 2,
               'updatedAt': now.toIso8601String(),
               'lastError': null,
             });
@@ -93,16 +112,18 @@ class MediaReconciliationService {
             actions.add('Documento local reconciliado a verified.');
           }
           await sync.put(photo.id, MediaSyncStatus.verified.name);
-          await work.put(
-            photo.id,
-            jsonEncode({
-              'photoId': photo.id,
-              'status': MediaSyncStatus.verified.name,
-              'reconciledAt': now.toIso8601String(),
-              'source': 'remote-confirmation',
-            }),
-          );
-          actions.add('Cola legacy reconciliada a verified.');
+          if (needsAdoption || !work.containsKey(photo.id)) {
+            await work.put(
+              photo.id,
+              jsonEncode({
+                'photoId': photo.id,
+                'status': 'verify',
+                'reconciledAt': now.toIso8601String(),
+                'source': 'legacy-adoption',
+              }),
+            );
+            actions.add('Confirmación legacy programada para verificación.');
+          }
         } else if (!work.containsKey(photo.id)) {
           issues.add(MediaReconciliationIssue.missingQueue);
           await work.put(

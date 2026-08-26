@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../domain/media/inspection_photo.dart';
+import '../../../domain/media/photo_integrity_status.dart';
 import '../domain/rv_draft.dart';
 import '../domain/rv_sync_state.dart';
 import '../domain/parcel_valve_configuration.dart';
@@ -40,6 +41,56 @@ class RemotePhoto {
   final String id, slotCode, status;
   final String? sha256, clientSha256;
 }
+
+class RemotePhotoIntegrity {
+  const RemotePhotoIntegrity({
+    required this.photoId,
+    required this.status,
+    required this.originalPresent,
+    required this.thumbnailPresent,
+    required this.storageVerified,
+    required this.mapped,
+    required this.mappingStatus,
+    required this.retryable,
+    required this.repairable,
+    this.serverSha256,
+  });
+
+  final String photoId;
+  final PhotoIntegrityStatus status;
+  final bool originalPresent, thumbnailPresent, storageVerified, mapped;
+  final PhotoMappingStatus mappingStatus;
+  final bool retryable, repairable;
+  final String? serverSha256;
+
+  factory RemotePhotoIntegrity.fromJson(Map<String, dynamic> json) =>
+      RemotePhotoIntegrity(
+        photoId: '${json['photoId'] ?? ''}',
+        status: _integrityStatusFromWire(json['status']),
+        originalPresent: json['originalPresent'] == true,
+        thumbnailPresent: json['thumbnailPresent'] == true,
+        storageVerified: json['storageVerified'] == true,
+        mapped: json['mapped'] == true,
+        mappingStatus: photoMappingStatusFromWire(json['mappingStatus']),
+        retryable: json['retryable'] == true,
+        repairable: json['repairable'] == true,
+        serverSha256: json['serverSha256']?.toString(),
+      );
+}
+
+PhotoIntegrityStatus _integrityStatusFromWire(Object? value) =>
+    switch (value?.toString()) {
+      'confirmed' => PhotoIntegrityStatus.confirmed,
+      'missing_original' => PhotoIntegrityStatus.missingOriginal,
+      'missing_thumbnail' => PhotoIntegrityStatus.missingThumbnail,
+      'hash_mismatch' => PhotoIntegrityStatus.hashMismatch,
+      'missing_mapping' => PhotoIntegrityStatus.missingMapping,
+      'mapping_conflict' => PhotoIntegrityStatus.mappingConflict,
+      'deleted' => PhotoIntegrityStatus.deleted,
+      'not_verified' => PhotoIntegrityStatus.notVerified,
+      'not_found' => PhotoIntegrityStatus.notFound,
+      _ => PhotoIntegrityStatus.retryRequired,
+    };
 
 class RemoteHydrantIdentity {
   const RemoteHydrantIdentity({required this.id, required this.accountNumber});
@@ -467,6 +518,35 @@ class InspectionRemoteRepository {
             );
           })
           .toList();
+    } on DioException catch (error) {
+      throw ApiException.fromDio(error);
+    }
+  }
+
+  Future<List<RemotePhotoIntegrity>> verifyPhotosBatch(
+    Iterable<String> photoIds,
+  ) async {
+    final unique = photoIds.where((id) => id.isNotEmpty).toSet().toList();
+    if (unique.isEmpty) return const [];
+    if (unique.length > 100) {
+      throw const ApiException(
+        ApiErrorKind.invalidData,
+        'El lote de verificación supera 100 fotografías.',
+      );
+    }
+    try {
+      final response = await client.dio.post<Map<String, dynamic>>(
+        '/photos/verify-batch',
+        data: {'photoIds': unique},
+      );
+      return (response.data?['items'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) =>
+                RemotePhotoIntegrity.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .where((item) => item.photoId.isNotEmpty)
+          .toList(growable: false);
     } on DioException catch (error) {
       throw ApiException.fromDio(error);
     }
