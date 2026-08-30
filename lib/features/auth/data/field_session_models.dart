@@ -42,10 +42,13 @@ class FieldSession {
     this.crewId = '',
     this.role = 'field',
     this.startedAt,
+    this.persistentSessionId = '',
+    this.bindingId = '',
   });
 
   final String sessionId, userId, accessToken, refreshToken, installationId;
   final String name, email, phone, crew, crewId, role;
+  final String persistentSessionId, bindingId;
   final DateTime? startedAt;
 
   FieldSession copyWith({String? accessToken, String? refreshToken}) =>
@@ -62,5 +65,7 @@ class FieldSession {
         crewId: crewId,
         role: role,
         startedAt: startedAt,
+        persistentSessionId: persistentSessionId,
+        bindingId: bindingId,
       );
 }

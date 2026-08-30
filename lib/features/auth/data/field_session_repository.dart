@@ -76,6 +76,7 @@ class FieldSessionRepository {
     final installationId = await storage.installationId();
     final device = await _device();
     try {
+      await completePendingLogout();
       final response = await client.dio.post<Map<String, dynamic>>(
         '/field-sessions/start',
         data: {
@@ -108,11 +109,30 @@ class FieldSessionRepository {
         crewId: _required(data, 'crewId'),
         role: data['role']?.toString() ?? 'field',
         startedAt: DateTime.now().toUtc(),
+        persistentSessionId: data['persistentSessionId']?.toString() ?? '',
+        bindingId: data['bindingId']?.toString() ?? '',
       );
       await storage.save(session);
       return session;
     } on Object catch (error) {
       client.rethrowAsApi(error);
+    }
+  }
+
+  Future<void> revokeExisting(String takeoverToken) async {
+    try {
+      await client.dio.post<void>(
+        '/field-sessions/revoke-existing',
+        data: {'takeoverToken': takeoverToken},
+        options: Options(extra: {'skipAuth': true}),
+      );
+    } on DioException catch (error) {
+      final apiError = ApiException.fromDio(error);
+      if (error.response?.statusCode == 404 &&
+          apiError.domainCode == 'SESSION_NOT_FOUND') {
+        return;
+      }
+      throw apiError;
     }
   }
 
@@ -138,6 +158,10 @@ class FieldSessionRepository {
         crewId: _required(data, 'crew_id'),
         role: 'field',
         startedAt: local.startedAt,
+        persistentSessionId:
+            data['persistent_session_id']?.toString() ??
+            local.persistentSessionId,
+        bindingId: data['binding_id']?.toString() ?? local.bindingId,
       );
       await storage.save(restored);
       return restored;
@@ -149,7 +173,13 @@ class FieldSessionRepository {
         return local;
       }
       if (error.response?.statusCode == 401) {
-        return storage.read();
+        final apiError = ApiException.fromDio(error);
+        if (apiError.kind == ApiErrorKind.sessionRevoked) {
+          await storage.clear();
+          throw apiError;
+        }
+        lastRestoreOffline = true;
+        return local;
       }
       rethrow;
     }
@@ -158,26 +188,52 @@ class FieldSessionRepository {
   Future<bool> end() async {
     final session = await storage.read();
     if (session == null) return true;
+    final pendingStorage = storage is PendingLogoutStorage
+        ? storage as PendingLogoutStorage
+        : null;
+    await pendingStorage?.savePendingLogout(session);
     try {
       await client.dio.post<void>(
         '/field-sessions/${session.sessionId}/end',
         options: Options(
-          headers: {'Idempotency-Key': 'end-${session.sessionId}'},
+          extra: {'skipAuth': true},
+          headers: {
+            'Authorization': 'Bearer ${session.accessToken}',
+            'Idempotency-Key': 'end-${session.sessionId}',
+          },
         ),
       );
+      await pendingStorage?.clearPendingLogout();
       await storage.clear();
       return true;
-    } on DioException catch (error) {
-      if (error.type == DioExceptionType.connectionError ||
-          error.type == DioExceptionType.connectionTimeout ||
-          error.type == DioExceptionType.receiveTimeout ||
-          error.type == DioExceptionType.sendTimeout) {
-        // El cierre remoto queda pendiente, pero la sesión local no debe
-        // vincular el dispositivo ni impedir que otro usuario se autentique.
-        await storage.clear();
-        return false;
-      }
-      client.rethrowAsApi(error);
+    } on DioException {
+      // El cierre local siempre gana. El sobre cifrado queda pendiente ante
+      // cualquier resultado remoto no confirmado, incluidos 5xx/timeout.
+      await storage.clear();
+      return false;
+    }
+  }
+
+  Future<bool> completePendingLogout() async {
+    if (storage is! PendingLogoutStorage) return true;
+    final pendingStorage = storage as PendingLogoutStorage;
+    final pending = await pendingStorage.readPendingLogout();
+    if (pending == null) return true;
+    try {
+      await client.dio.post<void>(
+        '/field-sessions/${pending.sessionId}/end',
+        options: Options(
+          extra: {'skipAuth': true},
+          headers: {
+            'Authorization': 'Bearer ${pending.accessToken}',
+            'Idempotency-Key': 'end-${pending.sessionId}',
+          },
+        ),
+      );
+      await pendingStorage.clearPendingLogout();
+      return true;
+    } on DioException {
+      return false;
     }
   }
 

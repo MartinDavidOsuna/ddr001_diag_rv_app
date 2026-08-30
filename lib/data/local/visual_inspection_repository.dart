@@ -2,12 +2,14 @@ import 'package:hive_ce/hive.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/persistence/versioned_json_codec.dart';
+import '../../core/security/f02a_scoped_identity.dart';
 import '../../core/security/local_data_scope.dart';
 import '../../domain/enums/app_enums.dart';
 import '../../domain/inspections/visual_inspection.dart';
 import '../../domain/models/app_models.dart';
 import '../../domain/workflow/report_state_machine.dart';
 import '../../domain/integrity/operation_journal.dart';
+import '../../features/inspections/domain/rv_visual_document_classification.dart';
 import 'operation_journal_repository.dart';
 
 class VisualInspectionRepository {
@@ -17,11 +19,22 @@ class VisualInspectionRepository {
   final Box<String> index;
   LocalDataScope? _scope;
   bool _scopeConfigured = false;
+  final Map<String, Set<String>> _documentIdsByHydrant = {};
+  bool _hydrantLookupComplete = false;
+
+  void _remember(VisualInspection value) {
+    _documentIdsByHydrant
+        .putIfAbsent(value.hydrantId, () => <String>{})
+        .add(value.id);
+  }
 
   void setAccessScope(LocalDataScope? scope) {
     _scope = scope;
     _scopeConfigured = true;
   }
+
+  bool get accessScopeConfigured => _scopeConfigured;
+  String? get accessScopeNamespace => _scope?.namespace;
 
   bool _canAccess(VisualInspection value) {
     if (!_scopeConfigured) return true;
@@ -29,10 +42,15 @@ class VisualInspectionRepository {
     if (scope == null || !scope.isUsable) return false;
     if (scope.isAdministrator) return true;
     final rawScope = value.unknownFields['dataScope'];
-    if (rawScope is! Map) return false;
+    // 1.0.0+100 documents did not always carry dataScope. They remain
+    // recoverable and visible; write authorization is still owner-checked.
+    if (rawScope is! Map) {
+      return scope.owns(ownerUserId: value.createdBy) ||
+          scope.owns(ownerUserId: value.inspectorId);
+    }
     final storedScope = Map<String, dynamic>.from(rawScope);
-    if (storedScope['environment'] != scope.environment ||
-        storedScope['accountId'] != scope.accountId) {
+    if (!scope.sameEnvironment('${storedScope['environment'] ?? ''}') ||
+        !scope.sameAccount('${storedScope['accountId'] ?? ''}')) {
       return false;
     }
     return scope.owns(ownerUserId: value.createdBy) ||
@@ -40,28 +58,158 @@ class VisualInspectionRepository {
   }
 
   String _indexKey(String hydrantId) {
-    final prefix = _scope?.namespace;
-    return prefix == null ? '$hydrantId:f02A' : '$prefix/$hydrantId/f02A';
+    final scope = _scope;
+    final scopedKey = scope == null
+        ? null
+        : buildF02AScopedKey(
+            environment: scope.environment,
+            accountId: scope.accountId,
+            ownerUserId: scope.userId,
+            createdBy: null,
+            inspectorId: null,
+            hydrantId: hydrantId,
+          );
+    return scopedKey ?? '$hydrantId:f02A';
+  }
+
+  String activeIndexKeyForHydrant(String hydrantId) => _indexKey(hydrantId);
+
+  String _legacyIndexKey(String hydrantId) => '$hydrantId:f02A';
+
+  bool _isCurrentScopedKey(Object key) {
+    final scope = _scope;
+    return scope != null && '$key'.startsWith('${scope.namespace}/');
   }
 
   List<VisualInspection> accessible() {
     final values = <VisualInspection>[];
+    final lookup = <String, Set<String>>{};
     for (final raw in documents.values) {
       try {
         final value = VisualInspection.fromJson(
           VersionedJsonCodec.decode(raw).payload,
         );
+        lookup.putIfAbsent(value.hydrantId, () => <String>{}).add(value.id);
         if (_canAccess(value)) values.add(value);
       } on Object {
         continue;
       }
     }
+    _documentIdsByHydrant
+      ..clear()
+      ..addAll(lookup);
+    _hydrantLookupComplete = true;
     return values;
+  }
+
+  /// Removes only index entries that cannot represent active work anymore.
+  /// Inspection documents are deliberately preserved for recovery/history.
+  Future<int> reconcileActiveIndex() async {
+    final staleKeys = <Object>[];
+    for (final entry in index.toMap().entries) {
+      final id = entry.value;
+      if (id.isEmpty) {
+        if (!_scopeConfigured || _isCurrentScopedKey(entry.key)) {
+          staleKeys.add(entry.key);
+        }
+        continue;
+      }
+      final raw = documents.get(id);
+      if (raw == null) {
+        // A missing target carries no ownership proof. With an active scope,
+        // only its own namespaced key can be retired automatically; legacy or
+        // foreign keys remain visible to the conservative integrity audit.
+        if (!_scopeConfigured || _isCurrentScopedKey(entry.key)) {
+          staleKeys.add(entry.key);
+        }
+        continue;
+      }
+      try {
+        final inspection = VisualInspection.fromJson(
+          VersionedJsonCodec.decode(raw).payload,
+        );
+        if (_scopeConfigured && !_canAccess(inspection)) continue;
+        final expected = _indexKey(inspection.hydrantId);
+        final legacy = _legacyIndexKey(inspection.hydrantId);
+        if (inspection.status == InspectionStatus.completed) {
+          staleKeys.add(entry.key);
+        } else if (entry.key == legacy && expected != legacy) {
+          // Migrate additively: never remove the only route to an active
+          // legacy document before its scoped route is durable.
+          if (index.get(expected) == inspection.id) staleKeys.add(entry.key);
+        } else if (entry.key != expected) {
+          staleKeys.add(entry.key);
+        }
+      } on Object {
+        // Keep ambiguous/corrupt entries for the integrity audit and quarantine.
+      }
+    }
+    if (staleKeys.isNotEmpty) await index.deleteAll(staleKeys);
+    return staleKeys.length;
+  }
+
+  Future<void> replaceActiveVisualIndex(
+    Map<String, String> canonicalByKey,
+  ) async {
+    final ownedKeys = <Object>[];
+    for (final key in index.keys) {
+      if (!'$key'.endsWith(':f02A') && !'$key'.endsWith('/f02A')) continue;
+      if (!_scopeConfigured || _isCurrentScopedKey(key)) {
+        ownedKeys.add(key);
+        continue;
+      }
+      final id = index.get(key);
+      final raw = id == null ? null : documents.get(id);
+      if (raw == null) continue;
+      try {
+        final inspection = VisualInspection.fromJson(
+          VersionedJsonCodec.decode(raw).payload,
+        );
+        if (_canAccess(inspection) &&
+            key == _legacyIndexKey(inspection.hydrantId)) {
+          ownedKeys.add(key);
+        }
+      } on Object {
+        // Ambiguous entries are preserved for audit rather than adopted.
+      }
+    }
+    // Make every canonical scoped entry durable before retiring its exact
+    // owned legacy predecessor. A failure can leave both keys for recovery,
+    // but never leaves active work without an index.
+    for (final entry in canonicalByKey.entries) {
+      if (index.get(entry.key) == entry.value) continue;
+      await index.put(entry.key, entry.value);
+      if (index.get(entry.key) != entry.value) {
+        throw StateError('No fue posible confirmar la escritura del índice.');
+      }
+    }
+    for (final key in ownedKeys) {
+      if (!canonicalByKey.containsKey('$key')) {
+        await index.delete(key);
+        if (index.containsKey(key)) {
+          throw StateError('No fue posible confirmar el retiro del índice.');
+        }
+      }
+    }
   }
 
   bool hasLocalInspection(String hydrantId) {
     final id = index.get(_indexKey(hydrantId));
     return id != null && findById(id) != null;
+  }
+
+  /// Resolves the active document through the persisted index without
+  /// materializing every inspection in the local archive.
+  VisualInspection? activeForHydrant(String hydrantId) {
+    final id = index.get(_indexKey(hydrantId));
+    if (id == null) return null;
+    final inspection = findById(id);
+    if (inspection == null ||
+        !_canAccess(inspection) ||
+        inspection.status == InspectionStatus.completed) {
+      return null;
+    }
+    return inspection;
   }
 
   VisualInspection? findById(String id) {
@@ -78,6 +226,15 @@ class VisualInspectionRepository {
   }
 
   List<VisualInspection> forHydrant(String hydrantId) {
+    if (_hydrantLookupComplete) {
+      final values = <VisualInspection>[];
+      for (final id in _documentIdsByHydrant[hydrantId] ?? const <String>{}) {
+        final value = findById(id);
+        if (value != null && _canAccess(value)) values.add(value);
+      }
+      values.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      return values;
+    }
     final values = <VisualInspection>[];
     for (final value in accessible()) {
       if (value.hydrantId == hydrantId) values.add(value);
@@ -93,26 +250,13 @@ class VisualInspectionRepository {
     }
     final existingId = index.get(_indexKey(hydrant.id));
     if (existingId != null) {
-      final raw = documents.get(existingId);
-      if (raw != null) {
-        return VisualInspection.fromJson(
-          VersionedJsonCodec.decode(raw).payload,
-        );
-      }
-    }
-    if (hydrant.f02a.status == InspectionStatus.completed) {
-      for (final raw in documents.values) {
-        try {
-          final candidate = VisualInspection.fromJson(
-            VersionedJsonCodec.decode(raw).payload,
-          );
-          if (candidate.hydrantId == hydrant.id &&
-              candidate.status == InspectionStatus.completed) {
-            return candidate;
-          }
-        } on FormatException {
-          continue;
-        }
+      // `findById` preserves scope checks and treats a missing or unreadable
+      // legacy target as recoverable instead of crashing the navigation.
+      final existing = findById(existingId);
+      if (existing != null &&
+          existing.hydrantId.toLowerCase() == hydrant.id.toLowerCase() &&
+          existing.status != InspectionStatus.completed) {
+        return existing;
       }
     }
     final now = DateTime.now().toUtc();
@@ -200,11 +344,120 @@ class VisualInspectionRepository {
       await documents.put('${inspection.id}:previous:$stamp', previous);
     }
     await documents.put(inspection.id, encoded);
+    _remember(inspection);
     final confirmed = documents.get(inspection.id);
     if (confirmed == null) {
       throw StateError('No fue posible confirmar la escritura del borrador.');
     }
     VersionedJsonCodec.decode(confirmed);
+    if (inspection.status == InspectionStatus.completed) {
+      final key = _indexKey(inspection.hydrantId);
+      if (index.get(key) == inspection.id) await index.delete(key);
+    }
+  }
+
+  /// Updates only the embedded RV synchronization envelope of a completed
+  /// report. Technical answers, evidence references and completion timestamps
+  /// remain exactly as originally persisted.
+  Future<void> saveCompletedSyncMetadata({
+    required String inspectionId,
+    required String storageKey,
+    required Object metadata,
+  }) async {
+    final stored = findById(inspectionId);
+    if (stored == null || stored.status != InspectionStatus.completed) {
+      throw StateError('El documento no es un REPORTE VISUAL finalizado.');
+    }
+    final updated = stored.copyWith(
+      unknownFields: {...stored.unknownFields, storageKey: metadata},
+    );
+    await documents.put(
+      inspectionId,
+      VersionedJsonCodec.encode(
+        schemaVersion: updated.schemaVersion,
+        payload: updated.toJson(),
+      ),
+    );
+    _remember(updated);
+  }
+
+  Future<void> createRevisionClone(VisualInspection revision) async {
+    if (documents.containsKey(revision.id)) {
+      throw StateError('La revisión local ya existe.');
+    }
+    await documents.put(
+      revision.id,
+      VersionedJsonCodec.encode(
+        schemaVersion: revision.schemaVersion,
+        payload: revision.toJson(),
+      ),
+    );
+    _remember(revision);
+    await index.put(_indexKey(revision.hydrantId), revision.id);
+  }
+
+  Future<void> deleteLocalDraft(
+    String id, {
+    required String creatorId,
+    String reason = 'archived_by_technician',
+    String? correlationId,
+  }) async {
+    final inspection = findById(id);
+    if (inspection == null) {
+      throw StateError('No se encontró el borrador local.');
+    }
+    if (inspection.createdBy != creatorId &&
+        inspection.inspectorId != creatorId) {
+      throw StateError('Sólo el creador puede eliminar este borrador.');
+    }
+    if (inspection.status == InspectionStatus.completed) {
+      throw StateError('Una revisión finalizada no puede eliminarse.');
+    }
+    final archived = inspection.copyWith(
+      updatedAt: DateTime.now().toUtc(),
+      unknownFields: {
+        ...inspection.unknownFields,
+        'archiveState': 'archived',
+        'archivedAt': DateTime.now().toUtc().toIso8601String(),
+        'archivedBy': creatorId,
+        'archiveReason': reason,
+        'archiveCorrelationId': correlationId ?? const Uuid().v4(),
+      },
+    );
+    await save(archived);
+    await detachFromActiveIndex(id);
+  }
+
+  Future<void> restoreArchivedDraft(
+    String id, {
+    required String actorId,
+  }) async {
+    final inspection = findById(id);
+    if (inspection == null) {
+      throw StateError('No se encontró la captura archivada.');
+    }
+    if (inspection.unknownFields['archiveState'] != 'archived') return;
+    final fields = {...inspection.unknownFields}
+      ..['archiveState'] = 'restored'
+      ..['restoredAt'] = DateTime.now().toUtc().toIso8601String()
+      ..['restoredBy'] = actorId;
+    await save(
+      inspection.copyWith(
+        updatedAt: DateTime.now().toUtc(),
+        unknownFields: fields,
+      ),
+    );
+    await index.put(_indexKey(inspection.hydrantId), inspection.id);
+    if (index.get(_indexKey(inspection.hydrantId)) != inspection.id) {
+      throw StateError('No fue posible confirmar la restauración.');
+    }
+  }
+
+  Future<void> detachFromActiveIndex(String id) async {
+    final inspection = findById(id);
+    if (inspection == null) return;
+    final key = _indexKey(inspection.hydrantId);
+    if (index.get(key) == id) await index.delete(key);
   }
 
   Future<VisualInspection> createRevision(
@@ -212,7 +465,7 @@ class VisualInspectionRepository {
     AppUser supervisor,
     String reason,
   ) async {
-    if (original.status != InspectionStatus.completed) {
+    if (!isNormalCompletedRvDocument(original)) {
       throw StateError('Solo un REPORTE VISUAL finalizado admite revisión.');
     }
     if (!supervisor.role.toLowerCase().contains('supervisor')) {
@@ -260,13 +513,17 @@ class VisualInspectionRepository {
     return revision;
   }
 
-  Future<void> finalize(VisualInspection inspection) async {
+  Future<void> finalize(
+    VisualInspection inspection, {
+    JournalOperationType operationType =
+        JournalOperationType.finalizeVisualReport,
+  }) async {
     final journal = OperationJournalRepository(
       Hive.box<String>('operation_journal_v1'),
     );
     var operation = OperationJournalEntry(
       operationId: const Uuid().v4(),
-      operationType: JournalOperationType.finalizeVisualReport,
+      operationType: operationType,
       entityIds: [inspection.id],
       documentWrites: [inspection.id],
       indexWrites: [_indexKey(inspection.hydrantId)],
@@ -288,7 +545,11 @@ class VisualInspectionRepository {
       }
       operation = operation.advance(JournalStatus.documentsWritten);
       await journal.save(operation);
-      await index.delete(_indexKey(inspection.hydrantId));
+      final indexKey = _indexKey(inspection.hydrantId);
+      if (index.get(indexKey) == inspection.id) await index.delete(indexKey);
+      if (index.get(indexKey) == inspection.id) {
+        throw StateError('No fue posible confirmar el retiro del índice.');
+      }
       await journal.save(operation.advance(JournalStatus.committed));
     } on Object catch (error) {
       await journal.save(

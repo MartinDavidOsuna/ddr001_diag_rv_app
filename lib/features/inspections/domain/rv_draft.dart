@@ -1,6 +1,7 @@
 import '../../checklist/data/checklist_models.dart';
 import 'rv_sync_state.dart';
 import 'parcel_valve_configuration.dart';
+import 'hydrant_account_identity.dart';
 
 const requiredRvPhotoSlots = <String>[
   'front_closed',
@@ -21,6 +22,19 @@ const rvPhotoSlotLabels = <String, String>{
   'front_open': 'Frente abierto',
   'serial_plate': 'Placa o número de serie',
 };
+
+const noHydrantAtLocationPhotoSlot = 'no_hydrant_at_location';
+const noHydrantAtLocationReasonCode = 'NO_HYDRANT_AT_CAPTURED_LOCATION';
+const inactiveClosureContractVersion = 1;
+const inactiveClosureCommentMinLength = 10;
+const inactiveClosureCommentMaxLength = 500;
+
+enum RvInactiveClosureSyncStatus {
+  pendingApiContract,
+  syncing,
+  remoteVerified,
+  conflict,
+}
 
 class RvAnswer {
   const RvAnswer({
@@ -77,6 +91,18 @@ class RvLocationSample {
   final double? altitude, horizontalAccuracy, verticalAccuracy;
   final String source;
   final DateTime capturedAt;
+  bool get isValid =>
+      latitude.isFinite &&
+      longitude.isFinite &&
+      latitude >= -90 &&
+      latitude <= 90 &&
+      longitude >= -180 &&
+      longitude <= 180 &&
+      !(latitude == 0 && longitude == 0) &&
+      (horizontalAccuracy == null ||
+          (horizontalAccuracy!.isFinite && horizontalAccuracy! >= 0)) &&
+      capturedAt.toUtc().millisecondsSinceEpoch > 0 &&
+      source.trim().isNotEmpty;
   Map<String, dynamic> toJson() => {
     'latitude': latitude,
     'longitude': longitude,
@@ -93,8 +119,181 @@ class RvLocationSample {
         altitude: (json['altitude'] as num?)?.toDouble(),
         horizontalAccuracy: (json['horizontalAccuracy'] as num?)?.toDouble(),
         verticalAccuracy: (json['verticalAccuracy'] as num?)?.toDouble(),
-        source: json['source'] as String? ?? 'gps',
-        capturedAt: DateTime.parse(json['capturedAt'] as String).toUtc(),
+        source: json['source'] as String? ?? '',
+        capturedAt:
+            DateTime.tryParse(json['capturedAt'] as String? ?? '')?.toUtc() ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+      );
+}
+
+bool sameRvLocationSample(RvLocationSample left, RvLocationSample right) =>
+    left.latitude == right.latitude &&
+    left.longitude == right.longitude &&
+    left.altitude == right.altitude &&
+    left.horizontalAccuracy == right.horizontalAccuracy &&
+    left.verticalAccuracy == right.verticalAccuracy &&
+    left.source == right.source &&
+    left.capturedAt.toUtc() == right.capturedAt.toUtc();
+
+class RvInactiveClosureDraft {
+  const RvInactiveClosureDraft({
+    required this.draftId,
+    required this.location,
+    required this.comment,
+    required this.startedAt,
+    required this.updatedAt,
+    required this.createdByUserId,
+    required this.createdByName,
+    required this.brigadeId,
+    required this.deviceId,
+    required this.photoIds,
+    this.recoveryStatus = 'ready',
+    this.contractVersion = inactiveClosureContractVersion,
+  });
+
+  final String draftId;
+  final RvLocationSample location;
+  final String comment;
+  final DateTime startedAt;
+  final DateTime updatedAt;
+  final String createdByUserId;
+  final String createdByName;
+  final String brigadeId;
+  final String deviceId;
+  final List<String> photoIds;
+  final String recoveryStatus;
+  final int contractVersion;
+
+  bool get hasUsefulComment => comment.trim().isNotEmpty;
+  bool get hasEvidence => photoIds.isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+    'draftId': draftId,
+    'location': location.toJson(),
+    'comment': comment,
+    'startedAt': startedAt.toUtc().toIso8601String(),
+    'updatedAt': updatedAt.toUtc().toIso8601String(),
+    'createdByUserId': createdByUserId,
+    'createdByName': createdByName,
+    'brigadeId': brigadeId,
+    'deviceId': deviceId,
+    'photoIds': photoIds,
+    'recoveryStatus': recoveryStatus,
+    'contractVersion': contractVersion,
+  };
+
+  factory RvInactiveClosureDraft.fromJson(Map<String, dynamic> json) =>
+      RvInactiveClosureDraft(
+        draftId: json['draftId'] as String? ?? '',
+        location: RvLocationSample.fromJson(
+          Map<String, dynamic>.from(json['location'] as Map),
+        ),
+        comment: json['comment'] as String? ?? '',
+        startedAt: DateTime.parse(json['startedAt'] as String).toUtc(),
+        updatedAt: DateTime.parse(json['updatedAt'] as String).toUtc(),
+        createdByUserId: json['createdByUserId'] as String? ?? '',
+        createdByName: json['createdByName'] as String? ?? '',
+        brigadeId: json['brigadeId'] as String? ?? '',
+        deviceId: json['deviceId'] as String? ?? '',
+        photoIds: (json['photoIds'] as List? ?? const [])
+            .map((value) => '$value')
+            .toList(growable: false),
+        recoveryStatus: json['recoveryStatus'] as String? ?? 'ready',
+        contractVersion:
+            json['contractVersion'] as int? ?? inactiveClosureContractVersion,
+      );
+}
+
+class RvInactiveClosure {
+  const RvInactiveClosure({
+    required this.reasonCode,
+    required this.comment,
+    required this.location,
+    required this.closedAt,
+    required this.closedByUserId,
+    required this.closedByName,
+    required this.brigadeId,
+    required this.deviceId,
+    required this.photoIds,
+    this.normalizedPhotoHashes = const {},
+    this.receivedPhotoHashes = const {},
+    required this.idempotencyKey,
+    this.syncStatus = RvInactiveClosureSyncStatus.pendingApiContract,
+    this.contractVersion = inactiveClosureContractVersion,
+    this.remoteRequestId,
+    this.remoteDomainCode,
+  });
+
+  final String reasonCode;
+  final String comment;
+  final RvLocationSample location;
+  final DateTime closedAt;
+  final String closedByUserId;
+  final String closedByName;
+  final String brigadeId;
+  final String deviceId;
+  final List<String> photoIds;
+  final Map<String, String> normalizedPhotoHashes;
+  final Map<String, String> receivedPhotoHashes;
+  final String idempotencyKey;
+  final RvInactiveClosureSyncStatus syncStatus;
+  final int contractVersion;
+  final String? remoteRequestId;
+  final String? remoteDomainCode;
+
+  Map<String, dynamic> toJson() => {
+    'reasonCode': reasonCode,
+    'comment': comment,
+    'location': location.toJson(),
+    'closedAt': closedAt.toUtc().toIso8601String(),
+    'closedByUserId': closedByUserId,
+    'closedByName': closedByName,
+    'brigadeId': brigadeId,
+    'deviceId': deviceId,
+    'photoIds': photoIds,
+    'normalizedPhotoHashes': normalizedPhotoHashes,
+    'receivedPhotoHashes': receivedPhotoHashes,
+    'idempotencyKey': idempotencyKey,
+    'syncStatus': syncStatus.name,
+    'contractVersion': contractVersion,
+    'remoteRequestId': remoteRequestId,
+    'remoteDomainCode': remoteDomainCode,
+  };
+
+  factory RvInactiveClosure.fromJson(Map<String, dynamic> json) =>
+      RvInactiveClosure(
+        reasonCode:
+            json['reasonCode'] as String? ?? noHydrantAtLocationReasonCode,
+        comment: json['comment'] as String? ?? '',
+        location: RvLocationSample.fromJson(
+          Map<String, dynamic>.from(json['location'] as Map? ?? const {}),
+        ),
+        closedAt:
+            DateTime.tryParse(json['closedAt'] as String? ?? '')?.toUtc() ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+        closedByUserId: json['closedByUserId'] as String? ?? '',
+        closedByName: json['closedByName'] as String? ?? '',
+        brigadeId: json['brigadeId'] as String? ?? '',
+        deviceId: json['deviceId'] as String? ?? '',
+        photoIds: (json['photoIds'] as List? ?? const [])
+            .map((value) => '$value')
+            .toList(growable: false),
+        normalizedPhotoHashes: Map<String, String>.from(
+          json['normalizedPhotoHashes'] as Map? ?? const {},
+        ),
+        receivedPhotoHashes: Map<String, String>.from(
+          json['receivedPhotoHashes'] as Map? ?? const {},
+        ),
+        idempotencyKey: json['idempotencyKey'] as String? ?? '',
+        syncStatus: _enum(
+          RvInactiveClosureSyncStatus.values,
+          json['syncStatus'],
+          RvInactiveClosureSyncStatus.pendingApiContract,
+        ),
+        contractVersion:
+            json['contractVersion'] as int? ?? inactiveClosureContractVersion,
+        remoteRequestId: json['remoteRequestId'] as String?,
+        remoteDomainCode: json['remoteDomainCode'] as String?,
       );
 }
 
@@ -240,11 +439,30 @@ class RvPhotoReference {
     this.serverPhotoId,
     this.retryCount = 0,
     this.lastError,
+    this.order,
+    this.description,
   });
   final String photoId, slotCode;
   final RvPhotoUploadStatus status;
   final String? serverPhotoId, lastError;
   final int retryCount;
+  final int? order;
+  final String? description;
+  bool get isGeneral => slotCode.startsWith('general:');
+  RvPhotoReference copyWith({
+    int? order,
+    String? description,
+    bool clearDescription = false,
+  }) => RvPhotoReference(
+    photoId: photoId,
+    slotCode: slotCode,
+    status: status,
+    serverPhotoId: serverPhotoId,
+    retryCount: retryCount,
+    lastError: lastError,
+    order: order ?? this.order,
+    description: clearDescription ? null : (description ?? this.description),
+  );
   Map<String, dynamic> toJson() => {
     'photoId': photoId,
     'slotCode': slotCode,
@@ -252,6 +470,8 @@ class RvPhotoReference {
     'serverPhotoId': serverPhotoId,
     'retryCount': retryCount,
     'lastError': lastError,
+    'order': order,
+    'description': description,
   };
   factory RvPhotoReference.fromJson(Map<String, dynamic> json) =>
       RvPhotoReference(
@@ -264,10 +484,14 @@ class RvPhotoReference {
         serverPhotoId: json['serverPhotoId'] as String?,
         retryCount: json['retryCount'] as int? ?? 0,
         lastError: json['lastError'] as String?,
+        order: json['order'] as int?,
+        description: json['description'] as String?,
       );
 }
 
 class RvDraft {
+  static const technicianSubmitAuthorization = 'technician_confirmed_submit_v1';
+
   const RvDraft({
     required this.clientInspectionId,
     required this.hydrantId,
@@ -278,7 +502,33 @@ class RvDraft {
     required this.checklistSnapshot,
     required this.createdAt,
     required this.updatedAt,
+    String? originalAccountNumber,
+    String? effectiveAccountNumber,
+    this.serverAccountNumber,
+    this.accountTransformation = AccountTransformation.none,
+    this.accountTransformationVersion,
+    this.accountTransformedAt,
+    this.accountResolutionState = AccountResolutionState.original,
+    this.accountResolutionAttempts = const [],
+    this.supersededBy,
+    this.canonicalReason,
+    this.recoveryStatus,
+    this.legacyMissingFields = const [],
     this.serverInspectionId,
+    this.serverHydrantId,
+    this.officialInspectionId,
+    this.conflictId,
+    this.visualReportId,
+    this.currentVersionId,
+    this.baseVersionId,
+    this.baseVersionNumber,
+    this.pendingVersionClientId,
+    this.editingMode = RvEditingMode.capture,
+    this.serverValidationStatus = 'not_validated',
+    this.hasPendingChanges = false,
+    this.versionConflictId,
+    this.proposedVersionId,
+    this.lastStatusChangedAt,
     this.localStatus = RvLocalStatus.pendingCreate,
     this.remoteStatus = 'not_created',
     this.answersStatus = RvPartStatus.pending,
@@ -301,17 +551,55 @@ class RvDraft {
     this.currentStep = RvSyncStep.create,
     this.lastAttemptAt,
     this.nextRetryAt,
-  });
+    this.generalObservations,
+    this.inactiveClosureDraft,
+    this.inactiveClosure,
+    this.remoteMutationAuthorization,
+    this.remoteMutationAuthorizedAt,
+    this.remoteMutationBlockReason,
+  }) : originalAccountNumber = originalAccountNumber ?? accountNumber,
+       effectiveAccountNumber = effectiveAccountNumber ?? accountNumber;
   final String clientInspectionId,
       hydrantId,
       accountNumber,
       fieldSessionId,
       checklistId;
-  final String? serverInspectionId, lastSyncError;
+  final String originalAccountNumber, effectiveAccountNumber;
+  final String? serverAccountNumber;
+  final AccountTransformation accountTransformation;
+  final int? accountTransformationVersion;
+  final DateTime? accountTransformedAt;
+  final AccountResolutionState accountResolutionState;
+  final List<String> accountResolutionAttempts;
+  final List<String> legacyMissingFields;
+  final String? serverInspectionId,
+      serverHydrantId,
+      officialInspectionId,
+      conflictId,
+      visualReportId,
+      currentVersionId,
+      baseVersionId,
+      pendingVersionClientId,
+      serverValidationStatus,
+      versionConflictId,
+      proposedVersionId,
+      lastSyncError,
+      supersededBy,
+      canonicalReason,
+      recoveryStatus;
+  final String? generalObservations;
+  final RvInactiveClosureDraft? inactiveClosureDraft;
+  final RvInactiveClosure? inactiveClosure;
+  final String? remoteMutationAuthorization;
+  final String? remoteMutationBlockReason;
+  final DateTime? remoteMutationAuthorizedAt;
   final int checklistVersion, retryCount, activeFormStep;
+  final int? baseVersionNumber;
+  final RvEditingMode editingMode;
+  final bool hasPendingChanges;
   final Map<String, dynamic> checklistSnapshot;
   final DateTime createdAt, updatedAt;
-  final DateTime? lastAttemptAt, nextRetryAt;
+  final DateTime? lastAttemptAt, nextRetryAt, lastStatusChangedAt;
   final RvLocalStatus localStatus;
   final String remoteStatus;
   final RvPartStatus answersStatus,
@@ -332,9 +620,31 @@ class RvDraft {
       DynamicChecklist.fromJson(checklistSnapshot);
   bool get isReadOnly =>
       localStatus == RvLocalStatus.submitted ||
+      localStatus == RvLocalStatus.conflict ||
+      localStatus == RvLocalStatus.versionConflict ||
+      editingMode == RvEditingMode.readOnly ||
+      localStatus == RvLocalStatus.inactive ||
       localStatus == RvLocalStatus.cancelled;
+  bool get isInactive =>
+      localStatus == RvLocalStatus.inactive && inactiveClosure != null;
+  bool get hasInactiveClosureDraft => inactiveClosureDraft != null;
+  bool get canEditTechnical =>
+      !isReadOnly &&
+      editingMode != RvEditingMode.validatedComplements &&
+      serverValidationStatus != 'validated';
+  bool get canAddComplements =>
+      !isReadOnly && editingMode != RvEditingMode.readOnly;
   int get photoCount =>
       photos.values.fold(0, (sum, values) => sum + values.length);
+  List<RvPhotoReference> get generalPhotos {
+    final values = photos.values
+        .expand((items) => items)
+        .where((photo) => photo.isGeneral)
+        .toList();
+    values.sort((a, b) => (a.order ?? 99).compareTo(b.order ?? 99));
+    return List.unmodifiable(values);
+  }
+
   List<RvPhotoReference> photosFor(String slot) =>
       List.unmodifiable(photos[slot] ?? const []);
   bool get hasAllPhotoSlots =>
@@ -346,7 +656,33 @@ class RvDraft {
   );
 
   RvDraft copyWith({
+    String? originalAccountNumber,
+    String? effectiveAccountNumber,
+    String? serverAccountNumber,
+    AccountTransformation? accountTransformation,
+    int? accountTransformationVersion,
+    DateTime? accountTransformedAt,
+    AccountResolutionState? accountResolutionState,
+    List<String>? accountResolutionAttempts,
+    String? supersededBy,
+    String? canonicalReason,
+    String? recoveryStatus,
+    List<String>? legacyMissingFields,
     String? serverInspectionId,
+    String? serverHydrantId,
+    String? officialInspectionId,
+    String? conflictId,
+    String? visualReportId,
+    String? currentVersionId,
+    String? baseVersionId,
+    int? baseVersionNumber,
+    String? pendingVersionClientId,
+    RvEditingMode? editingMode,
+    String? serverValidationStatus,
+    bool? hasPendingChanges,
+    String? versionConflictId,
+    String? proposedVersionId,
+    DateTime? lastStatusChangedAt,
     RvLocalStatus? localStatus,
     String? remoteStatus,
     RvPartStatus? answersStatus,
@@ -372,12 +708,55 @@ class RvDraft {
     RvSyncStep? currentStep,
     DateTime? lastAttemptAt,
     DateTime? nextRetryAt,
+    bool clearNextRetryAt = false,
     DateTime? updatedAt,
+    String? generalObservations,
+    bool clearGeneralObservations = false,
+    RvInactiveClosureDraft? inactiveClosureDraft,
+    bool clearInactiveClosureDraft = false,
+    RvInactiveClosure? inactiveClosure,
+    String? remoteMutationAuthorization,
+    DateTime? remoteMutationAuthorizedAt,
+    bool clearRemoteMutationAuthorization = false,
+    String? remoteMutationBlockReason,
+    bool clearRemoteMutationBlockReason = false,
   }) => RvDraft(
     clientInspectionId: clientInspectionId,
     serverInspectionId: serverInspectionId ?? this.serverInspectionId,
+    serverHydrantId: serverHydrantId ?? this.serverHydrantId,
+    officialInspectionId: officialInspectionId ?? this.officialInspectionId,
+    conflictId: conflictId ?? this.conflictId,
+    visualReportId: visualReportId ?? this.visualReportId,
+    currentVersionId: currentVersionId ?? this.currentVersionId,
+    baseVersionId: baseVersionId ?? this.baseVersionId,
+    baseVersionNumber: baseVersionNumber ?? this.baseVersionNumber,
+    pendingVersionClientId:
+        pendingVersionClientId ?? this.pendingVersionClientId,
+    editingMode: editingMode ?? this.editingMode,
+    serverValidationStatus:
+        serverValidationStatus ?? this.serverValidationStatus,
+    hasPendingChanges: hasPendingChanges ?? this.hasPendingChanges,
+    versionConflictId: versionConflictId ?? this.versionConflictId,
+    proposedVersionId: proposedVersionId ?? this.proposedVersionId,
+    lastStatusChangedAt: lastStatusChangedAt ?? this.lastStatusChangedAt,
     hydrantId: hydrantId,
-    accountNumber: accountNumber,
+    accountNumber: effectiveAccountNumber ?? this.effectiveAccountNumber,
+    originalAccountNumber: originalAccountNumber ?? this.originalAccountNumber,
+    effectiveAccountNumber:
+        effectiveAccountNumber ?? this.effectiveAccountNumber,
+    serverAccountNumber: serverAccountNumber ?? this.serverAccountNumber,
+    accountTransformation: accountTransformation ?? this.accountTransformation,
+    accountTransformationVersion:
+        accountTransformationVersion ?? this.accountTransformationVersion,
+    accountTransformedAt: accountTransformedAt ?? this.accountTransformedAt,
+    accountResolutionState:
+        accountResolutionState ?? this.accountResolutionState,
+    accountResolutionAttempts:
+        accountResolutionAttempts ?? this.accountResolutionAttempts,
+    supersededBy: supersededBy ?? this.supersededBy,
+    canonicalReason: canonicalReason ?? this.canonicalReason,
+    recoveryStatus: recoveryStatus ?? this.recoveryStatus,
+    legacyMissingFields: legacyMissingFields ?? this.legacyMissingFields,
     fieldSessionId: fieldSessionId,
     checklistId: checklistId,
     checklistVersion: checklistVersion,
@@ -413,14 +792,58 @@ class RvDraft {
     returnToSummary: returnToSummary ?? this.returnToSummary,
     currentStep: currentStep ?? this.currentStep,
     lastAttemptAt: lastAttemptAt ?? this.lastAttemptAt,
-    nextRetryAt: nextRetryAt ?? this.nextRetryAt,
+    nextRetryAt: clearNextRetryAt ? null : (nextRetryAt ?? this.nextRetryAt),
+    generalObservations: clearGeneralObservations
+        ? null
+        : (generalObservations ?? this.generalObservations),
+    inactiveClosureDraft: clearInactiveClosureDraft
+        ? null
+        : (inactiveClosureDraft ?? this.inactiveClosureDraft),
+    inactiveClosure: inactiveClosure ?? this.inactiveClosure,
+    remoteMutationAuthorization: clearRemoteMutationAuthorization
+        ? null
+        : (remoteMutationAuthorization ?? this.remoteMutationAuthorization),
+    remoteMutationAuthorizedAt: clearRemoteMutationAuthorization
+        ? null
+        : (remoteMutationAuthorizedAt ?? this.remoteMutationAuthorizedAt),
+    remoteMutationBlockReason: clearRemoteMutationBlockReason
+        ? null
+        : (remoteMutationBlockReason ?? this.remoteMutationBlockReason),
   );
 
   Map<String, dynamic> toJson() => {
     'clientInspectionId': clientInspectionId,
     'serverInspectionId': serverInspectionId,
+    'serverHydrantId': serverHydrantId,
+    'officialInspectionId': officialInspectionId,
+    'conflictId': conflictId,
+    'visualReportId': visualReportId,
+    'currentVersionId': currentVersionId,
+    'baseVersionId': baseVersionId,
+    'baseVersionNumber': baseVersionNumber,
+    'pendingVersionClientId': pendingVersionClientId,
+    'editingMode': editingMode.name,
+    'serverValidationStatus': serverValidationStatus,
+    'hasPendingChanges': hasPendingChanges,
+    'versionConflictId': versionConflictId,
+    'proposedVersionId': proposedVersionId,
+    'lastStatusChangedAt': lastStatusChangedAt?.toUtc().toIso8601String(),
     'hydrantId': hydrantId,
     'accountNumber': accountNumber,
+    'originalAccountNumber': originalAccountNumber,
+    'effectiveAccountNumber': effectiveAccountNumber,
+    'serverAccountNumber': serverAccountNumber,
+    'accountTransformation': accountTransformation == AccountTransformation.none
+        ? null
+        : 'hyphen_to_000',
+    'accountTransformationVersion': accountTransformationVersion,
+    'accountTransformedAt': accountTransformedAt?.toUtc().toIso8601String(),
+    'accountResolutionState': accountResolutionState.name,
+    'accountResolutionAttempts': accountResolutionAttempts,
+    'supersededBy': supersededBy,
+    'canonicalReason': canonicalReason,
+    'recoveryStatus': recoveryStatus,
+    'legacyMissingFields': legacyMissingFields,
     'fieldSessionId': fieldSessionId,
     'checklistId': checklistId,
     'checklistVersion': checklistVersion,
@@ -452,13 +875,70 @@ class RvDraft {
     'currentStep': currentStep.name,
     'lastAttemptAt': lastAttemptAt?.toUtc().toIso8601String(),
     'nextRetryAt': nextRetryAt?.toUtc().toIso8601String(),
+    'generalObservations': generalObservations,
+    'inactiveClosureDraft': inactiveClosureDraft?.toJson(),
+    'inactiveClosure': inactiveClosure?.toJson(),
+    'remoteMutationAuthorization': remoteMutationAuthorization,
+    'remoteMutationAuthorizedAt': remoteMutationAuthorizedAt
+        ?.toUtc()
+        .toIso8601String(),
+    'remoteMutationBlockReason': remoteMutationBlockReason,
   };
 
   factory RvDraft.fromJson(Map<String, dynamic> json) => RvDraft(
     clientInspectionId: json['clientInspectionId'] as String,
     serverInspectionId: json['serverInspectionId'] as String?,
+    serverHydrantId: json['serverHydrantId'] as String?,
+    officialInspectionId: json['officialInspectionId'] as String?,
+    conflictId: json['conflictId'] as String?,
+    visualReportId: json['visualReportId'] as String?,
+    currentVersionId: json['currentVersionId'] as String?,
+    baseVersionId: json['baseVersionId'] as String?,
+    baseVersionNumber: json['baseVersionNumber'] as int?,
+    pendingVersionClientId: json['pendingVersionClientId'] as String?,
+    editingMode: _enum(
+      RvEditingMode.values,
+      json['editingMode'],
+      RvEditingMode.capture,
+    ),
+    serverValidationStatus:
+        json['serverValidationStatus'] as String? ?? 'not_validated',
+    hasPendingChanges: json['hasPendingChanges'] as bool? ?? false,
+    versionConflictId: json['versionConflictId'] as String?,
+    proposedVersionId: json['proposedVersionId'] as String?,
+    lastStatusChangedAt: DateTime.tryParse(
+      json['lastStatusChangedAt'] as String? ?? '',
+    )?.toUtc(),
     hydrantId: json['hydrantId'] as String,
-    accountNumber: json['accountNumber'] as String,
+    accountNumber:
+        (json['effectiveAccountNumber'] ?? json['accountNumber']) as String,
+    originalAccountNumber:
+        (json['originalAccountNumber'] ?? json['accountNumber']) as String,
+    effectiveAccountNumber:
+        (json['effectiveAccountNumber'] ?? json['accountNumber']) as String,
+    serverAccountNumber: json['serverAccountNumber'] as String?,
+    accountTransformation: json['accountTransformation'] == 'hyphen_to_000'
+        ? AccountTransformation.hyphenTo000
+        : AccountTransformation.none,
+    accountTransformationVersion: json['accountTransformationVersion'] as int?,
+    accountTransformedAt: DateTime.tryParse(
+      json['accountTransformedAt'] as String? ?? '',
+    )?.toUtc(),
+    accountResolutionState: _enum(
+      AccountResolutionState.values,
+      json['accountResolutionState'],
+      AccountResolutionState.original,
+    ),
+    accountResolutionAttempts:
+        (json['accountResolutionAttempts'] as List? ?? const [])
+            .map((value) => '$value')
+            .toList(growable: false),
+    supersededBy: json['supersededBy'] as String?,
+    canonicalReason: json['canonicalReason'] as String?,
+    recoveryStatus: json['recoveryStatus'] as String?,
+    legacyMissingFields: (json['legacyMissingFields'] as List? ?? const [])
+        .map((value) => '$value')
+        .toList(growable: false),
     fieldSessionId: json['fieldSessionId'] as String,
     checklistId: json['checklistId'] as String,
     checklistVersion: json['checklistVersion'] as int,
@@ -506,11 +986,7 @@ class RvDraft {
           Map<String, dynamic>.from(entry.value as Map),
         ),
     },
-    location: json['location'] is Map
-        ? RvLocationSample.fromJson(
-            Map<String, dynamic>.from(json['location'] as Map),
-          )
-        : null,
+    location: _locationSampleFromJson(json['location']),
     signal: json['signal'] is Map
         ? RvSignalSample.fromJson(
             Map<String, dynamic>.from(json['signal'] as Map),
@@ -557,7 +1033,40 @@ class RvDraft {
     nextRetryAt: DateTime.tryParse(
       json['nextRetryAt'] as String? ?? '',
     )?.toUtc(),
+    generalObservations: json['generalObservations'] as String?,
+    inactiveClosureDraft: _inactiveClosureDraftFromJson(
+      json['inactiveClosureDraft'],
+    ),
+    inactiveClosure: json['inactiveClosure'] is Map
+        ? RvInactiveClosure.fromJson(
+            Map<String, dynamic>.from(json['inactiveClosure'] as Map),
+          )
+        : null,
+    remoteMutationAuthorization: json['remoteMutationAuthorization']
+        ?.toString(),
+    remoteMutationAuthorizedAt: DateTime.tryParse(
+      json['remoteMutationAuthorizedAt']?.toString() ?? '',
+    )?.toUtc(),
+    remoteMutationBlockReason: json['remoteMutationBlockReason']?.toString(),
   );
+}
+
+RvLocationSample? _locationSampleFromJson(Object? raw) {
+  if (raw is! Map) return null;
+  try {
+    return RvLocationSample.fromJson(Map<String, dynamic>.from(raw));
+  } on Object {
+    return null;
+  }
+}
+
+RvInactiveClosureDraft? _inactiveClosureDraftFromJson(Object? raw) {
+  if (raw is! Map) return null;
+  try {
+    return RvInactiveClosureDraft.fromJson(Map<String, dynamic>.from(raw));
+  } on Object {
+    return null;
+  }
 }
 
 T _enum<T extends Enum>(List<T> values, Object? name, T fallback) {

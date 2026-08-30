@@ -16,6 +16,7 @@ import '../../core/location/location_service.dart';
 import '../../core/media/reliable_photo_service.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
+import '../../core/media/image_decode_policy.dart';
 import '../../data/catalogs/f02a_catalogs.dart';
 import '../../data/catalogs/damage_component_catalog.dart';
 import '../../data/services/cellular_network_diagnostics_controller.dart';
@@ -1771,7 +1772,6 @@ class _StepBody extends StatelessWidget {
               photo.inspectionId == inspection.id &&
               photo.category == category &&
               !photo.isDeleted &&
-              File(photo.localPath).existsSync() &&
               photo.fileSize > 0 &&
               photo.sha256.isNotEmpty &&
               accepted.contains(photo.syncStatus),
@@ -1804,6 +1804,8 @@ class _StepBody extends StatelessWidget {
                 child: ListTile(
                   leading: Image.file(
                     File(photo.thumbnailPath),
+                    cacheWidth: evidenceThumbnailDecodePixels,
+                    cacheHeight: evidenceThumbnailDecodePixels,
                     width: 64,
                     height: 64,
                     fit: BoxFit.cover,
@@ -1816,7 +1818,10 @@ class _StepBody extends StatelessWidget {
                     context: sheetContext,
                     builder: (_) => Dialog(
                       child: InteractiveViewer(
-                        child: Image.file(File(photo.localPath)),
+                        child: Image.file(
+                          File(photo.localPath),
+                          cacheWidth: evidenceViewerDecodeWidth(sheetContext),
+                        ),
                       ),
                     ),
                   ),

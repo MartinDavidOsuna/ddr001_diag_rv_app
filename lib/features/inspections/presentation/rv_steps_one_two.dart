@@ -1,16 +1,18 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:hive_ce/hive.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/widgets/common_widgets.dart';
+import '../../../core/media/image_decode_policy.dart';
 import '../../../domain/media/inspection_photo.dart';
 import '../domain/rv_draft.dart';
 import '../domain/rv_sync_state.dart';
+import 'inspection_photo_projection.dart';
 import 'rv_inspection_controller.dart';
+import 'rv_inactive_closure_dialog.dart';
 
 String rvPhotoCountLabel(int count) =>
     count == 1 ? '1 foto capturada' : '$count fotos capturadas';
@@ -77,7 +79,9 @@ String transportTypeLabel(String? value) => switch (value) {
 
 String? manualCoordinateError(String? value, {required bool isLatitude}) {
   final parsed = double.tryParse((value ?? '').trim().replaceAll(',', '.'));
-  if (parsed == null) return 'Captura un valor decimal válido.';
+  if (parsed == null || !parsed.isFinite) {
+    return 'Captura un valor decimal válido.';
+  }
   final min = isLatitude ? -90 : -180;
   final max = isLatitude ? 90 : 180;
   if (parsed < min || parsed > max) {
@@ -88,9 +92,26 @@ String? manualCoordinateError(String? value, {required bool isLatitude}) {
   return null;
 }
 
+bool canStartInactiveClosure({
+  required RvDraft draft,
+  required bool busy,
+  required bool processingPhoto,
+}) =>
+    !busy &&
+    !processingPhoto &&
+    !draft.isReadOnly &&
+    draft.location?.isValid == true;
+
 class RvStepOnePanel extends StatefulWidget {
-  const RvStepOnePanel({required this.controller, super.key});
+  const RvStepOnePanel({
+    required this.controller,
+    this.navigationFieldId,
+    this.targetKey,
+    super.key,
+  });
   final RvInspectionController controller;
+  final String? navigationFieldId;
+  final GlobalKey? targetKey;
 
   @override
   State<RvStepOnePanel> createState() => _RvStepOnePanelState();
@@ -98,10 +119,34 @@ class RvStepOnePanel extends StatefulWidget {
 
 class _RvStepOnePanelState extends State<RvStepOnePanel> {
   bool manual = false;
+  bool inactiveDialogOpen = false;
   final latitude = TextEditingController();
   final longitude = TextEditingController();
   final altitude = TextEditingController();
   final formKey = GlobalKey<FormState>();
+
+  Future<void> _openInactiveReport() async {
+    if (inactiveDialogOpen) return;
+    setState(() => inactiveDialogOpen = true);
+    try {
+      final closed = await showRvInactiveClosureDialog(
+        context,
+        widget.controller,
+      );
+      if (closed && mounted) context.go('/reviews');
+    } finally {
+      if (mounted) setState(() => inactiveDialogOpen = false);
+    }
+  }
+
+  Future<void> _discardInactiveReport() async {
+    if (inactiveDialogOpen ||
+        !await confirmDiscardInactiveClosureDraft(context) ||
+        !mounted) {
+      return;
+    }
+    await widget.controller.discardInactiveClosureDraft();
+  }
 
   @override
   void dispose() {
@@ -119,6 +164,9 @@ class _RvStepOnePanelState extends State<RvStepOnePanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SectionCard(
+          key: const {'location', 'signal'}.contains(widget.navigationFieldId)
+              ? widget.targetKey
+              : null,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -226,6 +274,61 @@ class _RvStepOnePanelState extends State<RvStepOnePanel> {
             ],
           ),
         ),
+        const SizedBox(height: 12),
+        if (draft.inactiveClosureDraft != null) ...[
+          Card(
+            key: const ValueKey('inactive-draft-pending-card'),
+            color: Theme.of(context).colorScheme.secondaryContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Reporte “No hay hidrante” pendiente',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'La revisión continúa activa. Continúa el reporte o '
+                    'descártalo antes de enviar la revisión normal.',
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    key: const ValueKey('continue-inactive-draft'),
+                    onPressed: inactiveDialogOpen ? null : _openInactiveReport,
+                    child: const Text('Continuar reporte'),
+                  ),
+                  TextButton(
+                    key: const ValueKey('discard-inactive-draft-from-step'),
+                    onPressed: widget.controller.busy || inactiveDialogOpen
+                        ? null
+                        : _discardInactiveReport,
+                    child: const Text('Descartar reporte'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        OutlinedButton.icon(
+          key: const ValueKey('no-hydrant-at-location'),
+          onPressed:
+              !canStartInactiveClosure(
+                draft: draft,
+                busy: widget.controller.busy,
+                processingPhoto: widget.controller.processingPhoto,
+              )
+              ? null
+              : _openInactiveReport,
+          icon: const Icon(Icons.location_off_outlined),
+          label: Text(
+            draft.inactiveClosureDraft == null
+                ? 'No hay hidrante en esta ubicación'
+                : 'Continuar reporte: no hay hidrante',
+          ),
+        ),
       ],
     );
   }
@@ -331,8 +434,15 @@ Widget _detail(String label, String value) => Padding(
 );
 
 class RvStepTwoPhotoPanel extends StatelessWidget {
-  const RvStepTwoPhotoPanel({required this.controller, super.key});
+  const RvStepTwoPhotoPanel({
+    required this.controller,
+    this.targetSlot,
+    this.targetKey,
+    super.key,
+  });
   final RvInspectionController controller;
+  final String? targetSlot;
+  final GlobalKey? targetKey;
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +458,7 @@ class RvStepTwoPhotoPanel extends StatelessWidget {
           ),
           for (final slot in requiredRvPhotoSlots)
             _PhotoSlot(
+              key: slot == targetSlot ? targetKey : null,
               slot: slot,
               references: draft.photosFor(slot),
               readOnly: draft.isReadOnly,
@@ -365,6 +476,7 @@ class _PhotoSlot extends StatelessWidget {
     required this.references,
     required this.readOnly,
     required this.controller,
+    super.key,
   });
   final String slot;
   final List<RvPhotoReference> references;
@@ -386,11 +498,8 @@ class _PhotoSlot extends StatelessWidget {
               ? null
               : () => showDialog<void>(
                   context: context,
-                  builder: (_) => _SlotGallery(
-                    slot: slot,
-                    references: references,
-                    controller: controller,
-                  ),
+                  builder: (_) =>
+                      RvPhotoSlotGallery(slot: slot, controller: controller),
                 ),
           icon: const Icon(Icons.photo_library_outlined),
           label: Text(rvPhotoCountLabel(references.length)),
@@ -420,36 +529,90 @@ class _PhotoSlot extends StatelessWidget {
   );
 }
 
-class _SlotGallery extends StatefulWidget {
-  const _SlotGallery({
+class RvPhotoSlotGallery extends StatefulWidget {
+  RvPhotoSlotGallery({
     required this.slot,
-    required this.references,
-    required this.controller,
+    required RvInspectionController controller,
+    super.key,
+  }) : changes = controller,
+       draftProvider = (() => controller.draft!),
+       removePhoto = controller.removePhoto,
+       photoProjection = null;
+
+  @visibleForTesting
+  const RvPhotoSlotGallery.testing({
+    required this.slot,
+    required this.changes,
+    required this.draftProvider,
+    required this.removePhoto,
+    this.photoProjection,
+    super.key,
   });
+
   final String slot;
-  final List<RvPhotoReference> references;
-  final RvInspectionController controller;
+  final Listenable changes;
+  final RvDraft Function() draftProvider;
+  final Future<void> Function(String slot, String photoId) removePhoto;
+  final InspectionPhotoDocumentProjection? photoProjection;
 
   @override
-  State<_SlotGallery> createState() => _SlotGalleryState();
+  State<RvPhotoSlotGallery> createState() => _SlotGalleryState();
 }
 
-class _SlotGalleryState extends State<_SlotGallery> {
-  InspectionPhoto? _photo(String id) {
-    final raw = Hive.box<String>('inspection_photos_v1').get(id);
-    if (raw == null) return null;
-    try {
-      return InspectionPhoto.fromJson(
-        Map<String, dynamic>.from(jsonDecode(raw) as Map),
-      );
-    } on Object {
-      return null;
+class _SlotGalleryState extends State<RvPhotoSlotGallery> {
+  late final InspectionPhotoDocumentProjection _photos;
+  late final InspectionPhotoProjectionBinding _photoBinding;
+
+  @override
+  void initState() {
+    super.initState();
+    _photos = widget.photoProjection ?? InspectionPhotoDocumentProjection();
+    _photoBinding = InspectionPhotoProjectionBinding(
+      projection: _photos,
+      onChanged: _rebuildAfterPhotoDocumentChange,
+    );
+    _retainCurrentPhotos();
+    widget.changes.addListener(_onControllerChanged);
+  }
+
+  void _retainCurrentPhotos() {
+    _photoBinding.retain(
+      widget
+          .draftProvider()
+          .photosFor(widget.slot)
+          .map((reference) => reference.photoId),
+    );
+  }
+
+  void _onControllerChanged() {
+    _retainCurrentPhotos();
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didUpdateWidget(covariant RvPhotoSlotGallery oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.changes, widget.changes)) {
+      oldWidget.changes.removeListener(_onControllerChanged);
+      widget.changes.addListener(_onControllerChanged);
     }
+    _retainCurrentPhotos();
+  }
+
+  void _rebuildAfterPhotoDocumentChange() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    widget.changes.removeListener(_onControllerChanged);
+    _photoBinding.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final references = widget.controller.draft!.photosFor(widget.slot);
+    final references = widget.draftProvider().photosFor(widget.slot);
     return AlertDialog(
       title: Text(rvPhotoSlotLabels[widget.slot]!),
       content: SizedBox(
@@ -462,7 +625,7 @@ class _SlotGalleryState extends State<_SlotGallery> {
                   for (final reference in references)
                     _GalleryPhoto(
                       reference: reference,
-                      photo: _photo(reference.photoId),
+                      photo: _photos.photo(reference.photoId),
                       onDelete: () async {
                         final confirmed = await showDialog<bool>(
                           context: context,
@@ -486,11 +649,10 @@ class _SlotGalleryState extends State<_SlotGallery> {
                           ),
                         );
                         if (confirmed != true) return;
-                        await widget.controller.removePhoto(
+                        await widget.removePhoto(
                           widget.slot,
                           reference.photoId,
                         );
-                        if (mounted) setState(() {});
                       },
                     ),
                 ],
@@ -518,26 +680,40 @@ class _GalleryPhoto extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListTile(
-    leading: photo != null && File(photo!.thumbnailPath).existsSync()
+    key: ValueKey('gallery-photo-${reference.photoId}'),
+    leading: photo != null
         ? GestureDetector(
             onTap: () => showDialog<void>(
               context: context,
               builder: (_) => Dialog(
                 child: InteractiveViewer(
-                  child: Image.file(File(photo!.localPath)),
+                  child: Image.file(
+                    File(photo!.localPath),
+                    cacheWidth: evidenceViewerDecodeWidth(context),
+                  ),
                 ),
               ),
             ),
             child: Image.file(
+              key: ValueKey(
+                'gallery-thumbnail-${photo!.id}-${photo!.thumbnailPath}',
+              ),
               File(photo!.thumbnailPath),
+              cacheWidth: evidenceThumbnailDecodePixels,
+              cacheHeight: evidenceThumbnailDecodePixels,
               width: 64,
               height: 64,
               fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => const SizedBox.square(
+                dimension: 64,
+                child: Icon(Icons.broken_image_outlined),
+              ),
             ),
           )
-        : const SizedBox.square(
+        : SizedBox.square(
+            key: ValueKey('gallery-photo-fallback-${reference.photoId}'),
             dimension: 64,
-            child: Icon(Icons.cloud_outlined),
+            child: const Icon(Icons.cloud_outlined),
           ),
     title: Text(
       photo == null ? 'Archivo remoto' : '${photo!.capturedAt.toLocal()}',

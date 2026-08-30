@@ -40,6 +40,17 @@ class Hydrant {
     this.damageCount = 0,
     this.photoCount = 0,
     this.source = HydrantSource.assigned,
+    this.rvStatus = 'available',
+    this.officialInspectionId,
+    this.lastStatusChangedAt,
+    this.reviewedByName,
+    this.reviewedByCrew,
+    this.hasConflict = false,
+    this.conflictCount = 0,
+    this.availableForRv = true,
+    this.currentRound = 1,
+    this.requiredPhotosVerified = false,
+    this.isActive = true,
   });
   final String id, code, locality, parcel;
   final PriorityLevel priority;
@@ -49,6 +60,11 @@ class Hydrant {
   final double latitude, longitude;
   final int damageCount, photoCount;
   final HydrantSource source;
+  final String rvStatus;
+  final String? officialInspectionId, reviewedByName, reviewedByCrew;
+  final DateTime? lastStatusChangedAt;
+  final bool hasConflict, availableForRv, requiredPhotosVerified, isActive;
+  final int conflictCount, currentRound;
 
   String get displayShortId {
     final segments = code.split('-');
@@ -65,6 +81,8 @@ class Hydrant {
     HydrantSource? source,
     InspectionSummary? f02a,
     InspectionSummary? f02b,
+    DateTime? lastStatusChangedAt,
+    int? photoCount,
   }) => Hydrant(
     id: id,
     code: code,
@@ -78,8 +96,19 @@ class Hydrant {
     latitude: latitude,
     longitude: longitude,
     damageCount: damageCount,
-    photoCount: photoCount,
+    photoCount: photoCount ?? this.photoCount,
     source: source ?? this.source,
+    rvStatus: rvStatus,
+    officialInspectionId: officialInspectionId,
+    lastStatusChangedAt: lastStatusChangedAt ?? this.lastStatusChangedAt,
+    reviewedByName: reviewedByName,
+    reviewedByCrew: reviewedByCrew,
+    hasConflict: hasConflict,
+    conflictCount: conflictCount,
+    availableForRv: availableForRv,
+    currentRound: currentRound,
+    requiredPhotosVerified: requiredPhotosVerified,
+    isActive: isActive,
   );
 }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../catalogs/pressure_range_selector.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../domain/visual_component_models.dart';
@@ -424,24 +425,16 @@ class _VisualComponentsListStepPageState
                     );
                   },
           ),
-          TextFormField(
-            initialValue: value.specificData.visibleRange,
+          PressureRangeSelector(
+            value: value.specificData.pressureRange,
             enabled: !widget.readOnly,
-            decoration: const InputDecoration(labelText: 'Rango visible'),
-            onChanged: (text) => _updateDraft(
+            onChanged: (range) => _updateDraft(
               value.copyWith(
-                specificData: value.specificData.copyWith(visibleRange: text),
-                explicitlyConfirmed: false,
-              ),
-            ),
-          ),
-          TextFormField(
-            initialValue: value.specificData.visibleUnit,
-            enabled: !widget.readOnly,
-            decoration: const InputDecoration(labelText: 'Unidad visible'),
-            onChanged: (text) => _updateDraft(
-              value.copyWith(
-                specificData: value.specificData.copyWith(visibleUnit: text),
+                specificData: value.specificData.copyWith(
+                  pressureRange: range,
+                  visibleRange: range['displayName']?.toString(),
+                  visibleUnit: range['unit']?.toString(),
+                ),
                 explicitlyConfirmed: false,
               ),
             ),
@@ -647,6 +640,44 @@ class _VisualComponentsListStepPageState
       _ => const <String, String>{},
     };
     return [
+      if (type == VisualComponentType.pilotValve) ...[
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            '¿El piloto está conectado?',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Semantics(
+          label: '¿El piloto está conectado?',
+          child: SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: true, label: Text('Sí')),
+              ButtonSegment(value: false, label: Text('No')),
+            ],
+            selected: value.specificData.pilotConnected == null
+                ? const <bool>{}
+                : {value.specificData.pilotConnected!},
+            emptySelectionAllowed: true,
+            onSelectionChanged: widget.readOnly
+                ? null
+                : (selection) {
+                    final json = value.specificData.toJson()
+                      ..['pilotConnected'] = selection.first;
+                    _updateDraft(
+                      value.copyWith(
+                        specificData: VisualComponentSpecificData.fromJson(
+                          json,
+                        ),
+                        explicitlyConfirmed: false,
+                      ),
+                    );
+                  },
+          ),
+        ),
+        const SizedBox(height: 12),
+      ],
       for (final entry in labels.entries)
         SwitchListTile(
           title: Text(entry.value),

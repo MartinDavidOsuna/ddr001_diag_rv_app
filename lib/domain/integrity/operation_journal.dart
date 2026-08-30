@@ -4,6 +4,9 @@ enum JournalOperationType {
   createFunctionalReport,
   createVisualAndFunctional,
   finalizeVisualReport,
+  saveInactiveClosureDraft,
+  discardInactiveClosureDraft,
+  closeInactiveVisualReport,
   finalizeFunctionalReport,
   createRevision,
   capturePhoto,
@@ -15,6 +18,8 @@ enum JournalOperationType {
 
 enum JournalStatus {
   prepared,
+  photoSaved,
+  draftLinked,
   documentsWritten,
   indexesWritten,
   filesWritten,
@@ -24,6 +29,9 @@ enum JournalStatus {
   failed,
   quarantined,
 }
+
+const pendingExternalCameraRecoveryError =
+    'Captura externa pendiente; image_picker debe intentar restaurarla.';
 
 class OperationJournalEntry {
   const OperationJournalEntry({

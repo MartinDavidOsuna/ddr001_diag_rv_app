@@ -60,7 +60,10 @@ class WorkCreationCoordinator {
         operationType: entry.operationType,
         entityIds: [rv.id, rf.id],
         documentWrites: [rv.id, rf.id],
-        indexWrites: ['${hydrant.id}:f02A', '${hydrant.id}:f02B'],
+        indexWrites: [
+          visual.activeIndexKeyForHydrant(hydrant.id),
+          functional.indexKey(hydrant.id),
+        ],
         status: JournalStatus.documentsWritten,
         preparedAt: entry.preparedAt,
         actor: entry.actor,

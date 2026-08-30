@@ -105,6 +105,39 @@ void main() {
     );
   });
 
+  test('elimina solamente el hidrante manual local no confirmado', () async {
+    final repository = HydrantRepository(
+      client: clientWith(FakeHttpAdapter((_) async => jsonResponse('{}', 200))),
+      box: Hive.box<String>('local_hydrants_v1'),
+    );
+    await repository.createManual(
+      localId: 'manual-local',
+      accountNumber: 'LOCAL-1',
+      createdByUserId: 'creator',
+      accountId: 'account',
+      environment: 'production',
+      reason: 'Prueba',
+    );
+
+    expect(
+      await repository.deleteUnsyncedManualLocal(
+        hydrantId: 'manual-local',
+        creatorId: 'other',
+      ),
+      isFalse,
+    );
+    expect(repository.cached(scope: 'all'), hasLength(1));
+    expect(
+      await repository.deleteUnsyncedManualLocal(
+        hydrantId: 'manual-local',
+        creatorId: 'creator',
+      ),
+      isTrue,
+    );
+    expect(repository.cached(scope: 'all'), isEmpty);
+    expect(repository.cached(scope: 'mine'), isEmpty);
+  });
+
   test(
     'snapshot de catálogo usa una solicitud y reutiliza ETag con 304',
     () async {
@@ -133,6 +166,26 @@ void main() {
       expect(adapter.requests.last.headers['If-None-Match'], '"snapshot-v1"');
     },
   );
+
+  test('snapshot forzado omite ETag para recuperar coordenadas nuevas', () async {
+    final adapter = FakeHttpAdapter(
+      (_) async => jsonResponse(
+        '{"items":[{"hydrant_id":"735d3d0e-78a3-4ca8-a34b-6c0513458d29","account_number":"CTA-FORCE","latitude":29.1,"longitude":-110.9}],"total":1}',
+        200,
+      ),
+    );
+    final repository = HydrantRepository(
+      client: clientWith(adapter),
+      box: Hive.box<String>('local_hydrants_v1'),
+    );
+
+    await repository.refreshCatalogSnapshot();
+    await repository.refreshCatalogSnapshot(force: true);
+
+    expect(adapter.requests, hasLength(2));
+    expect(adapter.requests.last.headers['If-None-Match'], isNull);
+    expect(repository.cached(scope: 'all').single.latitude, 29.1);
+  });
 
   test('snapshot 404 activa fallback paginado una vez por sesión', () async {
     final adapter = FakeHttpAdapter((options) async {
@@ -230,6 +283,43 @@ void main() {
     expect(adapter.requests.single.queryParameters['radiusKm'], 2);
     expect(repository.cached(scope: 'all').single.accountNumber, 'CTA-MAP');
   });
+
+  test(
+    'snapshot local sobrevive reinicio y cursor actualiza sólo los cambios',
+    () async {
+      var invocation = 0;
+      final adapter = FakeHttpAdapter((options) async {
+        invocation++;
+        if (invocation == 1) {
+          return jsonResponse(
+            '{"items":[{"hydrant_id":"735d3d0e-78a3-4ca8-a34b-6c0513458d29","account_number":"CTA-MAP","latitude":21.9,"longitude":-102.3,"rvStatus":"available","updated_at":"2026-08-01T00:00:00Z"}],"total":1,"syncCursor":"cursor-1"}',
+            200,
+          );
+        }
+        return jsonResponse(
+          '{"items":[{"hydrantId":"735d3d0e-78a3-4ca8-a34b-6c0513458d29","accountNumber":"CTA-MAP","latitude":21.9,"longitude":-102.3,"rvStatus":"validated","updatedAt":"2026-08-02T00:00:00Z"}],"hasMore":false,"syncCursor":"cursor-2","generatedAt":"2026-08-02T00:00:01Z"}',
+          200,
+        );
+      });
+      final repository = HydrantRepository(
+        client: clientWith(adapter),
+        box: Hive.box<String>('local_hydrants_v1'),
+      );
+      await repository.refreshCatalogSnapshot();
+
+      final restarted = HydrantRepository(
+        client: clientWith(adapter),
+        box: Hive.box<String>('local_hydrants_v1'),
+      );
+      expect(restarted.cached(scope: 'all'), hasLength(1));
+      expect(restarted.cached(scope: 'all').single.rvStatus, 'available');
+
+      await restarted.refreshMapChanges();
+      expect(adapter.requests.last.queryParameters['scope'], 'all');
+      expect(adapter.requests.last.queryParameters['cursor'], 'cursor-1');
+      expect(restarted.cached(scope: 'all').single.rvStatus, 'validated');
+    },
+  );
 
   test('alta manual conserva UUID, propietario y ámbito local', () async {
     final repository = HydrantRepository(

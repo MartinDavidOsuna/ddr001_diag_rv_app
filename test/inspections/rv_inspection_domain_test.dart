@@ -84,14 +84,96 @@ void main() {
   );
 
   group('borrador RV persistente', () {
+    test('conflicto es terminal y conserva referencias al serializar', () {
+      final conflicted = draft().copyWith(
+        localStatus: RvLocalStatus.conflict,
+        remoteStatus: 'conflict',
+        officialInspectionId: 'official-id',
+        conflictId: 'conflict-id',
+        lastStatusChangedAt: DateTime.utc(2026, 8, 1),
+      );
+      final restored = RvDraft.fromJson(conflicted.toJson());
+      expect(restored.isReadOnly, isTrue);
+      expect(restored.officialInspectionId, 'official-id');
+      expect(restored.conflictId, 'conflict-id');
+      expect(restored.photos.keys, conflicted.photos.keys);
+      expect(restored.answers.keys, conflicted.answers.keys);
+    });
     test('conserva clientInspectionId en serialización', () {
       expect(RvDraft.fromJson(draft().toJson()).clientInspectionId, 'client-1');
+    });
+    test('migra borrador legacy con defaults seguros de versión', () {
+      final json = draft().toJson()
+        ..remove('editingMode')
+        ..remove('hasPendingChanges')
+        ..remove('serverValidationStatus');
+      final restored = RvDraft.fromJson(json);
+      expect(restored.editingMode, RvEditingMode.capture);
+      expect(restored.hasPendingChanges, isFalse);
+      expect(restored.canEditTechnical, isTrue);
+    });
+    test('persiste base y conflicto de edición sin perder evidencia', () {
+      final value = draft(answers: {'q1': answer('q1', true, type: 'boolean')})
+          .copyWith(
+            visualReportId: 'report-1',
+            currentVersionId: 'version-2',
+            baseVersionId: 'version-1',
+            baseVersionNumber: 1,
+            pendingVersionClientId: 'client-version-1',
+            hasPendingChanges: true,
+            localStatus: RvLocalStatus.versionConflict,
+            versionConflictId: 'conflict-1',
+            proposedVersionId: 'version-3',
+          );
+      final restored = RvDraft.fromJson(value.toJson());
+      expect(restored.baseVersionId, 'version-1');
+      expect(restored.versionConflictId, 'conflict-1');
+      expect(restored.answers['q1']?.value, true);
+      expect(restored.hasPendingChanges, isTrue);
+      expect(restored.isReadOnly, isTrue);
+    });
+    test('validación bloquea técnica y permite complementos', () {
+      final validated = draft().copyWith(
+        editingMode: RvEditingMode.validatedComplements,
+        serverValidationStatus: 'validated',
+      );
+      expect(validated.canEditTechnical, isFalse);
+      expect(validated.canAddComplements, isTrue);
     });
     test('conserva snapshot y versión de checklist', () {
       final restored = RvDraft.fromJson(draft().toJson());
       expect(restored.checklistVersion, 3);
       expect(restored.checklist.sections.single.items, hasLength(3));
     });
+    test('migra el paso general legacy con defaults opcionales seguros', () {
+      final json = draft().toJson()..remove('generalObservations');
+      final restored = RvDraft.fromJson(json);
+      expect(restored.generalObservations, isNull);
+      expect(restored.generalPhotos, isEmpty);
+    });
+    test(
+      'persiste orden, descripción y observaciones de fotografías generales',
+      () {
+        final value = draft(
+          photos: {
+            'general:00000000-0000-4000-8000-000000000001': const [
+              RvPhotoReference(
+                photoId: '00000000-0000-4000-8000-000000000001',
+                slotCode: 'general:00000000-0000-4000-8000-000000000001',
+                status: RvPhotoUploadStatus.pending,
+                order: 1,
+                description: 'Vista lateral',
+              ),
+            ],
+          },
+        ).copyWith(generalObservations: 'Corrosión superficial.');
+        final restored = RvDraft.fromJson(value.toJson());
+        expect(restored.generalPhotos, hasLength(1));
+        expect(restored.generalPhotos.single.order, 1);
+        expect(restored.generalPhotos.single.description, 'Vista lateral');
+        expect(restored.generalObservations, 'Corrosión superficial.');
+      },
+    );
     test('conserva respuesta y fecha', () {
       final restored = RvDraft.fromJson(
         draft(answers: {'q1': answer('q1', true, type: 'boolean')}).toJson(),

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
@@ -11,6 +12,8 @@ import '../../data/local/visual_inspection_repository.dart';
 import '../../data/local/functional_repositories.dart';
 import '../../data/local/sync_queue_repository.dart';
 import '../../domain/media/media_sync_status.dart';
+import '../../domain/media/photo_integrity_status.dart';
+import '../../domain/sync/rv_sync_truth.dart';
 import '../../domain/media/inspection_photo.dart';
 import '../../domain/enums/app_enums.dart';
 import '../../domain/enums/hydrant_list_filter.dart';
@@ -19,21 +22,40 @@ import '../../domain/filters/hydrant_query_projection.dart';
 import '../../domain/models/app_models.dart';
 import '../../domain/models/assignment_sync_models.dart';
 import '../../domain/functional/functional_models.dart';
+import '../../domain/inspections/visual_inspection.dart';
 import '../../domain/sync/sync_queue_item.dart';
 import '../../features/auth/data/field_session_models.dart';
 import '../../features/auth/data/field_session_repository.dart';
 import '../../features/hydrants/data/hydrant_repository.dart';
 import '../../features/hydrants/data/hydrant_api_models.dart';
+import '../../features/home/rv_work_dashboard.dart';
 import '../../features/checklist/data/checklist_models.dart';
 import '../../features/checklist/data/checklist_repository.dart';
 import '../../features/inspections/data/inspection_sync_coordinator.dart';
 import '../../features/inspections/data/rv_draft_repository.dart';
+import '../../features/inspections/domain/rv_draft.dart';
+import '../../features/inspections/domain/rv_sync_state.dart';
+import '../../features/inspections/domain/rv_visual_document_classification.dart';
 import '../../features/catalogs/dynamic_catalog_repository.dart';
+import '../../features/visual_reports/data/visual_report_repository.dart';
+import '../../features/diagnostics/rv_diagnostic_export_service.dart';
 import '../config/app_config.dart';
 import '../network/api_exception.dart';
 import '../network/connectivity_monitor.dart';
 import '../security/local_data_scope.dart';
 import 'update_service.dart';
+
+enum GlobalSyncStage {
+  idle,
+  waitingConnection,
+  preparing,
+  catalogs,
+  reports,
+  projections,
+  completed,
+  completedWithWarnings,
+  paused,
+}
 
 class ProfileTodayStats {
   const ProfileTodayStats({
@@ -47,6 +69,22 @@ class ProfileTodayStats {
   final int submitted;
   final int pending;
   final int unsynced;
+}
+
+class PhotoSyncSummary {
+  const PhotoSyncSummary({
+    required this.accessibleIds,
+    required this.pendingIds,
+    required this.verified,
+    required this.errors,
+    required this.errorById,
+  });
+
+  final Set<String> accessibleIds;
+  final Set<String> pendingIds;
+  final int verified;
+  final int errors;
+  final Map<String, String?> errorById;
 }
 
 class AppState extends ChangeNotifier {
@@ -65,6 +103,8 @@ class AppState extends ChangeNotifier {
     required this.checklistRepository,
     required this.rvDraftRepository,
     required this.inspectionSyncCoordinator,
+    this.diagnosticExportService,
+    this.visualReportRepository,
     this.dynamicCatalogRepository,
     this.connectivityMonitor,
   });
@@ -79,6 +119,8 @@ class AppState extends ChangeNotifier {
   final ChecklistRepository checklistRepository;
   final RvDraftRepository rvDraftRepository;
   final InspectionSyncCoordinator inspectionSyncCoordinator;
+  final RvDiagnosticExportService? diagnosticExportService;
+  final VisualReportRepository? visualReportRepository;
   final DynamicCatalogRepository? dynamicCatalogRepository;
   final ConnectivityMonitor? connectivityMonitor;
   late final SyncQueueRepository syncQueueRepository = SyncQueueRepository(
@@ -105,15 +147,22 @@ class AppState extends ChangeNotifier {
       assignmentSyncing = false;
   bool sessionOffline = false;
   double syncProgress = 0;
+  GlobalSyncStage syncStage = GlobalSyncStage.idle;
+  int syncTotal = 0, syncCompleted = 0, syncWarnings = 0, syncConflicts = 0;
+  String? syncingReport;
+  String? syncPauseMessage;
+  Future<void>? _activeSync;
+  DateTime? _lastAutomaticSyncAttempt;
+  static const automaticSyncCooldown = Duration(minutes: 5);
   UpdateInfo? updateInfo;
   AssignmentSyncScenario assignmentScenario = AssignmentSyncScenario.noChanges;
   AssignmentSyncResult? lastAssignmentResult;
   DateTime? lastAssignmentCheck;
   String? assignmentError, assignmentCursor;
+  String? pendingSessionTakeoverToken;
   HydrantListFilter hydrantListFilter = HydrantListFilter.all;
   HydrantFilterRequest? hydrantFilterRequest;
   int _hydrantFilterRequestSequence = 0;
-  ProfileTodayStats? _remoteProfileStats;
   bool profileStatsLoading = false;
 
   bool get authenticated => _session != null;
@@ -131,35 +180,121 @@ class AppState extends ChangeNotifier {
   bool get editingRestricted =>
       AppConfig.appUpdatesEnabled &&
       updateInfo?.status == UpdateStatus.required;
-  int get pendingDiagnostics =>
-      syncQueueRepository
-          .all()
-          .where((item) => item.status != SyncQueueStatus.synced)
-          .length +
-      syncQueueRepository.unreadableCount;
-  Set<String> get accessiblePhotoIds {
-    if (!authenticated) return const {};
-    final ids = <String>{};
+  int get pendingDiagnostics {
+    final pendingIds = <String>{};
+    for (final item in syncQueueRepository.all()) {
+      if (item.status == SyncQueueStatus.synced) continue;
+      final draft = item.inspectionId == null
+          ? null
+          : rvDraftRepository.find(item.inspectionId!);
+      if (draft != null && _isSupersededByOfficialState(draft)) continue;
+      pendingIds.add(item.inspectionId ?? item.id);
+    }
+    pendingIds.addAll(
+      _pendingDraftsForSync().map((draft) => draft.clientInspectionId),
+    );
+    return pendingIds.length + syncQueueRepository.unreadableCount;
+  }
+
+  PhotoSyncSummary get photoSyncSummary {
+    if (!authenticated) {
+      return const PhotoSyncSummary(
+        accessibleIds: {},
+        pendingIds: {},
+        verified: 0,
+        errors: 0,
+        errorById: {},
+      );
+    }
+    final accessible = <String>{};
+    final pending = <String>{};
+    final errorById = <String, String?>{};
+    var verified = 0;
+    var errors = 0;
     final photos = Hive.box<String>('inspection_photos_v1');
     for (final raw in photos.values) {
       try {
         final photo = InspectionPhoto.fromJson(
           Map<String, dynamic>.from(jsonDecode(raw) as Map),
         );
-        if (photo.capturedByUserId == user.id) ids.add(photo.id);
+        if (photo.capturedByUserId != user.id) continue;
+        accessible.add(photo.id);
+        if (photo.isSynchronized) {
+          verified++;
+          continue;
+        }
+        if (photo.isDeleted) continue;
+        pending.add(photo.id);
+        final error = _photoSyncError(photo);
+        errorById[photo.id] = error;
+        if (photo.integrityStatus.requiresReview ||
+            {
+              MediaSyncStatus.failedRetryable,
+              MediaSyncStatus.failedPermanent,
+              MediaSyncStatus.missingLocal,
+              MediaSyncStatus.remoteMissing,
+            }.contains(photo.syncStatus)) {
+          errors++;
+        }
       } on Object {
         continue;
       }
     }
-    return ids;
+    return PhotoSyncSummary(
+      accessibleIds: accessible,
+      pendingIds: pending,
+      verified: verified,
+      errors: errors,
+      errorById: errorById,
+    );
   }
 
-  int get pendingPhotos => accessiblePhotoIds
-      .where((id) => mediaBox.get(id) != MediaSyncStatus.verified.name)
-      .length;
-  int get verifiedPhotos => accessiblePhotoIds
-      .where((id) => mediaBox.get(id) == MediaSyncStatus.verified.name)
-      .length;
+  Set<String> get accessiblePhotoIds => photoSyncSummary.accessibleIds;
+  Set<String> get pendingPhotoIds => photoSyncSummary.pendingIds;
+
+  int get pendingPhotos => photoSyncSummary.pendingIds.length;
+  int get verifiedPhotos => photoSyncSummary.verified;
+
+  bool _photoIntegrityConfirmed(String id) {
+    final raw = Hive.box<String>('inspection_photos_v1').get(id);
+    if (raw == null) return false;
+    try {
+      return InspectionPhoto.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+      ).isSynchronized;
+    } on Object {
+      return false;
+    }
+  }
+
+  String? photoSyncError(String id) {
+    final raw = Hive.box<String>('inspection_photos_v1').get(id);
+    if (raw == null) return null;
+    try {
+      final photo = InspectionPhoto.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+      );
+      return _photoSyncError(photo);
+    } on Object {
+      return 'El registro local de esta evidencia no se pudo interpretar.';
+    }
+  }
+
+  String? _photoSyncError(InspectionPhoto photo) {
+    if (photo.integrityStatus == PhotoIntegrityStatus.mappingConflict) {
+      return 'Esta evidencia requiere revisión.';
+    }
+    if (photo.syncStatus == MediaSyncStatus.missingLocal ||
+        photo.originalPresent == false &&
+            photo.integrityStatus == PhotoIntegrityStatus.missingOriginal) {
+      return 'El archivo no está disponible en este dispositivo.';
+    }
+    if (photo.syncStatus == MediaSyncStatus.failedRetryable) {
+      return 'No fue posible completar la sincronización. Intenta nuevamente.';
+    }
+    return null;
+  }
+
   int get pendingTrace {
     if (!authenticated) return 0;
     var count = 0;
@@ -179,22 +314,103 @@ class AppState extends ChangeNotifier {
     return count;
   }
 
-  int get syncErrors => accessiblePhotoIds
-      .map(mediaBox.get)
-      .where(
-        (v) => {
-          MediaSyncStatus.failedRetryable.name,
-          MediaSyncStatus.failedPermanent.name,
-          MediaSyncStatus.missingLocal.name,
-          MediaSyncStatus.remoteMissing.name,
-        }.contains(v),
-      )
-      .length;
-  int get pendingCount => pendingDiagnostics + pendingPhotos;
-  bool get allSynchronized =>
-      pendingDiagnostics == 0 && pendingPhotos == 0 && syncErrors == 0;
+  int get syncErrors => photoSyncSummary.errors;
+  int get pendingCount {
+    final photos = photoSyncSummary;
+    return pendingDiagnostics + photos.pendingIds.length;
+  }
 
-  Future<void> initialize() async {
+  bool get allSynchronized {
+    final photos = photoSyncSummary;
+    return pendingDiagnostics == 0 &&
+        photos.pendingIds.isEmpty &&
+        photos.errors == 0;
+  }
+
+  Future<RvDiagnosticExportResult> exportSyncDiagnostic({
+    DiagnosticProgress? onProgress,
+  }) {
+    final exporter = diagnosticExportService;
+    if (exporter == null) {
+      throw StateError('El exportador de diagnóstico no está disponible.');
+    }
+    final groups = RvWorkDashboardProjection.byHydrant(
+      drafts: rvDraftRepository.all(),
+      hydrants: [...hydrants, ...catalogHydrants],
+    );
+    return exporter.export(
+      onProgress: onProgress,
+      hydrants: [...hydrants, ...catalogHydrants],
+      screenSummary: {
+        'home': {
+          'inProgress': groups[RvWorkGroup.inProgress]!.length,
+          'pendingSync': groups[RvWorkGroup.pendingSync]!.length,
+          'sent': groups[RvWorkGroup.submitted]!.length,
+          'validated': groups[RvWorkGroup.validated]!.length,
+          'returned': groups[RvWorkGroup.returned]!.length,
+          'conflicts': groups[RvWorkGroup.conflicts]!.length,
+        },
+        'syncPage': {
+          'pendingDiagnostics': pendingDiagnostics,
+          'pendingPhotos': pendingPhotos,
+          'verifiedPhotos': verifiedPhotos,
+          'errorCount': syncErrors,
+        },
+      },
+    );
+  }
+
+  Future<List<File>> certificationEvidenceFiles({File? currentDiagnostic}) {
+    final exporter = diagnosticExportService;
+    if (exporter == null) {
+      throw StateError('El exportador de diagnóstico no está disponible.');
+    }
+    return exporter.certificationEvidenceFiles(
+      currentDiagnostic: currentDiagnostic,
+    );
+  }
+
+  Future<void> deleteUnsyncedLocalDraft(String clientInspectionId) async {
+    final draft = rvDraftRepository.find(clientInspectionId);
+    if (draft == null) {
+      throw StateError('No se encontró la revisión local.');
+    }
+    if (!canDeleteUnsyncedLocalDraft(clientInspectionId)) {
+      throw StateError(
+        'Esta revisión ya fue enviada y no puede eliminarse localmente.',
+      );
+    }
+    await rvDraftRepository.deleteUnsyncedLocal(
+      clientInspectionId: clientInspectionId,
+      creatorId: user.id,
+    );
+    // Archiving a capture never physically deletes its grouping hydrant.
+    _replaceHydrantsFromCache();
+    notifyListeners();
+  }
+
+  bool canDeleteUnsyncedLocalDraft(String clientInspectionId) {
+    final draft = rvDraftRepository.find(clientInspectionId);
+    if (draft == null) return false;
+    return rvDraftRepository.canDeleteUnsyncedLocal(
+      clientInspectionId: clientInspectionId,
+      creatorId: user.id,
+    );
+  }
+
+  static bool _hasOfficialRvState(Hydrant hydrant) =>
+      hydrant.officialInspectionId != null ||
+      const {
+        'submitted',
+        'completed',
+        'validated',
+      }.contains(hydrant.rvStatus) ||
+      const {
+        InspectionStatus.completed,
+        InspectionStatus.validated,
+      }.contains(hydrant.f02a.status);
+
+  Future<void> initialize({bool startRemoteServices = true}) async {
     connectivityMonitor?.addListener(_onConnectivityChanged);
     _clearAccessScope();
     _replaceHydrantsFromCache();
@@ -204,10 +420,17 @@ class AppState extends ChangeNotifier {
       _session = localSession;
       sessionOffline = true;
       _applySession(localSession);
+      await rvDraftRepository.reconcileOrphanedInspectionQueue(
+        creatorId: localSession.userId,
+      );
+      await _reconcileLegacyDeletedManualHydrants(localSession.userId);
     }
     initialized = true;
     notifyListeners();
-    unawaited(_initializeRemoteServices());
+    if (startRemoteServices) {
+      unawaited(_completePendingLogout());
+      unawaited(_initializeRemoteServices());
+    }
   }
 
   Future<void> _initializeRemoteServices() async {
@@ -220,6 +443,15 @@ class AppState extends ChangeNotifier {
         sessionOffline = sessionRepository.lastRestoreOffline;
         _applySession(restored);
       }
+    } on ApiException catch (error) {
+      if (error.kind == ApiErrorKind.sessionRevoked ||
+          error.kind == ApiErrorKind.authenticationRequired ||
+          error.kind == ApiErrorKind.sessionExpired) {
+        _resetActiveSessionState();
+        assignmentError = error.message;
+      } else {
+        sessionOffline = true;
+      }
     } on Object {
       sessionOffline = true;
     }
@@ -231,9 +463,33 @@ class AppState extends ChangeNotifier {
   }
 
   void _onConnectivityChanged() {
+    final wasOnline = online;
     online = connectivityMonitor?.apiAvailable ?? online;
-    if (online) sessionOffline = false;
+    if (online) {
+      sessionOffline = false;
+      unawaited(_completePendingLogout());
+      final now = DateTime.now().toUtc();
+      final cooldownElapsed =
+          _lastAutomaticSyncAttempt == null ||
+          now.difference(_lastAutomaticSyncAttempt!) >= automaticSyncCooldown;
+      if (pendingCount > 0 && (!wasOnline || cooldownElapsed)) {
+        _lastAutomaticSyncAttempt = now;
+        unawaited(synchronize());
+      }
+    }
     notifyListeners();
+  }
+
+  Future<void> _completePendingLogout() async {
+    final completed = await sessionRepository.completePendingLogout();
+    if (completed) {
+      await preferences.setBool('pending_field_session_end', false);
+      if (assignmentError ==
+          'Sin conexión. El cierre de sesión quedó pendiente.') {
+        assignmentError = null;
+      }
+      notifyListeners();
+    }
   }
 
   Future<void> recheckConnectivity() async {
@@ -243,6 +499,7 @@ class AppState extends ChangeNotifier {
   Future<String?> startFieldSession(FieldRegistration registration) async {
     final stopwatch = Stopwatch()..start();
     try {
+      pendingSessionTakeoverToken = null;
       final newSession = await sessionRepository.start(registration);
       _resetActiveSessionState();
       _session = newSession;
@@ -252,19 +509,43 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       unawaited(synchronizeAssignments());
       unawaited(refreshChecklist());
+      unawaited(synchronize());
       final monitor = connectivityMonitor;
       if (monitor != null) unawaited(monitor.check());
       debugPrint('[PERF] login_session_ms=${stopwatch.elapsedMilliseconds}');
       return null;
     } on ApiException catch (error) {
+      if (error.kind == ApiErrorKind.sessionAlreadyActive &&
+          error.takeoverToken?.isNotEmpty == true) {
+        pendingSessionTakeoverToken = error.takeoverToken;
+        return 'Tu usuario ya está activo en otro dispositivo. ¿Deseas cerrar esa sesión? Presiona aquí';
+      }
       return error.message;
     } on Object {
       return 'Error desconocido.';
     }
   }
 
+  Future<String?> revokeExistingFieldSession() async {
+    final token = pendingSessionTakeoverToken;
+    if (token == null || token.isEmpty) {
+      return 'La autorización para cerrar la sesión ya no está disponible. Intenta iniciar sesión nuevamente.';
+    }
+    try {
+      await sessionRepository.revokeExisting(token);
+      pendingSessionTakeoverToken = null;
+      notifyListeners();
+      return null;
+    } on ApiException catch (error) {
+      return error.kind == ApiErrorKind.timeout
+          ? 'El servidor tardó demasiado en responder. La sesión anterior no se modificó.'
+          : error.message;
+    } on Object {
+      return 'No fue posible cerrar la sesión del otro dispositivo.';
+    }
+  }
+
   void _applySession(FieldSession session) {
-    _remoteProfileStats = null;
     profileStatsLoading = true;
     _user = AppUser(
       id: session.userId,
@@ -288,6 +569,7 @@ class AppState extends ChangeNotifier {
     visualInspectionRepository.setAccessScope(scope);
     hydrantRepository.setAccessScope(scope);
     syncQueueRepository.setAccessScope(scope);
+    dynamicCatalogRepository?.setOwner(session.userId);
     _replaceHydrantsFromCache();
   }
 
@@ -314,7 +596,6 @@ class AppState extends ChangeNotifier {
   void _resetActiveSessionState() {
     sessionRepository.cancelActiveRequests();
     _session = null;
-    _remoteProfileStats = null;
     profileStatsLoading = false;
     _clearAccessScope();
     hydrants.clear();
@@ -337,27 +618,86 @@ class AppState extends ChangeNotifier {
   }
 
   void _replaceHydrantsFromCache() {
+    final latestLocalByHydrant = <String, VisualInspection>{};
+    for (final report in visualInspectionRepository.accessible()) {
+      final current = latestLocalByHydrant[report.hydrantId];
+      if (current == null || report.updatedAt.isAfter(current.updatedAt)) {
+        latestLocalByHydrant[report.hydrantId] = report;
+      }
+    }
+    Hydrant project(Hydrant item) {
+      final report = latestLocalByHydrant[item.id];
+      if (report == null || !isNormalCompletedRvDocument(report)) {
+        return item;
+      }
+      final draft = rvDraftRepository.fromInspection(report);
+      final validated = draft?.remoteStatus == 'validated';
+      return item.copyWith(
+        syncStatus: validated ? SyncStatus.validated : SyncStatus.synced,
+        f02a: InspectionSummary(
+          type: item.f02a.type,
+          status: validated
+              ? InspectionStatus.validated
+              : InspectionStatus.completed,
+          progress: 1,
+        ),
+        lastStatusChangedAt:
+            draft?.lastStatusChangedAt ??
+            report.completedAt ??
+            report.updatedAt,
+        photoCount: draft?.photoCount ?? report.photoIds.length,
+      );
+    }
+
     final catalog = hydrantRepository
         .cached(scope: 'all')
-        .map((e) => e.toAppModel())
+        .map((e) => project(e.toAppModel()))
         .toList();
     catalogHydrants
       ..clear()
       ..addAll(catalog);
-    final cached = hydrantRepository
+    final assigned = hydrantRepository
         .cached(scope: 'mine')
-        .map((e) => e.toAppModel())
+        .map((e) => project(e.toAppModel()))
         .toList();
-    final ids = cached.map((item) => item.id).toSet();
-    for (final item in catalog) {
-      if (!ids.contains(item.id) &&
-          visualInspectionRepository.hasLocalInspection(item.id)) {
-        cached.add(item.copyWith(syncStatus: SyncStatus.local));
-      }
-    }
+    final cached = RvWorkDashboardProjection.personalWorkHydrants(
+      assigned: assigned,
+      catalog: catalog,
+      drafts: rvDraftRepository.all(),
+    );
     hydrants
       ..clear()
       ..addAll(cached);
+  }
+
+  void reconcileLocalWorkProjection() {
+    _replaceHydrantsFromCache();
+    notifyListeners();
+  }
+
+  Future<void> _reconcileLegacyDeletedManualHydrants(String creatorId) async {
+    final queuedManuals = syncQueueRepository
+        .all()
+        .where(
+          (item) =>
+              item.entityType == 'manualHydrant' &&
+              item.ownerUserId == creatorId &&
+              item.status != SyncQueueStatus.synced,
+        )
+        .toList(growable: false);
+    for (final item in queuedManuals) {
+      final hydrantId = item.hydrantId ?? item.entityId;
+      if (hydrantId.isEmpty ||
+          visualInspectionRepository.forHydrant(hydrantId).isNotEmpty) {
+        continue;
+      }
+      final removed = await hydrantRepository.deleteUnsyncedManualLocal(
+        hydrantId: hydrantId,
+        creatorId: creatorId,
+      );
+      if (removed) await syncQueueRepository.delete(item.id);
+    }
+    _replaceHydrantsFromCache();
   }
 
   Future<void> refreshChecklist() async {
@@ -399,12 +739,20 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<Hydrant> hydrantsForFilter(HydrantListFilter filter) => hydrants
-      .where(
-        (hydrant) =>
-            HydrantQueryProjection.matches(filter, _filterFacts(hydrant)),
-      )
-      .toList(growable: false);
+  List<Hydrant> hydrantsForFilter(HydrantListFilter filter) {
+    // The unfiltered list is the default and the search screen applies its
+    // text query afterwards. Avoid decoding every local inspection and photo
+    // merely to prove that every hydrant matches `all`.
+    if (filter == HydrantListFilter.all) {
+      return List<Hydrant>.unmodifiable(hydrants);
+    }
+    return hydrants
+        .where(
+          (hydrant) =>
+              HydrantQueryProjection.matches(filter, _filterFacts(hydrant)),
+        )
+        .toList(growable: false);
+  }
 
   int hydrantCountForFilter(HydrantListFilter filter) =>
       hydrantsForFilter(filter).length;
@@ -427,9 +775,15 @@ class AppState extends ChangeNotifier {
       hydrant.id,
     );
     final eligibility = functionalEligibilityRepository.find(hydrant.id);
+    final activeDraft = rvDraftRepository.activeFor(hydrant.id);
+    // The official state describes one historical review. Any distinct active
+    // draft is additional work for the same hydrant and must stay visible.
+    final officialWithoutActiveReview =
+        _hasOfficialRvState(hydrant) && activeDraft == null;
     final visualInProgress =
-        hydrant.f02a.status == InspectionStatus.inProgress ||
-        visualInspectionRepository.hasLocalInspection(hydrant.id);
+        !officialWithoutActiveReview &&
+        (hydrant.f02a.status == InspectionStatus.inProgress ||
+            activeDraft != null);
     final functionalInProgress =
         activeFunctional != null &&
         activeFunctional.status != FunctionalInspectionStatus.completed &&
@@ -453,7 +807,8 @@ class AppState extends ChangeNotifier {
       functionalInProgress: functionalInProgress,
       visualCompleted: hydrant.f02a.status == InspectionStatus.completed,
       functionalCompleted: functionalCompleted,
-      unsynchronized: _hasUnsynchronizedData(hydrant),
+      unsynchronized:
+          !officialWithoutActiveReview && _hasUnsynchronizedData(hydrant),
       visualPending: hydrant.f02a.status == InspectionStatus.pending,
       functionalPending: functional.status == InspectionStatus.pending,
       functionalRequired:
@@ -470,61 +825,31 @@ class AppState extends ChangeNotifier {
           hydrant.damageCount > 0 || assignmentsForReview.contains(hydrant.id),
       visualSubmittedToday: visualHistory.any(
         (value) =>
-            value.status == InspectionStatus.completed &&
+            isNormalCompletedRvDocument(value) &&
             value.completedAt != null &&
             isToday(value.completedAt!),
       ),
-      visualPendingToday: visualHistory.any(
-        (value) =>
-            value.status != InspectionStatus.completed &&
-            isToday(value.startedAt),
-      ),
+      visualPendingToday:
+          !officialWithoutActiveReview &&
+          visualHistory.any(
+            (value) =>
+                value.status != InspectionStatus.completed &&
+                isToday(value.startedAt),
+          ),
     );
   }
 
   ProfileTodayStats get profileTodayStats {
     final today = DateTime.now();
-    bool isToday(DateTime value) {
-      final local = value.toLocal();
-      return local.year == today.year &&
-          local.month == today.month &&
-          local.day == today.day;
-    }
-
-    final reports = visualInspectionRepository.accessible();
-    final submittedIds = {
-      for (final report in reports)
-        if (report.status == InspectionStatus.completed &&
-            report.completedAt != null &&
-            isToday(report.completedAt!))
-          report.id,
-    };
-    final pendingIds = {
-      for (final report in reports)
-        if (report.status != InspectionStatus.completed &&
-            isToday(report.startedAt))
-          report.id,
-    };
-    final unsyncedIds = {
-      for (final item in syncQueueRepository.all())
-        if (item.status != SyncQueueStatus.synced)
-          item.inspectionId ?? item.entityId,
-      for (final draft in rvDraftRepository.pending())
-        if (!draft.isReadOnly) draft.clientInspectionId,
-    };
-    final local = ProfileTodayStats(
-      date: DateTime(today.year, today.month, today.day),
-      submitted: submittedIds.length,
-      pending: pendingIds.length,
-      unsynced: unsyncedIds.length,
+    final grouped = RvWorkDashboardProjection.byHydrant(
+      drafts: rvDraftRepository.all(),
+      hydrants: hydrants,
     );
-    final remote = _remoteProfileStats;
-    if (remote == null || remote.date != local.date) return local;
     return ProfileTodayStats(
-      date: local.date,
-      submitted: remote.submitted,
-      pending: remote.pending,
-      unsynced: local.unsynced,
+      date: DateTime(today.year, today.month, today.day),
+      submitted: grouped[RvWorkGroup.submitted]!.length,
+      pending: grouped[RvWorkGroup.inProgress]!.length,
+      unsynced: grouped[RvWorkGroup.pendingSync]!.length,
     );
   }
 
@@ -544,21 +869,7 @@ class AppState extends ChangeNotifier {
         );
         if (photo.capturedByUserId == user.id &&
             photo.hydrantId == hydrant.id &&
-            mediaBox.get(photo.id) != MediaSyncStatus.verified.name) {
-          return true;
-        }
-      } on Object {
-        continue;
-      }
-    }
-    for (final entry in traceBox.toMap().entries) {
-      if (syncedTraceBox.containsKey('${entry.key}')) continue;
-      try {
-        final payload = Map<String, dynamic>.from(
-          jsonDecode(entry.value) as Map,
-        );
-        if (payload['userId'] == user.id &&
-            payload['hydrantId'] == hydrant.id) {
+            !photo.isSynchronized) {
           return true;
         }
       } on Object {
@@ -568,8 +879,55 @@ class AppState extends ChangeNotifier {
     return false;
   }
 
-  Hydrant hydrant(String id) =>
-      [...hydrants, ...catalogHydrants].firstWhere((item) => item.id == id);
+  bool _isSupersededByOfficialState(RvDraft draft) {
+    // An official inspection belongs to one review, not to the hydrant as a
+    // whole. A different local clientInspectionId is an additional review and
+    // must remain eligible for synchronization. Explicit local recovery marks
+    // true duplicates with supersededBy; RvDraftRepository.pending() already
+    // excludes those records.
+    return false;
+  }
+
+  List<RvDraft> _pendingDraftsForSync() {
+    final all = rvDraftRepository.all();
+    final submittedHydrants = all
+        .where((draft) => draft.localStatus == RvLocalStatus.submitted)
+        .map((draft) => draft.hydrantId)
+        .toSet();
+    return all
+        .where(
+          (draft) =>
+              (draft.supersededBy == null) &&
+              !RvWorkDashboardProjection.isEmptyLegacySyncShell(draft) &&
+              !(draft.remoteStatus == 'conflict' &&
+                  submittedHydrants.contains(draft.hydrantId)) &&
+              (!draft.isReadOnly ||
+                  (draft.localStatus == RvLocalStatus.conflict &&
+                      draft.serverInspectionId != null)) &&
+              !_isSupersededByOfficialState(draft) &&
+              (draft.localStatus != RvLocalStatus.conflict ||
+                  draft.serverInspectionId != null) &&
+              draft.localStatus != RvLocalStatus.versionConflict &&
+              draft.localStatus != RvLocalStatus.cancelled &&
+              (draft.localStatus != RvLocalStatus.submitted ||
+                  draft.hasPendingChanges ||
+                  _draftHasUnconfirmedEvidence(draft)),
+        )
+        .toList(growable: false);
+  }
+
+  bool _draftHasUnconfirmedEvidence(RvDraft draft) {
+    final referencePending = draft.photos.values
+        .expand((items) => items)
+        .any((reference) => reference.status != RvPhotoUploadStatus.verified);
+    return referencePending || !RvSyncTruthService.evaluate(draft).synchronized;
+  }
+
+  Hydrant hydrant(String id) {
+    final assigned = hydrants.where((item) => item.id == id).firstOrNull;
+    if (assigned != null) return assigned;
+    return catalogHydrants.firstWhere((item) => item.id == id);
+  }
 
   void includeLocalHydrant(Hydrant value) {
     if (!hydrants.any((item) => item.id == value.id)) {
@@ -755,7 +1113,6 @@ class AppState extends ChangeNotifier {
       correlationId: correlationId,
     );
     await traceBox.put(event.id, jsonEncode(event.toJson()));
-    notifyListeners();
   }
 
   Future<void> enqueueSync({
@@ -789,36 +1146,193 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> synchronize() async {
-    if (!online || syncing || allSynchronized) return;
+  Future<void> synchronize() {
+    final active = _activeSync;
+    if (active != null) return active;
+    final run = _runUnifiedSynchronization();
+    _activeSync = run;
+    return run.whenComplete(() => _activeSync = null);
+  }
+
+  Future<void> _runUnifiedSynchronization() async {
+    if (!online) {
+      syncStage = GlobalSyncStage.waitingConnection;
+      notifyListeners();
+      return;
+    }
+    if (allSynchronized) {
+      syncStage = GlobalSyncStage.completed;
+      notifyListeners();
+      return;
+    }
     syncing = true;
+    syncStage = GlobalSyncStage.preparing;
     syncProgress = 0;
+    syncCompleted = 0;
+    syncWarnings = 0;
+    syncConflicts = 0;
+    syncPauseMessage = null;
     notifyListeners();
     await trace('sync_execute', 'Ejecución de sincronización iniciada');
     try {
+      await _completePendingLogout();
+      syncStage = GlobalSyncStage.catalogs;
+      try {
+        await dynamicCatalogRepository?.synchronizePending();
+      } on Object catch (error) {
+        syncWarnings++;
+        await trace(
+          'sync_catalog_warning',
+          'La sincronización de catálogos falló; se continuará con los reportes',
+          reason: error.toString(),
+        );
+      }
+      final manual = syncQueueRepository
+          .ready()
+          .where((value) => value.entityType == 'manualHydrant')
+          .toList();
+      final drafts = _pendingDraftsForSync();
+      final remoteStatePass = rvDraftRepository
+          .all()
+          .where((draft) => draft.serverInspectionId != null)
+          .toList(growable: false);
+      final evidencePass = rvDraftRepository
+          .all()
+          .where(
+            (draft) =>
+                draft.serverInspectionId != null &&
+                _draftHasUnconfirmedEvidence(draft),
+          )
+          .toList(growable: false);
+      syncTotal =
+          manual.length +
+          drafts.length +
+          evidencePass.length +
+          remoteStatePass.length;
       for (final item in syncQueueRepository.ready().where(
         (value) => value.entityType == 'manualHydrant',
       )) {
-        await hydrantRepository.synchronizeManual(
-          item.entityId,
-          idempotencyKey: item.idempotencyKey,
-        );
-        await syncQueueRepository.markSynced(item.id);
+        try {
+          await hydrantRepository.synchronizeManual(
+            item.entityId,
+            idempotencyKey: item.idempotencyKey,
+          );
+          await syncQueueRepository.markSynced(item.id);
+        } on Object {
+          syncWarnings++;
+        }
+        syncCompleted++;
       }
-      final drafts = rvDraftRepository.pending();
+      syncStage = GlobalSyncStage.reports;
+      // Human-gated and completed reviews may be reconciled by GET. This pass
+      // records positive remote truth but cannot create/update/submit anything.
+      for (final draft in remoteStatePass) {
+        syncingReport = draft.accountNumber;
+        try {
+          await inspectionSyncCoordinator.reconcileInspectionStateReadOnly(
+            draft,
+          );
+        } on Object catch (error) {
+          syncWarnings++;
+          await trace(
+            'sync_read_reconciliation_failure',
+            'La consulta remota de una revisión quedó pendiente.',
+            reason: error.toString(),
+            metadata: {'clientInspectionId': draft.clientInspectionId},
+          );
+        } finally {
+          syncCompleted++;
+          syncProgress = syncTotal == 0 ? 1 : syncCompleted / syncTotal;
+          notifyListeners();
+        }
+      }
+      // Reconcile evidence for every server-linked review before any answer,
+      // valve or submit phase. This keeps a conflict in an active report from
+      // hiding confirmations that the server has already persisted. The pass
+      // never resends answers or submits a report.
+      for (final draft in evidencePass) {
+        syncingReport = draft.accountNumber;
+        try {
+          final result = await inspectionSyncCoordinator
+              .reconcileInspectionEvidence(draft);
+          if (result.pending > 0 || result.failed > 0) syncWarnings++;
+        } on Object catch (error) {
+          syncWarnings++;
+          await trace(
+            'sync_evidence_isolated_failure',
+            'La confirmación de evidencia falló de forma aislada; se continuará con el siguiente reporte',
+            reason: error.toString(),
+            metadata: {
+              'clientInspectionId': draft.clientInspectionId,
+              'accountNumber': draft.accountNumber,
+            },
+          );
+        } finally {
+          syncCompleted++;
+          syncProgress = syncTotal == 0 ? 1 : syncCompleted / syncTotal;
+          notifyListeners();
+        }
+      }
       for (var index = 0; index < drafts.length; index++) {
-        await inspectionSyncCoordinator.synchronize(drafts[index]);
-        syncProgress = drafts.isEmpty ? 1 : (index + 1) / drafts.length;
-        notifyListeners();
+        syncingReport = drafts[index].accountNumber;
+        try {
+          final result = await inspectionSyncCoordinator.synchronize(
+            drafts[index],
+            forceRetry: true,
+            submit:
+                drafts[index].localStatus == RvLocalStatus.submitPending ||
+                drafts[index].localStatus == RvLocalStatus.readyToSubmit ||
+                drafts[index].submitStatus == RvPartStatus.pending ||
+                drafts[index].submitStatus == RvPartStatus.syncing,
+          );
+          if (result.localStatus == RvLocalStatus.conflict ||
+              result.localStatus == RvLocalStatus.versionConflict) {
+            syncConflicts++;
+          } else if (result.lastSyncError != null) {
+            syncWarnings++;
+          }
+        } on Object catch (error) {
+          syncWarnings++;
+          await trace(
+            'sync_report_isolated_failure',
+            'Un reporte falló de forma aislada; se continuará con el siguiente',
+            reason: error.toString(),
+            metadata: {
+              'clientInspectionId': drafts[index].clientInspectionId,
+              'accountNumber': drafts[index].accountNumber,
+            },
+          );
+        } finally {
+          syncCompleted++;
+          syncProgress = syncTotal == 0 ? 1 : syncCompleted / syncTotal;
+          notifyListeners();
+        }
       }
+      syncStage = GlobalSyncStage.projections;
+      try {
+        await synchronizeAssignments();
+      } on Object catch (error) {
+        syncWarnings++;
+        await trace(
+          'sync_projection_warning',
+          'La actualización de asignaciones falló después de procesar los reportes',
+          reason: error.toString(),
+        );
+      }
+      syncStage = pendingCount > 0 || syncWarnings > 0 || syncConflicts > 0
+          ? GlobalSyncStage.completedWithWarnings
+          : GlobalSyncStage.completed;
+      syncProgress = 1;
     } finally {
       syncing = false;
+      syncingReport = null;
       notifyListeners();
     }
   }
 
   Future<void> retryMedia(String id) async {
-    await mediaBox.put(id, MediaSyncStatus.pendingUpload.name);
+    if (_photoIntegrityConfirmed(id)) return;
+    await mediaBox.put(id, 'verify');
     notifyListeners();
     await synchronize();
   }
@@ -838,28 +1352,25 @@ class AppState extends ChangeNotifier {
       List<CachedHydrant>? refreshed;
       final partialErrors = <Object>[];
       await Future.wait<void>([
-        hydrantRepository.refreshCatalogSnapshot().then<void>(
-          (value) => catalog = value,
-          onError: (Object error) => partialErrors.add(error),
-        ),
+        (hydrantRepository.cached(scope: 'all').isEmpty
+                ? hydrantRepository.refreshCatalogSnapshot()
+                : hydrantRepository.isCatalogCacheStale()
+                ? hydrantRepository.refreshMapChanges()
+                : Future.value(hydrantRepository.cached(scope: 'all')))
+            .then<void>(
+              (value) => catalog = value,
+              onError: (Object error) => partialErrors.add(error),
+            ),
         hydrantRepository
             .refresh(scope: 'mine')
             .then<void>(
               (value) => refreshed = value,
               onError: (Object error) => partialErrors.add(error),
             ),
-        hydrantRepository.todayStats().then((remoteStats) {
-          _remoteProfileStats = ProfileTodayStats(
-            date: DateTime(
-              remoteStats.date.year,
-              remoteStats.date.month,
-              remoteStats.date.day,
-            ),
-            submitted: remoteStats.submitted,
-            pending: remoteStats.pending,
-            unsynced: 0,
-          );
-        }, onError: (Object error) => partialErrors.add(error)),
+        hydrantRepository.todayStats().then<void>(
+          (_) {},
+          onError: (Object error) => partialErrors.add(error),
+        ),
       ]);
       profileStatsLoading = false;
       _replaceHydrantsFromCache();
@@ -919,8 +1430,21 @@ class AppState extends ChangeNotifier {
       profileStatsLoading = false;
       lastAssignmentCheck = DateTime.now();
       await trace('assignment_sync_error', assignmentError!);
+    } on Object {
+      assignmentError =
+          'No fue posible actualizar los hidrantes. Se conservan los datos guardados.';
+      profileStatsLoading = false;
+      lastAssignmentCheck = DateTime.now();
+      await trace('assignment_sync_error', assignmentError!);
+    } finally {
+      assignmentSyncing = false;
+      notifyListeners();
     }
-    assignmentSyncing = false;
+  }
+
+  Future<void> refreshMapCatalog({bool forceSnapshot = false}) async {
+    await hydrantRepository.refreshCatalogSnapshot(force: forceSnapshot);
+    _replaceHydrantsFromCache();
     notifyListeners();
   }
 

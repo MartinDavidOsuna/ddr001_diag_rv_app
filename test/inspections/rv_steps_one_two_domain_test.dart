@@ -1,9 +1,54 @@
 import 'package:ddr001diag/features/inspections/domain/rv_draft.dart';
 import 'package:ddr001diag/features/inspections/domain/rv_sync_state.dart';
 import 'package:ddr001diag/features/inspections/presentation/rv_steps_one_two.dart';
+import 'package:ddr001diag/features/checklist/data/checklist_models.dart';
+import 'package:ddr001diag/features/checklist/presentation/dynamic_checklist_renderer.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  ChecklistItemDefinition item({
+    required String code,
+    String type = 'text',
+    bool required = false,
+  }) => ChecklistItemDefinition(
+    id: code,
+    code: code,
+    label: code,
+    type: type,
+    required: required,
+    order: 1,
+  );
+
+  group('paso 2 sin controles duplicados', () {
+    test('comentarios generales no ofrece No aplica', () {
+      expect(
+        showNotApplicableForChecklistItem(item(code: 'cabinet_comments')),
+        isFalse,
+      );
+      expect(
+        showNotApplicableForChecklistItem(item(code: 'optional_note')),
+        isTrue,
+      );
+    });
+
+    test('oculta la primera captura fotográfica y conserva preguntas', () {
+      expect(
+        renderChecklistItemInSection(
+          item(code: 'cabinet_front', type: 'photo'),
+          hidePhotoQuestions: true,
+        ),
+        isFalse,
+      );
+      expect(
+        renderChecklistItemInSection(
+          item(code: 'locks_open', type: 'boolean', required: true),
+          hidePhotoQuestions: true,
+        ),
+        isTrue,
+      );
+    });
+  });
+
   RvSignalSample signal({
     bool connected = true,
     String generation = 'UNKNOWN',

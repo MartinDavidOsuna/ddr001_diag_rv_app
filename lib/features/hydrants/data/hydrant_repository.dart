@@ -25,12 +25,14 @@ class HydrantMapPage {
     required this.nextCursor,
     required this.hasMore,
     required this.generatedAt,
+    this.syncCursor,
   });
 
   final List<CachedHydrant> items;
   final String? nextCursor;
   final bool hasMore;
   final DateTime generatedAt;
+  final String? syncCursor;
 }
 
 class HydrantRepository {
@@ -95,8 +97,23 @@ class HydrantRepository {
   String get _snapshotMetadataKey =>
       '${_accessScope?.namespace ?? 'unscoped'}/meta/catalog-snapshot';
 
+  bool isCatalogCacheStale({Duration ttl = const Duration(minutes: 15)}) {
+    final raw = box.get(_snapshotMetadataKey);
+    if (raw == null) return true;
+    try {
+      final updatedAt = DateTime.tryParse(
+        '${(jsonDecode(raw) as Map)['updatedAt'] ?? ''}',
+      )?.toUtc();
+      return updatedAt == null ||
+          DateTime.now().toUtc().difference(updatedAt) >= ttl;
+    } on Object {
+      return true;
+    }
+  }
+
   Future<List<CachedHydrant>> refreshCatalogSnapshot({
     bool recheckCapability = false,
+    bool force = false,
     void Function(int received, int? total)? onProgress,
   }) {
     final active = _activeSnapshotRefresh;
@@ -104,12 +121,13 @@ class HydrantRepository {
     if (recheckCapability) _syncEndpointSupported = null;
     final future = _syncEndpointSupported == false
         ? _performRefresh(pageSize: 200, scope: 'all', onProgress: onProgress)
-        : _performCatalogSnapshotRefresh(onProgress: onProgress);
+        : _performCatalogSnapshotRefresh(force: force, onProgress: onProgress);
     _activeSnapshotRefresh = future;
     return future.whenComplete(() => _activeSnapshotRefresh = null);
   }
 
   Future<List<CachedHydrant>> _performCatalogSnapshotRefresh({
+    required bool force,
     void Function(int received, int? total)? onProgress,
   }) async {
     final requestWatch = Stopwatch()..start();
@@ -126,7 +144,7 @@ class HydrantRepository {
       final response = await client.dio.get<Map<String, dynamic>>(
         '/hydrants/sync',
         options: Options(
-          headers: {'If-None-Match': ?etag},
+          headers: {if (!force) 'If-None-Match': ?etag},
           validateStatus: (status) =>
               status != null &&
               ((status >= 200 && status < 300) || status == 304),
@@ -193,6 +211,7 @@ class HydrantRepository {
           'etag': response.headers.value('etag'),
           'updatedAt': now.toIso8601String(),
           'count': downloaded.length,
+          'cursor': response.data?['syncCursor']?.toString(),
         }),
       );
       cacheWatch.stop();
@@ -267,6 +286,27 @@ class HydrantRepository {
     return item;
   }
 
+  Future<bool> deleteUnsyncedManualLocal({
+    required String hydrantId,
+    required String creatorId,
+  }) async {
+    final records = cached()
+        .where((item) => item.hydrantId == hydrantId)
+        .toList();
+    if (records.isEmpty ||
+        records.any(
+          (item) =>
+              item.source != 'manual' ||
+              item.createdByUserId != creatorId ||
+              item.remoteId != null,
+        )) {
+      return false;
+    }
+    await box.deleteAll([_key('mine', hydrantId), _key('all', hydrantId)]);
+    _memoryCache.clear();
+    return true;
+  }
+
   Future<HydrantMapPage> fetchMapPage({
     double? latitude,
     double? longitude,
@@ -274,13 +314,18 @@ class HydrantRepository {
     HydrantMapBounds? bounds,
     int pageSize = 100,
     String? cursor,
+    bool allCatalog = false,
   }) async {
     final radiusMode = latitude != null || longitude != null;
-    if (radiusMode == (bounds != null) ||
-        (radiusMode && (latitude == null || longitude == null))) {
+    if (!allCatalog &&
+        (radiusMode == (bounds != null) ||
+            (radiusMode && (latitude == null || longitude == null)))) {
       throw ArgumentError(
         'Provide either latitude/longitude or visible bounds.',
       );
+    }
+    if (allCatalog && (radiusMode || bounds != null)) {
+      throw ArgumentError('allCatalog cannot be combined with a region.');
     }
     final watch = Stopwatch()..start();
     try {
@@ -294,6 +339,7 @@ class HydrantRepository {
           if (bounds != null) 'west': bounds.west,
           if (bounds != null) 'north': bounds.north,
           if (bounds != null) 'east': bounds.east,
+          if (allCatalog) 'scope': 'all',
           'pageSize': pageSize,
           if (cursor case final value?) ...{'cursor': value},
         },
@@ -333,10 +379,62 @@ class HydrantRepository {
         nextCursor: data['nextCursor']?.toString(),
         hasMore: data['hasMore'] == true,
         generatedAt: now,
+        syncCursor: data['syncCursor']?.toString(),
       );
     } on DioException catch (error) {
       throw ApiException.fromDio(error);
     }
+  }
+
+  Future<List<CachedHydrant>> refreshMapChanges() async {
+    final rawMetadata = box.get(_snapshotMetadataKey);
+    String? cursor;
+    if (rawMetadata != null) {
+      try {
+        cursor = (jsonDecode(rawMetadata) as Map)['cursor']?.toString();
+      } on Object {
+        cursor = null;
+      }
+    }
+    if (cursor == null || cursor.isEmpty) return refreshCatalogSnapshot();
+    var currentCursor = cursor;
+    var hasMore = false;
+    do {
+      final page = await fetchMapPage(
+        allCatalog: true,
+        pageSize: 500,
+        cursor: currentCursor,
+      );
+      final writes = <String, String>{};
+      final removals = <String>[];
+      for (final item in page.items) {
+        final key = _key('all', item.hydrantId);
+        if (item.isActive) {
+          writes[key] = jsonEncode(item.toJson());
+        } else {
+          removals.add(key);
+        }
+      }
+      if (writes.isNotEmpty) await box.putAll(writes);
+      if (removals.isNotEmpty) await box.deleteAll(removals);
+      currentCursor = page.syncCursor ?? currentCursor;
+      hasMore = page.hasMore && page.nextCursor != null;
+      if (hasMore) currentCursor = page.nextCursor!;
+    } while (hasMore);
+    final metadata = rawMetadata == null
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(rawMetadata) as Map);
+    await box.put(
+      _snapshotMetadataKey,
+      jsonEncode({
+        ...metadata,
+        'cursor': currentCursor,
+        'updatedAt': DateTime.now().toUtc().toIso8601String(),
+        'count': cached(scope: 'all').length,
+      }),
+    );
+    _memoryCache.clear();
+    return cached(scope: 'all');
   }
 
   Future<CachedHydrant> synchronizeManual(
@@ -380,6 +478,24 @@ class HydrantRepository {
     } on DioException catch (error) {
       throw ApiException.fromDio(error);
     }
+  }
+
+  Future<void> linkServerHydrantId(String localId, String serverId) async {
+    final records = cached()
+        .where((item) => item.hydrantId == localId)
+        .toList(growable: false);
+    if (records.isEmpty || records.every((item) => item.remoteId == serverId)) {
+      return;
+    }
+    for (final item in records) {
+      final linked = CachedHydrant.fromJson({
+        ...item.toJson(),
+        'remoteId': serverId,
+        'updatedAt': DateTime.now().toUtc().toIso8601String(),
+      });
+      await box.put(_key(item.scope, localId), jsonEncode(linked.toJson()));
+    }
+    _memoryCache.clear();
   }
 
   Future<List<CachedHydrant>> refresh({
@@ -477,7 +593,16 @@ class HydrantRepository {
     }
   }
 
-  Future<({DateTime date, int submitted, int pending})> todayStats() async {
+  Future<
+    ({
+      DateTime date,
+      int submitted,
+      int pending,
+      List<String> completedInspectionIds,
+      List<String> pendingInspectionIds,
+    })
+  >
+  todayStats() async {
     try {
       final response = await client.dio.get<Map<String, dynamic>>(
         '/profile/today-stats',
@@ -487,6 +612,14 @@ class HydrantRepository {
         date: DateTime.parse('${data['date']}').toLocal(),
         submitted: (data['completed'] as num?)?.toInt() ?? 0,
         pending: (data['pending'] as num?)?.toInt() ?? 0,
+        completedInspectionIds:
+            (data['completedInspectionIds'] as List? ?? const [])
+                .map((value) => '$value')
+                .toList(growable: false),
+        pendingInspectionIds:
+            (data['pendingInspectionIds'] as List? ?? const [])
+                .map((value) => '$value')
+                .toList(growable: false),
       );
     } on DioException catch (error) {
       throw ApiException.fromDio(error);

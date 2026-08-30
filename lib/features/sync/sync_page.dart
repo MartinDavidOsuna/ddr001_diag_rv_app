@@ -1,16 +1,29 @@
 import 'package:flutter/material.dart';
+import '../../data/local/media_work_item_codec.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
-import '../../domain/media/media_sync_status.dart';
 import '../../domain/sync/sync_queue_item.dart';
 
 String syncConnectionMessage(bool online) => online
     ? 'Conectado a la API; cada elemento requiere confirmación remota'
     : 'Los cambios permanecen guardados hasta recuperar la conexión';
+
+@visibleForTesting
+String mediaSyncStatusForUi(String? persistedStatus) =>
+    switch (persistedStatus) {
+      'verified' => 'Sincronizado',
+      'uploading' => 'Sincronizando',
+      'requiresReview' => 'Requiere revisión',
+      'failedRetryable' ||
+      'failedPermanent' ||
+      'missingLocal' ||
+      'remoteMissing' => 'Requiere reintento',
+      _ => 'Información pendiente',
+    };
 
 class SyncPage extends StatefulWidget {
   const SyncPage({required this.returnLocation, super.key});
@@ -41,9 +54,8 @@ class _SyncPageState extends State<SyncPage> {
         status: item.status.name,
       ));
     }
-    final photos = state.accessiblePhotoIds
-        .where((id) => state.mediaBox.get(id) != MediaSyncStatus.verified.name)
-        .toList();
+    final photoSummary = state.photoSyncSummary;
+    final photos = photoSummary.pendingIds.toList();
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -60,7 +72,11 @@ class _SyncPageState extends State<SyncPage> {
           actions: [
             Padding(
               padding: const EdgeInsets.only(right: 12),
-              child: ConnectionBadge(online: state.online),
+              child: ConnectionBadge(
+                online: state.online,
+                state: state.connectivityState,
+                transport: state.connectivityMonitor?.transport,
+              ),
             ),
           ],
         ),
@@ -124,13 +140,13 @@ class _SyncPageState extends State<SyncPage> {
                   ),
                   SyncCount(
                     label: 'Fotografías',
-                    value: state.pendingPhotos,
-                    detail: '${state.verifiedPhotos} verificadas',
+                    value: photoSummary.pendingIds.length,
+                    detail: '${photoSummary.verified} verificadas',
                   ),
                   SyncCount(
                     label: 'Errores',
-                    value: state.syncErrors,
-                    color: state.syncErrors > 0
+                    value: photoSummary.errors,
+                    color: photoSummary.errors > 0
                         ? AppColors.red
                         : AppColors.green,
                   ),
@@ -138,7 +154,9 @@ class _SyncPageState extends State<SyncPage> {
               ),
             ),
             const SizedBox(height: 16),
-            if (state.allSynchronized)
+            if (state.pendingDiagnostics == 0 &&
+                photoSummary.pendingIds.isEmpty &&
+                photoSummary.errors == 0)
               SectionCard(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 24),
@@ -155,7 +173,7 @@ class _SyncPageState extends State<SyncPage> {
                         style: TextStyle(fontWeight: FontWeight.w800),
                       ),
                       Text(
-                        'Fotografías verificadas: ${state.verifiedPhotos}',
+                        'Fotografías verificadas: ${photoSummary.verified}',
                         style: const TextStyle(color: AppColors.muted),
                       ),
                     ],
@@ -189,7 +207,13 @@ class _SyncPageState extends State<SyncPage> {
                     for (final id in photos)
                       PhotoRow(
                         id: id,
-                        status: state.mediaBox.get(id)!,
+                        status: mediaSyncStatusForUi(
+                          MediaWorkItemCodec.statusOf(
+                            id,
+                            state.mediaBox.get(id),
+                          ),
+                        ),
+                        error: photoSummary.errorById[id],
                         onRetry: () => state.retryMedia(id),
                       ),
                   ],
@@ -201,25 +225,39 @@ class _SyncPageState extends State<SyncPage> {
               LinearProgressIndicator(value: state.syncProgress),
               const SizedBox(height: 7),
               Text(
-                '${(state.syncProgress * 100).round()}% · procesando diagnósticos, fotografías y trazabilidad',
+                '${state.syncCompleted} de ${state.syncTotal} · ${_stageLabel(state.syncStage)}${state.syncingReport == null ? '' : ' · hidrante ${state.syncingReport}'}',
                 textAlign: TextAlign.center,
+              ),
+            ],
+            if (state.syncPauseMessage != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                state.syncPauseMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.orange,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: state.allSynchronized || !state.online || state.syncing
+              onPressed:
+                  (state.pendingDiagnostics == 0 &&
+                          photoSummary.pendingIds.isEmpty &&
+                          photoSummary.errors == 0) ||
+                      !state.online ||
+                      state.syncing
                   ? null
                   : state.synchronize,
               icon: const Icon(Icons.sync),
               label: Text(
-                state.syncing
-                    ? 'Sincronizando...'
-                    : 'Sincronizar ${state.pendingCount} elementos',
+                state.syncing ? 'Sincronizando...' : 'Sincronizar todo',
               ),
             ),
             const SizedBox(height: 12),
             const Text(
-              'Solo MediaSyncStatus.verified cuenta como fotografía sincronizada. uploadedUnverified permanece pendiente.',
+              'Una fotografía cuenta como sincronizada únicamente después de la confirmación del servidor.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11, color: AppColors.muted),
             ),
@@ -228,6 +266,18 @@ class _SyncPageState extends State<SyncPage> {
       ),
     );
   }
+
+  String _stageLabel(GlobalSyncStage stage) => switch (stage) {
+    GlobalSyncStage.idle => 'En espera',
+    GlobalSyncStage.waitingConnection => 'Esperando conexión',
+    GlobalSyncStage.preparing => 'Preparando',
+    GlobalSyncStage.catalogs => 'Sincronizando catálogos',
+    GlobalSyncStage.reports => 'Enviando revisiones y fotografías',
+    GlobalSyncStage.projections => 'Actualizando hidrantes',
+    GlobalSyncStage.completed => 'Completado',
+    GlobalSyncStage.completedWithWarnings => 'Completado con advertencias',
+    GlobalSyncStage.paused => 'Pausado por red',
+  };
 }
 
 class SyncCount extends StatelessWidget {
@@ -292,21 +342,29 @@ class PhotoRow extends StatelessWidget {
   const PhotoRow({
     required this.id,
     required this.status,
+    this.error,
     required this.onRetry,
     super.key,
   });
   final String id, status;
+  final String? error;
   final VoidCallback onRetry;
   @override
   Widget build(BuildContext context) {
     final failed =
-        status == MediaSyncStatus.failedRetryable.name ||
-        status == MediaSyncStatus.failedPermanent.name ||
-        status == MediaSyncStatus.missingLocal.name ||
-        status == MediaSyncStatus.remoteMissing.name;
+        status == 'Requiere reintento' || status == 'Requiere revisión';
     return ListTile(
-      title: Text(id, style: const TextStyle(fontWeight: FontWeight.w700)),
-      subtitle: Text(failed ? '$status · Requiere atención' : status),
+      title: const Text(
+        'Fotografía',
+        style: TextStyle(fontWeight: FontWeight.w700),
+      ),
+      subtitle: Text(
+        failed
+            ? error?.trim().isNotEmpty == true
+                  ? error!
+                  : '$status · Requiere atención'
+            : status,
+      ),
       trailing: failed
           ? TextButton(onPressed: onRetry, child: const Text('Reintentar'))
           : const StatusBadge('Pendiente', color: AppColors.orange),

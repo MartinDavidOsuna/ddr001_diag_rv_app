@@ -1,3 +1,5 @@
+import 'f02a_scoped_identity.dart';
+
 class LocalDataScope {
   const LocalDataScope({
     required this.environment,
@@ -17,11 +19,18 @@ class LocalDataScope {
   bool get isAdministrator => role.toLowerCase() == 'admin';
 
   String get namespace =>
-      '${_part(environment)}/${_part(accountId)}/${_part(userId)}';
+      '${canonicalScopeSegment(environment) ?? ''}/'
+      '${canonicalScopeSegment(accountId) ?? ''}/'
+      '${canonicalScopeSegment(userId) ?? ''}';
 
   bool owns({required String ownerUserId}) =>
-      isUsable && ownerUserId.isNotEmpty && ownerUserId == userId;
+      isUsable &&
+      ownerUserId.trim().isNotEmpty &&
+      ownerUserId.trim().toLowerCase() == userId.trim().toLowerCase();
 
-  static String _part(String value) =>
-      Uri.encodeComponent(value.trim().toLowerCase());
+  bool sameEnvironment(String value) =>
+      value.trim().toLowerCase() == environment.trim().toLowerCase();
+
+  bool sameAccount(String value) =>
+      value.trim().toLowerCase() == accountId.trim().toLowerCase();
 }

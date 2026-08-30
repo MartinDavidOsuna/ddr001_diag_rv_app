@@ -133,7 +133,7 @@ class RvReviewNavigation {
         builder: (dialogContext) => AlertDialog(
           title: const Text('¿Salir de la revisión?'),
           content: const Text(
-            'Tus avances guardados se conservarán y podrás continuar después.',
+            'Tus avances están guardados en el dispositivo. Podrás continuar después.',
           ),
           actions: [
             TextButton(
@@ -161,6 +161,32 @@ class RvReviewNavigation {
           title: const Text('Inspección enviada'),
           content: const Text(
             'La inspección se sincronizó y envió correctamente.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Aceptar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted) return;
+    hydrantsNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+    if (context.mounted) context.go('/home');
+  }
+
+  static Future<void> showConflictAndReturnHome(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: const Text('Conflicto de revisión'),
+          content: const Text(
+            'Otro reporte se confirmó primero. Tu revisión, respuestas y '
+            'fotografías quedaron guardadas para su resolución.',
           ),
           actions: [
             FilledButton(

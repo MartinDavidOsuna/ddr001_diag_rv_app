@@ -1,7 +1,16 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -25,11 +34,38 @@ android {
         versionName = flutter.versionName
     }
 
+    flavorDimensions += "environment"
+
+    signingConfigs {
+        create("release") {
+            check(keystorePropertiesFile.exists()) {
+                "Falta android/key.properties para firmar la aplicación de producción."
+            }
+            keyAlias = keystoreProperties["keyAlias"] as String
+            keyPassword = keystoreProperties["keyPassword"] as String
+            storeFile = file(keystoreProperties["storeFile"] as String)
+            storePassword = keystoreProperties["storePassword"] as String
+        }
+    }
+
+
+    productFlavors {
+        create("production") {
+            dimension = "environment"
+            applicationId = "com.aquafim.ddr001diag"
+            signingConfig = signingConfigs.getByName("release")
+        }
+        create("qa") {
+            dimension = "environment"
+            applicationIdSuffix = ".qa"
+            versionNameSuffix = "-qa"
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
         }
     }
 }
@@ -42,4 +78,9 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.16.1")
 }

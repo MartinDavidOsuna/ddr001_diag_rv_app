@@ -40,7 +40,8 @@ void main() {
         await monitor.check(force: true),
         NetworkAvailabilityState.noNetwork,
       );
-      expect(monitor.label, 'Sin conexión');
+      expect(monitor.transportLabel, 'Sin red');
+      expect(monitor.serviceLabel, 'Servicio no disponible');
       expect(calls, 0);
       monitor.dispose();
     },
@@ -60,7 +61,8 @@ void main() {
       await monitor.check(force: true),
       NetworkAvailabilityState.apiAvailable,
     );
-    expect(monitor.label, 'API disponible');
+    expect(monitor.transportLabel, 'Red inalámbrica');
+    expect(monitor.serviceLabel, 'Servidor disponible');
     monitor.dispose();
   });
 
@@ -81,7 +83,8 @@ void main() {
       await monitor.check(force: true),
       NetworkAvailabilityState.apiUnavailable,
     );
-    expect(monitor.label, 'Servidor no disponible');
+    expect(monitor.transportLabel, 'Datos móviles');
+    expect(monitor.serviceLabel, 'Servidor no disponible');
     monitor.dispose();
   });
 

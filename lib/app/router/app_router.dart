@@ -4,6 +4,7 @@ import '../../core/services/app_state.dart';
 import '../../core/config/app_config.dart';
 import '../../features/auth/auth_pages.dart';
 import '../../features/home/home_page.dart';
+import '../../features/home/all_reviews_page.dart';
 import '../../features/hydrants/hydrant_pages.dart';
 import '../../features/inspections/presentation/rv_inspection_page.dart';
 import '../../features/inspections/presentation/rv_summary_page.dart';
@@ -14,6 +15,7 @@ import '../../features/profile/profile_pages.dart';
 import '../../features/shell/main_shell.dart';
 import '../../features/sync/sync_page.dart';
 import '../../features/diagnostics/local_integrity_page.dart';
+import '../../features/visual_reports/presentation/rv_visual_report_page.dart';
 import 'branch_root_pop_scope.dart';
 import 'navigation_keys.dart';
 
@@ -40,6 +42,23 @@ GoRouter createRouter(AppState state) => GoRouter(
   routes: [
     GoRoute(path: '/', builder: (_, _) => const SplashPage()),
     GoRoute(path: '/login', builder: (_, _) => const LoginPage()),
+    GoRoute(path: '/reviews', builder: (_, _) => const AllReviewsPage()),
+    GoRoute(
+      path: '/reviews/:clientId',
+      builder: (_, route) {
+        final clientInspectionId = route.pathParameters['clientId']!;
+        final draft = state.rvDraftRepository.find(clientInspectionId);
+        return RvSummaryPage(
+          hydrantId: draft?.hydrantId ?? '',
+          clientInspectionId: clientInspectionId,
+        );
+      },
+    ),
+    GoRoute(
+      path: '/visual-report/:account',
+      builder: (_, route) =>
+          RvVisualReportPage(accountNumber: route.pathParameters['account']!),
+    ),
     StatefulShellRoute.indexedStack(
       builder: (_, _, shell) => MainShell(navigationShell: shell),
       branches: [
@@ -58,8 +77,12 @@ GoRouter createRouter(AppState state) => GoRouter(
           routes: [
             GoRoute(
               path: '/hydrants',
-              builder: (_, _) =>
-                  const BranchRootPopScope(index: 1, child: HydrantsPage()),
+              builder: (_, route) => BranchRootPopScope(
+                index: 1,
+                child: HydrantsPage(
+                  workGroup: route.uri.queryParameters['workGroup'],
+                ),
+              ),
               routes: [
                 GoRoute(
                   path: 'new',

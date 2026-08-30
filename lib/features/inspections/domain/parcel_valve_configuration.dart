@@ -31,6 +31,7 @@ class ParcelValve {
     this.hasSolenoid = false,
     this.solenoidBrand,
     this.hasPilot = false,
+    this.pilotConnected,
     this.pilotBrand,
     this.hasPressureGauge = false,
     this.pressureGaugeBrand,
@@ -38,6 +39,7 @@ class ParcelValve {
   final int index;
   final Map<String, dynamic>? valveBrand, diameter;
   final bool hasSolenoid, hasPilot, hasPressureGauge;
+  final bool? pilotConnected;
   final Map<String, dynamic>? solenoidBrand, pilotBrand, pressureGaugeBrand;
 
   ParcelValve copyWith({
@@ -46,6 +48,7 @@ class ParcelValve {
     bool? hasSolenoid,
     Map<String, dynamic>? solenoidBrand,
     bool? hasPilot,
+    bool? pilotConnected,
     Map<String, dynamic>? pilotBrand,
     bool? hasPressureGauge,
     Map<String, dynamic>? pressureGaugeBrand,
@@ -58,6 +61,9 @@ class ParcelValve {
         ? (solenoidBrand ?? this.solenoidBrand)
         : null,
     hasPilot: hasPilot ?? this.hasPilot,
+    pilotConnected: (hasPilot ?? this.hasPilot)
+        ? (pilotConnected ?? this.pilotConnected)
+        : null,
     pilotBrand: (hasPilot ?? this.hasPilot)
         ? (pilotBrand ?? this.pilotBrand)
         : null,
@@ -74,6 +80,7 @@ class ParcelValve {
     'hasSolenoid': hasSolenoid,
     'solenoidBrand': solenoidBrand,
     'hasPilot': hasPilot,
+    'pilotConnected': pilotConnected,
     'pilotBrand': pilotBrand,
     'hasPressureGauge': hasPressureGauge,
     'pressureGaugeBrand': pressureGaugeBrand,
@@ -85,6 +92,7 @@ class ParcelValve {
     hasSolenoid: json['hasSolenoid'] as bool? ?? false,
     solenoidBrand: _map(json['solenoidBrand']),
     hasPilot: json['hasPilot'] as bool? ?? false,
+    pilotConnected: json['pilotConnected'] as bool?,
     pilotBrand: _map(json['pilotBrand']),
     hasPressureGauge: json['hasPressureGauge'] as bool? ?? false,
     pressureGaugeBrand: _map(json['pressureGaugeBrand']),

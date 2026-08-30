@@ -35,9 +35,12 @@ class AppConfig {
     if (!supportedEnvironments.contains(environment)) {
       throw StateError('APP_ENV no corresponde a un ambiente válido.');
     }
-    final raw =
+    final configuredUrl =
         (apiBaseUrlOverride ?? const String.fromEnvironment('API_BASE_URL'))
             .trim();
+    final raw = configuredUrl.isEmpty && environment == 'production'
+        ? productionBaseUrl
+        : configuredUrl;
     if (raw.isEmpty) {
       throw StateError('Falta la configuración del servicio.');
     }
