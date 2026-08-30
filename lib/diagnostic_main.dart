@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'app/bootstrap.dart';
 import 'core/persistence/versioned_json_codec.dart';
 import 'core/services/app_state.dart';
+import 'core/widgets/common_widgets.dart';
 import 'features/inspections/domain/rv_sync_state.dart';
 
 const reportChannel = MethodChannel('com.aquafim.ddr001diag/diagnostic_report');
@@ -68,7 +69,9 @@ class _DiagnosticPageState extends State<DiagnosticPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Diagnóstico RV de campo')),
+    appBar: AppBar(
+      title: const AppBarBrandTitle(title: 'Diagnóstico RV de campo'),
+    ),
     body: Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),

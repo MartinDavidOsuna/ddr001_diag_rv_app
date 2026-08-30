@@ -1,5 +1,6 @@
 import 'package:ddr001diag/core/assets/app_assets.dart';
 import 'package:ddr001diag/core/widgets/app_brand_logo.dart';
+import 'package:ddr001diag/core/widgets/common_widgets.dart';
 import 'package:ddr001diag/features/auth/auth_pages.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -31,6 +32,29 @@ void main() {
 
     final image = tester.widget<Image>(find.byType(Image));
     expect((image.image as AssetImage).assetName, AppAssets.logoSymbol);
+  });
+
+  testWidgets('app bar title keeps the RV logo size and title margin', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(appBar: AppPageHeader(title: 'Pantalla RV')),
+      ),
+    );
+
+    final logo = tester.widget<AppBrandLogo>(find.byType(AppBrandLogo));
+    final margin = tester.widget<SizedBox>(
+      find.descendant(
+        of: find.byType(AppBarBrandTitle),
+        matching: find.byType(SizedBox),
+      ),
+    );
+    expect(logo.variant, AppBrandLogoVariant.symbol);
+    expect(logo.width, 30);
+    expect(logo.height, 30);
+    expect(margin.width, 9);
+    expect(find.text('Pantalla RV'), findsOneWidget);
   });
 
   testWidgets('login uses the horizontal logo when enough width is available', (

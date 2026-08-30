@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/media/image_decode_policy.dart';
 import '../../../core/services/app_state.dart';
+import '../../../core/widgets/common_widgets.dart';
 import '../domain/visual_report.dart';
 
 String rvReportTitle(String accountNumber) =>
@@ -37,7 +38,9 @@ class _RvVisualReportPageState extends State<RvVisualReportPage> {
   void _retry() => setState(() => _future = _load());
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(rvReportTitle(widget.accountNumber))),
+    appBar: AppBar(
+      title: AppBarBrandTitle(title: rvReportTitle(widget.accountNumber)),
+    ),
     body: SafeArea(
       child: FutureBuilder<VisualReport>(
         future: _future,
@@ -389,7 +392,9 @@ class _RvPhotoViewerState extends State<RvPhotoViewer> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: Text('${index + 1} de ${widget.photos.length} · ${photo.title}'),
+        title: AppBarBrandTitle(
+          title: '${index + 1} de ${widget.photos.length} · ${photo.title}',
+        ),
       ),
       body: PageView.builder(
         controller: controller,

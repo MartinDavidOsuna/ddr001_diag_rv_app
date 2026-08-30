@@ -100,36 +100,46 @@ class AppPageHeader extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) => AppBar(
     leading: leading,
     automaticallyImplyLeading: automaticallyImplyLeading,
-    title: Row(
-      children: [
-        const AppBrandLogo(
-          variant: AppBrandLogoVariant.symbol,
-          width: 30,
-          height: 30,
-        ),
-        const SizedBox(width: 9),
-        Flexible(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-              if (subtitle != null)
-                Text(
-                  subtitle!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w400,
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
-    ),
+    title: AppBarBrandTitle(title: title, subtitle: subtitle),
     actions: actions,
+  );
+}
+
+class AppBarBrandTitle extends StatelessWidget {
+  const AppBarBrandTitle({required this.title, this.subtitle, super.key});
+
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      const AppBrandLogo(
+        variant: AppBrandLogoVariant.symbol,
+        width: 30,
+        height: 30,
+      ),
+      const SizedBox(width: 9),
+      Flexible(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+            if (subtitle != null)
+              Text(
+                subtitle!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+          ],
+        ),
+      ),
+    ],
   );
 }
 

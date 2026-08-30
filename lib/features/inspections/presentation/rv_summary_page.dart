@@ -590,7 +590,7 @@ class _HistoricalPhotoTile extends StatelessWidget {
         builder: (dialogContext) => Dialog.fullscreen(
           child: Scaffold(
             appBar: AppBar(
-              title: const Text('Evidencia fotográfica'),
+              title: const AppBarBrandTitle(title: 'Evidencia fotográfica'),
               leading: IconButton(
                 tooltip: 'Cerrar',
                 onPressed: () => Navigator.pop(dialogContext),

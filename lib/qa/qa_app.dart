@@ -7,6 +7,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 
 import '../app/theme/app_theme.dart';
+import '../core/widgets/common_widgets.dart';
 import '../features/inspections/presentation/rv_inactive_closure_dialog.dart';
 import '../features/inspections/presentation/rv_inspection_controller.dart';
 import '../features/inspections/presentation/rv_summary_page.dart';
@@ -102,7 +103,7 @@ class _QaAppState extends State<QaApp> {
     debugShowCheckedModeBanner: false,
     theme: AppTheme.light,
     home: Scaffold(
-      appBar: AppBar(title: const Text('DDR001 RV QA')),
+      appBar: AppBar(title: const AppBarBrandTitle(title: 'DDR001 RV QA')),
       body: Column(
         children: [
           const Material(
@@ -239,8 +240,8 @@ class _QaAppState extends State<QaApp> {
                               MaterialPageRoute(
                                 builder: (_) => Scaffold(
                                   appBar: AppBar(
-                                    title: const Text(
-                                      'Historial QA · solo lectura',
+                                    title: const AppBarBrandTitle(
+                                      title: 'Historial QA · solo lectura',
                                     ),
                                   ),
                                   body: ListView(

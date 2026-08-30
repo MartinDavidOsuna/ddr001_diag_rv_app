@@ -321,7 +321,7 @@ class _PhotoViewer extends StatelessWidget {
   Widget build(BuildContext context) => Dialog.fullscreen(
     child: Scaffold(
       appBar: AppBar(
-        title: Text(photo.category),
+        title: AppBarBrandTitle(title: photo.category),
         leading: IconButton(
           onPressed: () => Navigator.pop(context),
           icon: const Icon(Icons.close),
