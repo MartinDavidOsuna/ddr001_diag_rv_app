@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../core/network/api_exception.dart';
@@ -15,6 +16,9 @@ import '../../domain/enums/app_enums.dart';
 import '../../domain/models/app_models.dart';
 import '../hydrants/data/hydrant_repository.dart';
 import '../hydrants/new_survey_route.dart';
+import 'basemap/basemap_layer.dart';
+import 'basemap/basemap_provider.dart';
+import 'basemap/open_free_map_basemap.dart';
 import 'hydrant_map_marker_source.dart';
 import 'map_location_provider.dart';
 
@@ -23,10 +27,12 @@ class MapPage extends StatefulWidget {
     super.key,
     this.markerSource = const FlatHydrantMapMarkerSource(),
     this.locationProvider = const GeolocatorMapLocationProvider(),
+    this.basemapProvider = const OpenFreeMapBasemap(),
   });
 
   final HydrantMapMarkerSource markerSource;
   final MapLocationProvider locationProvider;
+  final BasemapProvider basemapProvider;
 
   @override
   State<MapPage> createState() => _MapPageState();
@@ -147,14 +153,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
                       },
                     ),
                     children: [
-                      TileLayer(
-                        urlTemplate:
-                            'https://{s}.basemaps.cartocdn.com/'
-                            'light_all/{z}/{x}/{y}.png',
-                        subdomains: const ['a', 'b', 'c', 'd'],
-                        userAgentPackageName: 'com.aquafim.ddr001diag',
-                        maxNativeZoom: 20,
-                      ),
+                      BasemapLayer(provider: widget.basemapProvider),
                       MarkerLayer(
                         markers: [
                           for (final item in items)
@@ -177,10 +176,15 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
                             ),
                         ],
                       ),
-                      const RichAttributionWidget(
+                      RichAttributionWidget(
                         attributions: [
-                          TextSourceAttribution('© OpenStreetMap contributors'),
-                          TextSourceAttribution('© CARTO'),
+                          for (final attribution
+                              in widget.basemapProvider.config.attributions)
+                            TextSourceAttribution(
+                              attribution.label,
+                              prependCopyright: false,
+                              onTap: () => launchUrl(attribution.url),
+                            ),
                         ],
                       ),
                     ],

@@ -19,8 +19,15 @@ import 'package:ddr001diag/features/inspections/data/inspection_remote_repositor
 import 'package:ddr001diag/features/inspections/data/inspection_sync_coordinator.dart';
 import 'package:ddr001diag/features/inspections/data/rv_draft_repository.dart';
 import 'package:ddr001diag/features/inspections/domain/rv_sync_state.dart';
+import 'package:ddr001diag/features/map/basemap/basemap_config.dart';
+import 'package:ddr001diag/features/map/basemap/basemap_provider.dart';
+import 'package:ddr001diag/features/map/basemap/open_free_map_basemap.dart';
+import 'package:ddr001diag/features/map/map_page.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_vector_tiles/flutter_map_vector_tiles.dart'
+    as vector_tiles;
 import 'package:hive_ce/hive.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
@@ -404,6 +411,39 @@ void main() {
     expect(find.textContaining('demostración'), findsNothing);
   });
 
+  testWidgets('Mapa conserva controles e interacción si falla el basemap', (
+    tester,
+  ) async {
+    final basemap = _OfflineBasemapProvider();
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: MaterialApp(home: MapPage(basemapProvider: basemap)),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(FlutterMap), findsOneWidget);
+    expect(find.byKey(const ValueKey('basemap-unavailable')), findsOneWidget);
+    expect(find.byKey(const ValueKey('map-filter-all')), findsOneWidget);
+    expect(find.byKey(const ValueKey('map-refresh-region')), findsOneWidget);
+    expect(find.byKey(const ValueKey('map-my-location')), findsOneWidget);
+    expect(find.byKey(const ValueKey('map-show-all')), findsOneWidget);
+    expect(basemap.loadCount, 1);
+
+    await tester.tap(find.byKey(const ValueKey('map-filter-reviewed')));
+    await tester.pump();
+
+    expect(find.byType(FlutterMap), findsOneWidget);
+    expect(find.byKey(const ValueKey('basemap-unavailable')), findsOneWidget);
+    expect(basemap.loadCount, 1);
+  });
+
   testWidgets('Manual operativo contiene flujo RV y no contenido provisional', (
     tester,
   ) async {
@@ -423,6 +463,19 @@ void main() {
     expect(content.toLowerCase(), isNot(contains('demo')));
     expect(find.textContaining('demo', findRichText: true), findsNothing);
   });
+}
+
+class _OfflineBasemapProvider implements BasemapProvider {
+  int loadCount = 0;
+
+  @override
+  BasemapConfig get config => OpenFreeMapBasemap.openFreeMapConfig;
+
+  @override
+  Future<vector_tiles.Style> loadStyle() {
+    loadCount++;
+    return Future.error(StateError('offline'));
+  }
 }
 
 Hydrant _hydrant(int index) => Hydrant(
