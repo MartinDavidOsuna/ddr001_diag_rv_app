@@ -8,7 +8,7 @@ void main() {
   test('dashboard exposes exactly the six operational groups', () {
     expect(RvWorkGroup.values.map((group) => group.label), [
       'En proceso',
-      'Pendientes de sincronizar',
+      'Pendientes',
       'Enviados',
       'Validados',
       'Devueltos',
@@ -23,7 +23,11 @@ void main() {
       expect(home, contains('rvDraftRepository.all()'));
       expect(home, contains('RvWorkDashboardProjection.byHydrant'));
       expect(home, contains('/hydrants?workGroup='));
-      expect(home, contains('height: 92'));
+      expect(home, contains('crossAxisCount: 3'));
+      expect(home, contains('mainAxisExtent: 82'));
+      expect(home, contains('maxLines: 1'));
+      expect(home, isNot(contains("label: const Text('Mis hidrantes')")));
+      expect(home, isNot(contains("label: const Text('Mapa general')")));
       final projection = File(
         'lib/features/home/rv_work_dashboard.dart',
       ).readAsStringSync();
@@ -51,6 +55,15 @@ void main() {
     ]) {
       expect(map, contains("'$label'"));
     }
+  });
+
+  test('map actions remain compact and transparent', () {
+    final map = File('lib/features/map/map_page.dart').readAsStringSync();
+    expect(map, contains("label: const Text('Todos')"));
+    expect(map, contains("tooltip: 'Mi ubicación'"));
+    expect(map, contains('backgroundColor: Colors.transparent'));
+    expect(map, isNot(contains("label: const Text('Mi ubicación')")));
+    expect(map, isNot(contains("Text('Mostrar todos los hidrantes')")));
   });
 
   test(

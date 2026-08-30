@@ -308,7 +308,11 @@ void main() {
       await state.trace('legacy_event', 'Traza previa', hydrantId: official.id);
 
       expect(state.pendingDiagnostics, 1);
-      expect(state.hydrantsForFilter(HydrantListFilter.inProgress), [official]);
+      expect(state.hydrantsForFilter(HydrantListFilter.inProgress), isEmpty);
+      expect(
+        state.hydrantsForFilter(HydrantListFilter.synchronizationPending),
+        [official],
+      );
       expect(state.profileTodayStats.pending, 0);
       expect(state.profileTodayStats.unsynced, 1);
       expect(state.profileTodayStats.submitted, 0);
@@ -337,6 +341,9 @@ void main() {
     );
     expect(find.text('ESTADÍSTICAS ACTUALES'), findsOneWidget);
     expect(find.text('Enviados'), findsOneWidget);
+    expect(find.text('En proceso'), findsOneWidget);
+    expect(find.text('Pendientes'), findsOneWidget);
+    expect(find.text('Sin sincronizar'), findsNothing);
     expect(find.text('Simular conexión'), findsNothing);
     expect(find.text('Revisar actualización'), findsNothing);
     expect(find.textContaining('demostración'), findsNothing);

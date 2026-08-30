@@ -15,7 +15,7 @@ enum RvWorkGroup {
 extension RvWorkGroupLabel on RvWorkGroup {
   String get label => switch (this) {
     RvWorkGroup.inProgress => 'En proceso',
-    RvWorkGroup.pendingSync => 'Pendientes de sincronizar',
+    RvWorkGroup.pendingSync => 'Pendientes',
     RvWorkGroup.submitted => 'Enviados',
     RvWorkGroup.validated => 'Validados',
     RvWorkGroup.returned => 'Devueltos',

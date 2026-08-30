@@ -250,9 +250,13 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
                 Positioned(
                   left: 12,
                   bottom: selected == null ? 12 : 198,
-                  child: _MapActions(
+                  child: _ShowAllMapButton(onShowAll: () => _showAll(items)),
+                ),
+                Positioned(
+                  right: 6,
+                  bottom: selected == null ? 42 : 228,
+                  child: _MyLocationMapButton(
                     locating: _locating,
-                    onShowAll: () => _showAll(items),
                     onMyLocation: _goToCurrentLocation,
                   ),
                 ),
@@ -701,43 +705,51 @@ class _ZoomControls extends StatelessWidget {
   );
 }
 
-class _MapActions extends StatelessWidget {
-  const _MapActions({
+class _ShowAllMapButton extends StatelessWidget {
+  const _ShowAllMapButton({required this.onShowAll});
+
+  final VoidCallback onShowAll;
+
+  @override
+  Widget build(BuildContext context) => OutlinedButton.icon(
+    key: const ValueKey('map-show-all'),
+    onPressed: onShowAll,
+    style: OutlinedButton.styleFrom(
+      backgroundColor: Colors.transparent,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      minimumSize: const Size(0, 36),
+      visualDensity: VisualDensity.compact,
+    ),
+    icon: const Icon(Icons.fit_screen, size: 19),
+    label: const Text('Todos'),
+  );
+}
+
+class _MyLocationMapButton extends StatelessWidget {
+  const _MyLocationMapButton({
     required this.locating,
-    required this.onShowAll,
     required this.onMyLocation,
   });
 
   final bool locating;
-  final VoidCallback onShowAll;
   final VoidCallback onMyLocation;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      FloatingActionButton.extended(
-        key: const ValueKey('map-show-all'),
-        heroTag: 'map-show-all',
-        onPressed: onShowAll,
-        icon: const Icon(Icons.fit_screen),
-        label: const Text('Mostrar todos los hidrantes'),
-      ),
-      const SizedBox(height: 8),
-      FloatingActionButton.extended(
-        key: const ValueKey('map-my-location'),
-        heroTag: 'map-my-location',
-        onPressed: locating ? null : onMyLocation,
-        icon: locating
-            ? const SizedBox.square(
-                dimension: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.my_location),
-        label: const Text('Mi ubicación'),
-      ),
-    ],
+  Widget build(BuildContext context) => IconButton(
+    key: const ValueKey('map-my-location'),
+    tooltip: 'Mi ubicación',
+    onPressed: locating ? null : onMyLocation,
+    style: IconButton.styleFrom(
+      backgroundColor: Colors.transparent,
+      foregroundColor: Theme.of(context).colorScheme.primary,
+      side: BorderSide(color: Theme.of(context).colorScheme.primary),
+    ),
+    icon: locating
+        ? const SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : const Icon(Icons.my_location),
   );
 }
 

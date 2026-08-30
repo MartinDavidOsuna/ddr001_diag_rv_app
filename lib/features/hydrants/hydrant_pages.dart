@@ -356,7 +356,7 @@ class _HydrantsPageState extends State<HydrantsPage> {
     HydrantListFilter.functionalFailed =>
       '${ReportTypeLabels.functionalShort} con falla',
     HydrantListFilter.pendingValidation => 'Pendiente de validación',
-    HydrantListFilter.synchronizationPending => 'Sin sincronizar',
+    HydrantListFilter.synchronizationPending => 'Pendientes',
     HydrantListFilter.submittedToday => 'Enviados hoy',
     HydrantListFilter.pendingToday => 'Pendientes hoy',
     HydrantListFilter.incidents => 'Con incidencias',
@@ -365,8 +365,7 @@ class _HydrantsPageState extends State<HydrantsPage> {
   String _emptyMessage(HydrantListFilter value) => switch (value) {
     HydrantListFilter.submittedToday => 'No hay inspecciones enviadas hoy.',
     HydrantListFilter.pendingToday => 'No hay inspecciones pendientes hoy.',
-    HydrantListFilter.synchronizationPending =>
-      'No hay inspecciones sin sincronizar.',
+    HydrantListFilter.synchronizationPending => 'No hay revisiones pendientes.',
     _ => 'No hay hidrantes para el filtro activo.',
   };
 }

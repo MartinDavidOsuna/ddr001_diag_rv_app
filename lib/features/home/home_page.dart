@@ -7,6 +7,7 @@ import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
 import '../../domain/enums/app_enums.dart';
 import 'rv_work_dashboard.dart';
+import 'rv_work_group_presentation.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -70,46 +71,27 @@ class HomePage extends StatelessWidget {
             style: TextStyle(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final group in RvWorkGroup.values)
-                _Count(
-                  label: group.label,
-                  value: grouped[group]!.length,
-                  color: switch (group) {
-                    RvWorkGroup.inProgress => AppColors.blue,
-                    RvWorkGroup.pendingSync => AppColors.orange,
-                    RvWorkGroup.submitted => AppColors.teal,
-                    RvWorkGroup.validated => AppColors.green,
-                    RvWorkGroup.returned ||
-                    RvWorkGroup.conflicts => AppColors.red,
-                  },
-                  onTap: () => context.go('/hydrants?workGroup=${group.name}'),
-                ),
-            ],
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: RvWorkGroup.values.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+              mainAxisExtent: 82,
+            ),
+            itemBuilder: (context, index) {
+              final group = RvWorkGroup.values[index];
+              return _Count(
+                label: group.label,
+                value: grouped[group]!.length,
+                color: group.color,
+                onTap: () => context.go('/hydrants?workGroup=${group.name}'),
+              );
+            },
           ),
           const SizedBox(height: 18),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => context.go('/hydrants'),
-                  icon: const Icon(Icons.water_drop_outlined),
-                  label: const Text('Mis hidrantes'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => context.go('/map'),
-                  icon: const Icon(Icons.map_outlined),
-                  label: const Text('Mapa general'),
-                ),
-              ),
-            ],
-          ),
           OutlinedButton.icon(
             onPressed: () => context.push('/reviews'),
             icon: const Icon(Icons.history),
@@ -169,9 +151,7 @@ class _Count extends StatelessWidget {
     onTap: onTap,
     borderRadius: BorderRadius.circular(12),
     child: Container(
-      width: 150,
-      height: 92,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: color.withValues(alpha: .1),
         borderRadius: BorderRadius.circular(12),
@@ -179,15 +159,26 @@ class _Count extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '$value',
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w900,
-              color: color,
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '$value',
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                  color: color,
+                ),
+              ),
             ),
           ),
-          Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(label, maxLines: 1, softWrap: false),
+          ),
         ],
       ),
     ),

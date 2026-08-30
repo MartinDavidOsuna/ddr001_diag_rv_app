@@ -746,6 +746,20 @@ class AppState extends ChangeNotifier {
     if (filter == HydrantListFilter.all) {
       return List<Hydrant>.unmodifiable(hydrants);
     }
+    final dashboardGroup = switch (filter) {
+      HydrantListFilter.inProgress => RvWorkGroup.inProgress,
+      HydrantListFilter.synchronizationPending => RvWorkGroup.pendingSync,
+      _ => null,
+    };
+    if (dashboardGroup != null) {
+      final ids = RvWorkDashboardProjection.byHydrant(
+        drafts: rvDraftRepository.all(),
+        hydrants: hydrants,
+      )[dashboardGroup]!;
+      return hydrants
+          .where((hydrant) => ids.contains(hydrant.id))
+          .toList(growable: false);
+    }
     return hydrants
         .where(
           (hydrant) =>

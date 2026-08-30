@@ -8,6 +8,7 @@ import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
 import '../home/rv_work_dashboard.dart';
+import '../home/rv_work_group_presentation.dart';
 import '../diagnostics/rv_diagnostic_export_service.dart';
 
 const _diagnosticExportChannel = MethodChannel(
@@ -112,8 +113,8 @@ class ProfilePage extends StatelessWidget {
                       value: state.profileStatsLoading
                           ? '—'
                           : '${stats.submitted}',
-                      label: 'Enviados',
-                      color: AppColors.green,
+                      label: RvWorkGroup.submitted.label,
+                      color: RvWorkGroup.submitted.color,
                       onTap: () =>
                           _openWorkGroup(context, RvWorkGroup.submitted),
                     ),
@@ -121,8 +122,8 @@ class ProfilePage extends StatelessWidget {
                       value: state.profileStatsLoading
                           ? '—'
                           : '${stats.pending}',
-                      label: 'Pendientes',
-                      color: AppColors.orange,
+                      label: RvWorkGroup.inProgress.label,
+                      color: RvWorkGroup.inProgress.color,
                       onTap: () =>
                           _openWorkGroup(context, RvWorkGroup.inProgress),
                     ),
@@ -130,8 +131,8 @@ class ProfilePage extends StatelessWidget {
                       value: state.profileStatsLoading
                           ? '—'
                           : '${stats.unsynced}',
-                      label: 'Sin sincronizar',
-                      color: AppColors.red,
+                      label: RvWorkGroup.pendingSync.label,
+                      color: RvWorkGroup.pendingSync.color,
                       onTap: () =>
                           _openWorkGroup(context, RvWorkGroup.pendingSync),
                     ),
@@ -346,10 +347,17 @@ class _StatMetric extends StatelessWidget {
                 fontWeight: FontWeight.w900,
               ),
             ),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 11),
+            SizedBox(
+              width: double.infinity,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: const TextStyle(fontSize: 11),
+                ),
+              ),
             ),
           ],
         ),
