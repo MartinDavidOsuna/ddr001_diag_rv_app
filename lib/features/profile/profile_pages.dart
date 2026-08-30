@@ -1,11 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
-import '../../domain/enums/hydrant_list_filter.dart';
+import '../home/rv_work_dashboard.dart';
+import '../diagnostics/rv_diagnostic_export_service.dart';
+
+const _diagnosticExportChannel = MethodChannel(
+  'com.aquafim.ddr001diag/diagnostic_export',
+);
+
+@visibleForTesting
+Future<bool> saveDiagnosticJson(
+  RvDiagnosticExportResult report, {
+  MethodChannel channel = _diagnosticExportChannel,
+}) async =>
+    await channel.invokeMethod<bool>('save', {'path': report.file.path}) ??
+    false;
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -21,7 +36,11 @@ class ProfilePage extends StatelessWidget {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: ConnectionBadge(online: state.online),
+            child: ConnectionBadge(
+              online: state.online,
+              state: state.connectivityState,
+              transport: state.connectivityMonitor?.transport,
+            ),
           ),
         ],
       ),
@@ -83,7 +102,7 @@ class ProfilePage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'ESTADÍSTICAS DE HOY',
+                  'ESTADÍSTICAS ACTUALES',
                   style: TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
                 const SizedBox(height: 18),
@@ -95,11 +114,8 @@ class ProfilePage extends StatelessWidget {
                           : '${stats.submitted}',
                       label: 'Enviados',
                       color: AppColors.green,
-                      onTap: () => _openFilter(
-                        context,
-                        state,
-                        HydrantListFilter.submittedToday,
-                      ),
+                      onTap: () =>
+                          _openWorkGroup(context, RvWorkGroup.submitted),
                     ),
                     _StatMetric(
                       value: state.profileStatsLoading
@@ -107,11 +123,8 @@ class ProfilePage extends StatelessWidget {
                           : '${stats.pending}',
                       label: 'Pendientes',
                       color: AppColors.orange,
-                      onTap: () => _openFilter(
-                        context,
-                        state,
-                        HydrantListFilter.pendingToday,
-                      ),
+                      onTap: () =>
+                          _openWorkGroup(context, RvWorkGroup.inProgress),
                     ),
                     _StatMetric(
                       value: state.profileStatsLoading
@@ -119,11 +132,8 @@ class ProfilePage extends StatelessWidget {
                           : '${stats.unsynced}',
                       label: 'Sin sincronizar',
                       color: AppColors.red,
-                      onTap: () => _openFilter(
-                        context,
-                        state,
-                        HydrantListFilter.synchronizationPending,
-                      ),
+                      onTap: () =>
+                          _openWorkGroup(context, RvWorkGroup.pendingSync),
                     ),
                   ],
                 ),
@@ -140,6 +150,11 @@ class ProfilePage extends StatelessWidget {
                   title: 'Sincronización',
                   subtitle: '${stats.unsynced} inspecciones pendientes',
                   onTap: () => context.push('/sync'),
+                ),
+                _Menu(
+                  icon: Icons.file_download_outlined,
+                  title: 'Exportar diagnóstico',
+                  onTap: () => _exportDiagnostic(context),
                 ),
                 _Menu(
                   icon: Icons.menu_book_outlined,
@@ -191,13 +206,113 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  static void _openFilter(
-    BuildContext context,
-    AppState state,
-    HydrantListFilter filter,
-  ) {
-    state.requestHydrantListFilterFromHome(filter);
-    context.go('/hydrants');
+  static void _openWorkGroup(BuildContext context, RvWorkGroup group) =>
+      context.go('/hydrants?workGroup=${group.name}');
+
+  static Future<void> _exportDiagnostic(BuildContext context) async {
+    final state = context.read<AppState>();
+    String progress = 'Recopilando estado local...';
+    RvDiagnosticExportResult? result;
+    Object? failure;
+    var started = false;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) {
+          if (!started) {
+            started = true;
+            state
+                .exportSyncDiagnostic(
+                  onProgress: (message) {
+                    if (dialogContext.mounted) {
+                      setState(() => progress = message);
+                    }
+                  },
+                )
+                .then((value) {
+                  if (dialogContext.mounted) setState(() => result = value);
+                })
+                .catchError((Object error) {
+                  if (dialogContext.mounted) setState(() => failure = error);
+                });
+          }
+          return AlertDialog(
+            title: const Text('Exportar diagnóstico de sincronización'),
+            content: result == null && failure == null
+                ? Row(
+                    children: [
+                      const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(child: Text(progress)),
+                    ],
+                  )
+                : failure != null
+                ? const Text(
+                    'No fue posible generar el diagnóstico. Tus revisiones no fueron modificadas.',
+                  )
+                : Text(
+                    result!.remoteSnapshotComplete
+                        ? 'Diagnóstico generado correctamente.'
+                        : 'El diagnóstico se generó con información local. Algunas consultas al servidor no pudieron completarse.',
+                  ),
+            actions: [
+              if (failure != null || result != null)
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cerrar'),
+                ),
+              if (result != null)
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    try {
+                      final saved = await saveDiagnosticJson(result!);
+                      if (!dialogContext.mounted || !saved) return;
+                      ScaffoldMessenger.of(dialogContext).showSnackBar(
+                        const SnackBar(
+                          content: Text('JSON guardado localmente.'),
+                        ),
+                      );
+                    } on PlatformException {
+                      if (!dialogContext.mounted) return;
+                      ScaffoldMessenger.of(dialogContext).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'No fue posible abrir el selector de archivos.',
+                          ),
+                        ),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.save_alt),
+                  label: const Text('Guardar JSON'),
+                ),
+              if (result != null)
+                FilledButton.icon(
+                  onPressed: () async {
+                    final evidence = await state.certificationEvidenceFiles(
+                      currentDiagnostic: result!.file,
+                    );
+                    await SharePlus.instance.share(
+                      ShareParams(
+                        files: [for (final file in evidence) XFile(file.path)],
+                        text:
+                            'Evidencia completa de certificación DDR001 RV (${evidence.length} archivos)',
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.share_outlined),
+                  label: const Text('Compartir evidencia completa'),
+                ),
+            ],
+          );
+        },
+      ),
+    );
   }
 }
 
@@ -333,7 +448,7 @@ class ManualPage extends StatelessWidget {
     ),
     (
       '11. Perfil',
-      'Consulta tu nombre, rol, cuadrilla, estadísticas del día, versión, '
+      'Consulta tu nombre, rol, cuadrilla, estadísticas actuales, versión, '
           'manual y cierre de sesión. Las estadísticas pertenecen únicamente '
           'a la sesión activa.',
     ),

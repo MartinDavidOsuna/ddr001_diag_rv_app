@@ -22,12 +22,20 @@ void main() {
     expect(config.apiBaseUrl.path, '/api/v1');
   });
 
-  test('AppConfig rechaza URL ausente en cualquier ambiente', () {
+  test('AppConfig usa el endpoint aprobado si producción no inyecta URL', () {
+    final config = AppConfig.fromEnvironment(
+      environmentOverride: 'production',
+      apiBaseUrlOverride: '',
+      debugMode: false,
+    );
+    expect(config.apiBaseUrl.toString(), AppConfig.productionBaseUrl);
+  });
+
+  test('AppConfig rechaza URL ausente fuera de producción', () {
     expect(
       () => AppConfig.fromEnvironment(
-        environmentOverride: 'production',
+        environmentOverride: 'development',
         apiBaseUrlOverride: '',
-        debugMode: false,
       ),
       throwsStateError,
     );
@@ -322,7 +330,44 @@ void main() {
 
       expect(await repository.end(), isFalse);
       expect(await storage.read(), isNull);
+      expect(storage.pendingLogout?.refreshToken, 'refresh-a');
       expect(await storage.installationId(), storage.installation);
+    },
+  );
+
+  test(
+    'logout pendiente se confirma y se elimina antes del siguiente login',
+    () async {
+      final storage = MemorySessionStorage()
+        ..pendingLogout = const FieldSession(
+          sessionId: 'old-session',
+          userId: 'old-user',
+          accessToken: '',
+          refreshToken: 'old-refresh',
+          installationId: 'installation',
+        );
+      final adapter = FakeHttpAdapter((options) async => jsonResponse('', 204));
+      final dio = Dio()..httpClientAdapter = adapter;
+      final repository = FieldSessionRepository(
+        client: ApiClient(
+          config: AppConfig.fromEnvironment(
+            environmentOverride: 'test',
+            apiBaseUrlOverride: 'https://example.test/api/v1',
+          ),
+          sessionStorage: storage,
+          dio: dio,
+        ),
+        storage: storage,
+        packageInfo: PackageInfo(
+          appName: 'DIAGNOSTICO HIDRANTES',
+          packageName: 'ddr001diag',
+          version: '0.2.0',
+          buildNumber: '3',
+        ),
+      );
+      expect(await repository.completePendingLogout(), isTrue);
+      expect(storage.pendingLogout, isNull);
+      expect(adapter.requests.single.path, '/field-sessions/old-session/end');
     },
   );
 
@@ -365,6 +410,45 @@ void main() {
     expect(await repository.restore(), isNotNull);
     expect(repository.lastRestoreOffline, isTrue);
   });
+
+  test(
+    'restauración conserva sesión ante 401 sin código de revocación',
+    () async {
+      final storage = MemorySessionStorage()
+        ..value = const FieldSession(
+          sessionId: 'session',
+          userId: 'user',
+          accessToken: 'expired-access',
+          refreshToken: 'expired-refresh',
+          installationId: 'installation',
+        );
+      final adapter = FakeHttpAdapter(
+        (options) async => jsonResponse('{"title":"Unauthorized"}', 401),
+      );
+      final repository = FieldSessionRepository(
+        client: ApiClient(
+          config: AppConfig.fromEnvironment(
+            environmentOverride: 'test',
+            apiBaseUrlOverride: 'https://example.test/api/v1',
+          ),
+          sessionStorage: storage,
+          dio: Dio()..httpClientAdapter = adapter,
+        ),
+        storage: storage,
+        packageInfo: PackageInfo(
+          appName: 'DIAGNOSTICO HIDRANTES',
+          packageName: 'ddr001diag',
+          version: '0.2.0',
+          buildNumber: '3',
+        ),
+      );
+
+      expect(await repository.restore(), isNotNull);
+      expect(repository.lastRestoreOffline, isTrue);
+      expect(storage.value?.refreshToken, 'expired-refresh');
+      expect(storage.clearCalls, 0);
+    },
+  );
 
   test('refresh rotativo es único para solicitudes simultáneas', () async {
     final storage = MemorySessionStorage()
@@ -435,7 +519,35 @@ void main() {
     expect(storage.clearCalls, 0);
   });
 
-  test('rechazo 401 del refresh elimina solo las credenciales', () async {
+  test(
+    '500 durante refresh conserva token anterior y cola recuperable',
+    () async {
+      final storage = MemorySessionStorage()
+        ..value = const FieldSession(
+          sessionId: 'session',
+          userId: 'user',
+          accessToken: 'expired-access',
+          refreshToken: 'previous-refresh',
+          installationId: 'installation',
+        );
+      final adapter = FakeHttpAdapter(
+        (options) async => jsonResponse('{"title":"temporary"}', 500),
+      );
+      final client = ApiClient(
+        config: AppConfig.fromEnvironment(
+          environmentOverride: 'test',
+          apiBaseUrlOverride: 'https://example.test/api/v1',
+        ),
+        sessionStorage: storage,
+        dio: Dio()..httpClientAdapter = adapter,
+      );
+      await expectLater(client.refreshSession(), throwsA(isA<DioException>()));
+      expect(storage.value?.refreshToken, 'previous-refresh');
+      expect(storage.clearCalls, 0);
+    },
+  );
+
+  test('401 genérico del refresh conserva credenciales recuperables', () async {
     final storage = MemorySessionStorage()
       ..value = const FieldSession(
         sessionId: 'session',
@@ -461,8 +573,81 @@ void main() {
     );
 
     await expectLater(client.refreshSession(), throwsA(isA<DioException>()));
-    expect(storage.value, isNull);
-    expect(storage.clearCalls, 1);
+    expect(storage.value?.refreshToken, 'revoked-refresh');
+    expect(storage.clearCalls, 0);
+  });
+
+  for (final entry in {
+    'SESSION_REVOKED': 'cerrada desde otro dispositivo',
+    'USER_INACTIVE': 'desactivado',
+    'DEVICE_BLOCKED': 'bloqueado',
+    'DEVICE_BINDING_REVOKED': 'revocado',
+  }.entries) {
+    test('${entry.key} cierra credenciales con mensaje diferenciado', () async {
+      final storage = MemorySessionStorage()
+        ..value = const FieldSession(
+          sessionId: 'session',
+          userId: 'user',
+          accessToken: 'expired',
+          refreshToken: 'refresh',
+          installationId: 'installation',
+        );
+      final adapter = FakeHttpAdapter(
+        (options) async =>
+            jsonResponse('{"code":"${entry.key}","detail":"definitive"}', 401),
+      );
+      final client = ApiClient(
+        config: AppConfig.fromEnvironment(
+          environmentOverride: 'test',
+          apiBaseUrlOverride: 'https://example.test/api/v1',
+        ),
+        sessionStorage: storage,
+        dio: Dio()..httpClientAdapter = adapter,
+      );
+      await expectLater(client.refreshSession(), throwsA(isA<DioException>()));
+      expect(storage.value, isNull);
+      expect(storage.clearCalls, 1);
+      final request = RequestOptions(path: '/field-sessions/refresh');
+      final translated = ApiException.fromDio(
+        DioException(
+          requestOptions: request,
+          response: Response(
+            requestOptions: request,
+            statusCode: 401,
+            data: {'code': entry.key},
+          ),
+        ),
+      );
+      expect(translated.kind, ApiErrorKind.sessionRevoked);
+      expect(translated.message, contains(entry.value));
+    });
+  }
+
+  test('reintento de refresh no se interpreta como cierre de sesión', () async {
+    final storage = MemorySessionStorage()
+      ..value = const FieldSession(
+        sessionId: 'session',
+        userId: 'user',
+        accessToken: 'expired',
+        refreshToken: 'refresh',
+        installationId: 'installation',
+      );
+    final adapter = FakeHttpAdapter(
+      (options) async =>
+          jsonResponse('{"code":"REFRESH_TOKEN_REUSE","detail":"retry"}', 401),
+    );
+    final client = ApiClient(
+      config: AppConfig.fromEnvironment(
+        environmentOverride: 'test',
+        apiBaseUrlOverride: 'https://example.test/api/v1',
+      ),
+      sessionStorage: storage,
+      dio: Dio()..httpClientAdapter = adapter,
+    );
+
+    await expectLater(client.refreshSession(), throwsA(isA<DioException>()));
+    expect(storage.value?.refreshToken, 'refresh');
+    expect(storage.clearCalls, 0);
   });
 
   test(
@@ -515,7 +700,7 @@ void main() {
     },
   );
 
-  test('401 y error de conexión no se confunden con falta de interfaz', () {
+  test('401 genérico conserva sesión y permite seguir trabajando', () {
     final request = RequestOptions(path: '/private');
     final unauthorized = DioException(
       requestOptions: request,
@@ -526,8 +711,27 @@ void main() {
       type: DioExceptionType.connectionError,
       error: 'network',
     );
-    expect(ApiException.fromDio(unauthorized).message, 'Tu sesión expiró.');
-    expect(ApiException.fromDio(offline).message, 'Servidor no disponible.');
+    expect(
+      ApiException.fromDio(unauthorized).message,
+      'No fue posible verificar la sesión con el servidor. Puedes continuar trabajando y se intentará nuevamente.',
+    );
+    expect(
+      ApiException.fromDio(offline).message,
+      'No fue posible conectar con el servidor. Revisa la red e intenta nuevamente.',
+    );
+  });
+
+  test('500 se distingue de una falla de conectividad', () {
+    final request = RequestOptions(path: '/inspections/id/parcel-valves');
+    final failure = DioException(
+      requestOptions: request,
+      response: Response(requestOptions: request, statusCode: 500),
+    );
+
+    final translated = ApiException.fromDio(failure);
+    expect(translated.kind, ApiErrorKind.serverError);
+    expect(translated.message, contains('respondió con un error'));
+    expect(translated.message, isNot(contains('conexión')));
   });
 
   test('conflicto de teléfono explica cómo corregir el inicio de sesión', () {

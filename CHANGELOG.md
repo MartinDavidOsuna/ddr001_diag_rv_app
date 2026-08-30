@@ -2,6 +2,16 @@
 
 Todos los cambios notables de **DIAGNOSTICO HIDRANTES** se documentan aquí.
 
+## [1.0.0+100] - 2026-08-24
+
+- Permite registrar y sincronizar N revisiones independientes del mismo hidrante.
+- Recupera conflictos heredados creando una nueva revisión sin alterar ni eliminar la evidencia original.
+- Aísla los errores por reporte para que un registro problemático no detenga los siguientes.
+- Excluye de pendientes los cascarones heredados vacíos y los estados terminales ya resueltos.
+- Refuerza la carga de fotografías grandes mediante copias temporales, streaming, verificación SHA-256 y tiempos límite por archivo.
+- Conserva inmutables los diagnósticos finalizados salvo sus metadatos de sincronización.
+- Mejora la recuperación, trazabilidad y exportación diagnóstica en Android sin borrar datos locales.
+
 ## 0.2.4+17
 
 - Conserva sesiones y reportes locales cuando falla temporalmente la renovación.

@@ -9,6 +9,7 @@ import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
 import '../../core/constants/report_type_labels.dart';
+import '../../core/media/image_decode_policy.dart';
 import '../../domain/media/inspection_photo.dart';
 
 class PhotoGalleryPage extends StatefulWidget {
@@ -271,7 +272,7 @@ class _PhotoTile extends StatelessWidget {
                   ? Image.file(
                       file,
                       fit: BoxFit.cover,
-                      cacheWidth: 400,
+                      cacheWidth: evidenceGridDecodePixels,
                       errorBuilder: (_, _, _) {
                         WidgetsBinding.instance.addPostFrameCallback(
                           (_) => onImageError(),
@@ -331,6 +332,7 @@ class _PhotoViewer extends StatelessWidget {
         children: [
           Image.file(
             File(photo.localPath),
+            cacheWidth: evidenceViewerDecodeWidth(context),
             errorBuilder: (_, _, _) => const SizedBox(
               height: 220,
               child: Center(

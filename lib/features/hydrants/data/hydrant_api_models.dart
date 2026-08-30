@@ -19,6 +19,17 @@ class CachedHydrant {
     this.metadata,
     this.calculatedStatus,
     this.rvStatus,
+    this.officialInspectionId,
+    this.lastStatusChangedAt,
+    this.reviewedByUserId,
+    this.reviewedByName,
+    this.reviewedByCrew,
+    this.hasConflict = false,
+    this.conflictCount = 0,
+    this.availableForRv = true,
+    this.currentRound = 1,
+    this.requiredPhotosVerified = false,
+    this.isActive = true,
     this.latestInspectionId,
     this.latestInspectionStatus,
     this.latestInspectionStartedAt,
@@ -50,10 +61,18 @@ class CachedHydrant {
       municipality,
       calculatedStatus,
       rvStatus,
+      officialInspectionId,
+      reviewedByUserId,
+      reviewedByName,
+      reviewedByCrew,
       latestInspectionId,
       latestInspectionStatus,
       sectionCode;
-  final DateTime? latestInspectionStartedAt, latestInspectionSubmittedAt;
+  final DateTime? latestInspectionStartedAt,
+      latestInspectionSubmittedAt,
+      lastStatusChangedAt;
+  final bool hasConflict, availableForRv, requiredPhotosVerified, isActive;
+  final int conflictCount, currentRound;
   final Object? metadata;
   final String source;
   final String? createdByUserId, accountId, environment, remoteId, reason;
@@ -78,7 +97,20 @@ class CachedHydrant {
     municipality: json['municipality']?.toString(),
     metadata: json['metadata_json'],
     calculatedStatus: json['calculated_status']?.toString(),
-    rvStatus: json['rvStatus']?.toString(),
+    rvStatus: json['rvStatus']?.toString() ?? 'available',
+    officialInspectionId: json['officialInspectionId']?.toString(),
+    lastStatusChangedAt: _date(json['lastStatusChangedAt']),
+    reviewedByUserId: json['reviewedByUserId']?.toString(),
+    reviewedByName: json['reviewedByName']?.toString(),
+    reviewedByCrew: json['reviewedByCrew']?.toString(),
+    hasConflict: json['hasConflict'] == true,
+    conflictCount: _int(json['conflictCount']) ?? 0,
+    availableForRv: json['availableForRv'] is bool
+        ? json['availableForRv'] as bool
+        : true,
+    currentRound: _int(json['currentRound']) ?? 1,
+    requiredPhotosVerified: json['requiredPhotosVerified'] == true,
+    isActive: json['isActive'] is bool ? json['isActive'] as bool : true,
     latestInspectionId: json['latestInspectionId']?.toString(),
     latestInspectionStatus: json['latestInspectionStatus']?.toString(),
     latestInspectionStartedAt: _date(json['latestInspectionStartedAt']),
@@ -90,7 +122,7 @@ class CachedHydrant {
     installationAngleDeg: _double(json['installation_angle_deg']),
     elevationM: _double(json['elevation_m']),
     outletCount: _int(json['outlet_count']),
-    updatedAt: updatedAt,
+    updatedAt: _date(json['updatedAt'] ?? json['updated_at']) ?? updatedAt,
     source: json['source_type']?.toString() == 'manual' ? 'manual' : 'remote',
     createdByUserId: json['created_by_user_id']?.toString(),
     environment: json['source_environment']?.toString(),
@@ -115,7 +147,18 @@ class CachedHydrant {
     municipality: json['municipality'] as String?,
     metadata: json['metadata'],
     calculatedStatus: json['calculatedStatus'] as String?,
-    rvStatus: json['rvStatus'] as String?,
+    rvStatus: json['rvStatus'] as String? ?? 'available',
+    officialInspectionId: json['officialInspectionId'] as String?,
+    lastStatusChangedAt: _date(json['lastStatusChangedAt']),
+    reviewedByUserId: json['reviewedByUserId'] as String?,
+    reviewedByName: json['reviewedByName'] as String?,
+    reviewedByCrew: json['reviewedByCrew'] as String?,
+    hasConflict: json['hasConflict'] as bool? ?? false,
+    conflictCount: _int(json['conflictCount']) ?? 0,
+    availableForRv: json['availableForRv'] as bool? ?? true,
+    currentRound: _int(json['currentRound']) ?? 1,
+    requiredPhotosVerified: json['requiredPhotosVerified'] as bool? ?? false,
+    isActive: json['isActive'] as bool? ?? true,
     latestInspectionId: json['latestInspectionId'] as String?,
     latestInspectionStatus: json['latestInspectionStatus'] as String?,
     latestInspectionStartedAt: _date(json['latestInspectionStartedAt']),
@@ -152,6 +195,17 @@ class CachedHydrant {
     'metadata': metadata,
     'calculatedStatus': calculatedStatus,
     'rvStatus': rvStatus,
+    'officialInspectionId': officialInspectionId,
+    'lastStatusChangedAt': lastStatusChangedAt?.toUtc().toIso8601String(),
+    'reviewedByUserId': reviewedByUserId,
+    'reviewedByName': reviewedByName,
+    'reviewedByCrew': reviewedByCrew,
+    'hasConflict': hasConflict,
+    'conflictCount': conflictCount,
+    'availableForRv': availableForRv,
+    'currentRound': currentRound,
+    'requiredPhotosVerified': requiredPhotosVerified,
+    'isActive': isActive,
     'latestInspectionId': latestInspectionId,
     'latestInspectionStatus': latestInspectionStatus,
     'latestInspectionStartedAt': latestInspectionStartedAt
@@ -175,11 +229,25 @@ class CachedHydrant {
   };
 
   Hydrant toAppModel() {
-    final status = switch (latestInspectionStatus ?? calculatedStatus) {
-      'submitted' || 'validated' => InspectionStatus.completed,
+    final canonicalStatus =
+        rvStatus ?? latestInspectionStatus ?? calculatedStatus ?? 'available';
+    final status = switch (canonicalStatus) {
+      'submitted' || 'completed' => InspectionStatus.completed,
+      'validated' => InspectionStatus.validated,
+      'returned' || 'rejected' => InspectionStatus.returned,
       'draft' || 'in_progress' || 'pending_sync' => InspectionStatus.inProgress,
       _ => InspectionStatus.pending,
     };
+    final effectiveAvailableForRv =
+        availableForRv &&
+        !const {
+          'submitted',
+          'completed',
+          'validated',
+          'conflict',
+          'returned',
+          'rejected',
+        }.contains(canonicalStatus);
     return Hydrant(
       id: hydrantId,
       code: accountNumber,
@@ -189,7 +257,11 @@ class CachedHydrant {
       parcel: municipality ?? 'Sin municipio',
       priority: PriorityLevel.medium,
       access: AccessType.both,
-      syncStatus: source == 'manual' && remoteId == null
+      syncStatus: status == InspectionStatus.validated
+          ? SyncStatus.validated
+          : status == InspectionStatus.completed || officialInspectionId != null
+          ? SyncStatus.synced
+          : source == 'manual' && remoteId == null
           ? SyncStatus.pending
           : SyncStatus.synced,
       f02a: InspectionSummary(
@@ -207,6 +279,17 @@ class CachedHydrant {
       source: source == 'manual'
           ? HydrantSource.fieldCreated
           : HydrantSource.assigned,
+      rvStatus: canonicalStatus,
+      officialInspectionId: officialInspectionId,
+      lastStatusChangedAt: lastStatusChangedAt,
+      reviewedByName: reviewedByName,
+      reviewedByCrew: reviewedByCrew,
+      hasConflict: hasConflict,
+      conflictCount: conflictCount,
+      availableForRv: effectiveAvailableForRv,
+      currentRound: currentRound,
+      requiredPhotosVerified: requiredPhotosVerified,
+      isActive: isActive,
     );
   }
 

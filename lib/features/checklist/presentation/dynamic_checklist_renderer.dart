@@ -2,25 +2,38 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../inspections/domain/rv_draft.dart';
 import '../../inspections/domain/parcel_valve_configuration.dart';
+import '../../inspections/domain/filter_element_selection.dart';
 import '../../inspections/presentation/rv_inspection_controller.dart';
 import '../../inspections/presentation/rv_review_navigation.dart';
+import '../../inspections/presentation/rv_general_photos_observations_step.dart';
+import '../../inspections/presentation/rv_steps_one_two.dart';
 import '../../catalogs/dynamic_catalog_repository.dart';
+import '../../catalogs/pressure_range_selector.dart';
+import '../../catalogs/brand_selection.dart';
 import '../data/checklist_models.dart';
+
+bool showNotApplicableForChecklistItem(ChecklistItemDefinition item) =>
+    !item.required && item.code != 'cabinet_comments';
+
+bool renderChecklistItemInSection(
+  ChecklistItemDefinition item, {
+  required bool hidePhotoQuestions,
+}) =>
+    !const {'coordinates', 'signal', 'readonly'}.contains(item.type) &&
+    !(hidePhotoQuestions && item.type == 'photo');
 
 class DynamicChecklistRenderer extends StatefulWidget {
   const DynamicChecklistRenderer({
     required this.controller,
-    required this.stepOne,
-    required this.stepTwo,
     required this.onExitRequested,
     this.onSummary,
     super.key,
   });
   final RvInspectionController controller;
-  final Widget stepOne, stepTwo;
   final VoidCallback? onSummary;
   final Future<void> Function() onExitRequested;
 
@@ -36,10 +49,11 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
   bool _transitioning = false;
   int? _renderedStep;
 
-  void _scheduleStepFocus(int step) {
+  void _scheduleStepFocus(int step, {required bool hasNavigationTarget}) {
     if (_renderedStep == step) return;
     _renderedStep = step;
     FocusManager.instance.primaryFocus?.unfocus();
+    if (hasNavigationTarget) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final heading = _headingKey.currentContext;
@@ -89,16 +103,21 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
     final draft = widget.controller.draft!;
     final sections = draft.checklist.sections;
     if (sections.isEmpty) return const Text('El checklist no contiene pasos.');
-    final currentStep = draft.activeFormStep.clamp(0, sections.length - 1);
-    _scheduleStepFocus(currentStep);
-    if ((draft.navigationQuestionId != null ||
-            draft.navigationFieldId != null) &&
-        !_targetScheduled) {
+    final currentStep = draft.activeFormStep.clamp(0, sections.length);
+    final hasNavigationTarget =
+        draft.navigationQuestionId != null || draft.navigationFieldId != null;
+    _scheduleStepFocus(currentStep, hasNavigationTarget: hasNavigationTarget);
+    if (hasNavigationTarget && !_targetScheduled) {
       _targetScheduled = true;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
+        BuildContext? target;
+        for (var attempt = 0; attempt < 5 && mounted; attempt++) {
+          target = _targetKey.currentContext;
+          if (target != null) break;
+          await WidgetsBinding.instance.endOfFrame;
+        }
         if (!mounted) return;
-        final target = _targetKey.currentContext;
-        if (target != null) {
+        if (target != null && target.mounted) {
           await Scrollable.ensureVisible(
             target,
             duration: const Duration(milliseconds: 300),
@@ -116,21 +135,34 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
       child: RvStepLayout(
         headingKey: _headingKey,
         currentStep: currentStep,
-        totalFormSteps: sections.length,
+        totalFormSteps: sections.length + 1,
         onPrevious: _previous,
         onNext: _next,
         content: KeyedSubtree(
           key: ValueKey('rv-step-${currentStep + 1}'),
           child: switch (currentStep) {
-            0 => widget.stepOne,
+            int step when step == sections.length =>
+              RvGeneralPhotosAndObservationsStep(controller: widget.controller),
+            0 => RvStepOnePanel(
+              controller: widget.controller,
+              targetKey: _targetKey,
+              navigationFieldId: draft.navigationFieldId,
+            ),
             1 => Column(
               children: [
                 _Section(
                   section: sections[currentStep],
                   controller: widget.controller,
                   collapsible: false,
+                  hidePhotoQuestions: true,
                 ),
-                widget.stepTwo,
+                RvStepTwoPhotoPanel(
+                  controller: widget.controller,
+                  targetSlot: _photoSlotFromNavigationField(
+                    draft.navigationFieldId,
+                  ),
+                  targetKey: _targetKey,
+                ),
               ],
             ),
             _ =>
@@ -153,6 +185,11 @@ class _DynamicChecklistRendererState extends State<DynamicChecklistRenderer> {
       ),
     );
   }
+
+  String? _photoSlotFromNavigationField(String? fieldId) {
+    if (fieldId == null || !fieldId.startsWith('photo:')) return null;
+    return fieldId.substring('photo:'.length);
+  }
 }
 
 class _ParcelValveSection extends StatelessWidget {
@@ -167,6 +204,8 @@ class _ParcelValveSection extends StatelessWidget {
   final GlobalKey? targetKey;
 
   Map<String, dynamic> _brand(BrandOption option) => {
+    'mode': 'readable',
+    'brandId': option.remoteId,
     'catalogId': option.remoteId,
     'localCatalogId': option.localId,
     'displayValue': option.name,
@@ -320,19 +359,10 @@ class _ParcelValveSection extends StatelessWidget {
             ),
             if (config?.type == ParcelValveConfigurationType.other) ...[
               const SizedBox(height: 12),
-              TextFormField(
-                key: targetFieldId == 'customDescription'
-                    ? targetKey
-                    : const ValueKey('parcel-custom-description'),
-                initialValue: config?.customDescription,
-                decoration: const InputDecoration(
-                  labelText: 'Especifique la configuración de válvulas',
-                ),
-                onChanged: (value) => unawaited(
-                  controller.saveParcelValveConfiguration(
-                    config!.copyWith(customDescription: value),
-                  ),
-                ),
+              const Text(
+                'Especifique la configuración de válvulas',
+                key: ValueKey('parcel-custom-configuration-instruction'),
+                style: TextStyle(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<int>(
@@ -345,6 +375,8 @@ class _ParcelValveSection extends StatelessWidget {
                   DropdownMenuItem(value: 1, child: Text('1')),
                   DropdownMenuItem(value: 2, child: Text('2')),
                   DropdownMenuItem(value: 3, child: Text('3')),
+                  DropdownMenuItem(value: 4, child: Text('4')),
+                  DropdownMenuItem(value: 5, child: Text('5')),
                 ],
                 onChanged: draft.isReadOnly
                     ? null
@@ -473,6 +505,8 @@ class _ParcelValveCard extends StatelessWidget {
           readOnly: readOnly,
           onSelected: (value) =>
               onChanged(valve.copyWith(valveBrand: brandValue(value))),
+          onIllegible: (reason) =>
+              onChanged(valve.copyWith(valveBrand: illegibleBrandMap(reason))),
         ),
         const SizedBox(height: 12),
         if (fixedDiameter != null)
@@ -503,6 +537,9 @@ class _ParcelValveCard extends StatelessWidget {
           onPresence: (value) => onChanged(valve.copyWith(hasSolenoid: value)),
           onBrand: (value) =>
               onChanged(valve.copyWith(solenoidBrand: brandValue(value))),
+          onIllegible: (reason) => onChanged(
+            valve.copyWith(solenoidBrand: illegibleBrandMap(reason)),
+          ),
         ),
         _ComponentField(
           key: targetFieldId == 'pilotBrand' ? targetKey : null,
@@ -517,7 +554,19 @@ class _ParcelValveCard extends StatelessWidget {
           onPresence: (value) => onChanged(valve.copyWith(hasPilot: value)),
           onBrand: (value) =>
               onChanged(valve.copyWith(pilotBrand: brandValue(value))),
+          onIllegible: (reason) =>
+              onChanged(valve.copyWith(pilotBrand: illegibleBrandMap(reason))),
         ),
+        if (valve.hasPilot) ...[
+          const SizedBox(height: 8),
+          _PilotConnectionField(
+            key: targetFieldId == 'pilotConnected' ? targetKey : null,
+            value: valve.pilotConnected,
+            readOnly: readOnly,
+            onChanged: (value) =>
+                onChanged(valve.copyWith(pilotConnected: value)),
+          ),
+        ],
         _ComponentField(
           key: targetFieldId == 'pressureGaugeBrand' ? targetKey : null,
           label: 'Manómetro',
@@ -532,9 +581,55 @@ class _ParcelValveCard extends StatelessWidget {
               onChanged(valve.copyWith(hasPressureGauge: value)),
           onBrand: (value) =>
               onChanged(valve.copyWith(pressureGaugeBrand: brandValue(value))),
+          onIllegible: (reason) => onChanged(
+            valve.copyWith(pressureGaugeBrand: illegibleBrandMap(reason)),
+          ),
         ),
       ],
     ),
+  );
+}
+
+class _PilotConnectionField extends StatelessWidget {
+  const _PilotConnectionField({
+    required this.value,
+    required this.readOnly,
+    required this.onChanged,
+    super.key,
+  });
+
+  final bool? value;
+  final bool readOnly;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text(
+        '¿El piloto está conectado? *',
+        style: TextStyle(fontWeight: FontWeight.w700),
+      ),
+      const Text(
+        'Indica si el piloto está conectado físicamente a esta válvula; '
+        'es distinto de indicar si la válvula tiene piloto.',
+      ),
+      const SizedBox(height: 8),
+      Semantics(
+        label: '¿El piloto está conectado físicamente a esta válvula?',
+        child: SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: true, label: Text('Sí')),
+            ButtonSegment(value: false, label: Text('No')),
+          ],
+          selected: value == null ? const <bool>{} : {value!},
+          emptySelectionAllowed: true,
+          onSelectionChanged: readOnly
+              ? null
+              : (selection) => onChanged(selection.first),
+        ),
+      ),
+    ],
   );
 }
 
@@ -550,6 +645,7 @@ class _ComponentField extends StatelessWidget {
     required this.brandValue,
     required this.onPresence,
     required this.onBrand,
+    required this.onIllegible,
     super.key,
   });
   final String label;
@@ -561,6 +657,7 @@ class _ComponentField extends StatelessWidget {
   final Map<String, dynamic> Function(BrandOption) brandValue;
   final ValueChanged<bool> onPresence;
   final ValueChanged<BrandOption> onBrand;
+  final ValueChanged<String> onIllegible;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -588,6 +685,7 @@ class _ComponentField extends StatelessWidget {
             answer: answer(brand),
             readOnly: readOnly,
             onSelected: onBrand,
+            onIllegible: onIllegible,
           ),
         ],
       ],
@@ -655,12 +753,14 @@ class _Section extends StatelessWidget {
     required this.section,
     required this.controller,
     this.collapsible = true,
+    this.hidePhotoQuestions = false,
     this.targetQuestionId,
     this.targetKey,
   });
   final ChecklistSectionDefinition section;
   final RvInspectionController controller;
   final bool collapsible;
+  final bool hidePhotoQuestions;
   final String? targetQuestionId;
   final GlobalKey? targetKey;
 
@@ -676,30 +776,49 @@ class _Section extends StatelessWidget {
           ),
         )
         .toList();
-    final answerable = visible
+    final countable = visible
         .where(
-          (item) => !const {
-            'photo',
-            'coordinates',
-            'signal',
-            'readonly',
-          }.contains(item.type),
+          (item) =>
+              !const {'coordinates', 'signal', 'readonly'}.contains(item.type),
         )
         .toList();
-    if (answerable.isEmpty) return const SizedBox.shrink();
-    final missing = answerable
-        .where((item) => item.required && !draft.answers.containsKey(item.id))
+    final renderable = countable
+        .where(
+          (item) => renderChecklistItemInSection(
+            item,
+            hidePhotoQuestions: hidePhotoQuestions,
+          ),
+        )
+        .toList();
+    if (renderable.isEmpty) return const SizedBox.shrink();
+    final missing = countable
+        .where(
+          (item) =>
+              item.required &&
+              (item.type == 'photo'
+                  ? draft.photosFor(item.photoSlot ?? item.code).isEmpty
+                  : !draft.answers.containsKey(item.id)),
+        )
         .length;
     final questions = [
-      for (final item in answerable)
+      for (final item in renderable)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
-          child: _Question(
-            key: item.id == targetQuestionId ? targetKey : null,
-            section: section,
-            item: item,
-            controller: controller,
-          ),
+          child: item.type == 'photo'
+              ? _ChecklistPhotoQuestion(
+                  key: item.id == targetQuestionId ? targetKey : null,
+                  item: item,
+                  controller: controller,
+                )
+              : _Question(
+                  key: item.id == targetQuestionId ? targetKey : null,
+                  section: section,
+                  item: item,
+                  controller: controller,
+                  highlighted:
+                      item.id == targetQuestionId &&
+                      controller.highlightedFocusKey != null,
+                ),
         ),
     ];
     return Card(
@@ -747,56 +866,206 @@ class _Section extends StatelessWidget {
   }
 }
 
-class _Question extends StatelessWidget {
-  const _Question({
-    required this.section,
+class _ChecklistPhotoQuestion extends StatelessWidget {
+  const _ChecklistPhotoQuestion({
     required this.item,
     required this.controller,
     super.key,
   });
-  final ChecklistSectionDefinition section;
+
   final ChecklistItemDefinition item;
   final RvInspectionController controller;
 
   @override
   Widget build(BuildContext context) {
-    final answer = controller.draft!.answers[item.id];
-    final readOnly = controller.draft!.isReadOnly;
+    final draft = controller.draft!;
+    final slot = item.photoSlot ?? item.code;
+    final photos = draft.photosFor(slot);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '${item.label}${item.required ? ' *' : ''}',
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        if (item.helpText != null)
-          Text(item.helpText!, style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 8),
-        _field(context, answer, readOnly),
-        if (!item.required)
-          CheckboxListTile(
+        Text(item.label, style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text(item.required ? 'Fotografía obligatoria' : 'Fotografía opcional'),
+        for (final photo in photos)
+          ListTile(
             contentPadding: EdgeInsets.zero,
-            value: answer?.notApplicable ?? false,
-            onChanged: readOnly
+            leading: const Icon(Icons.check_circle, color: Colors.green),
+            title: const Text('Fotografía guardada'),
+            subtitle: Text(photo.status.name),
+            trailing: draft.isReadOnly
                 ? null
-                : (value) => unawaited(
-                    controller.answer(
-                      section,
-                      item,
-                      value: answer?.value,
-                      selected: answer?.selectedOptions ?? const [],
-                      notApplicable: value ?? false,
-                      comment: answer?.comment ?? '',
-                    ),
+                : IconButton(
+                    tooltip: 'Eliminar fotografía',
+                    onPressed: () =>
+                        controller.removePhoto(slot, photo.photoId),
+                    icon: const Icon(Icons.delete_outline),
                   ),
-            title: const Text('No aplica'),
           ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: [
+            FilledButton.icon(
+              onPressed: draft.isReadOnly
+                  ? null
+                  : () => controller.addPhoto(slot, ImageSource.camera),
+              icon: const Icon(Icons.photo_camera),
+              label: const Text('Tomar foto'),
+            ),
+            OutlinedButton.icon(
+              onPressed: draft.isReadOnly
+                  ? null
+                  : () => controller.addPhoto(slot, ImageSource.gallery),
+              icon: const Icon(Icons.photo_library_outlined),
+              label: const Text('Galería'),
+            ),
+          ],
+        ),
       ],
+    );
+  }
+}
+
+class _Question extends StatelessWidget {
+  const _Question({
+    required this.section,
+    required this.item,
+    required this.controller,
+    this.highlighted = false,
+    super.key,
+  });
+  final ChecklistSectionDefinition section;
+  final ChecklistItemDefinition item;
+  final RvInspectionController controller;
+  final bool highlighted;
+
+  @override
+  Widget build(BuildContext context) {
+    final answer = controller.draft!.answers[item.id];
+    final readOnly = controller.draft!.isReadOnly;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: highlighted
+            ? Theme.of(context).colorScheme.primaryContainer
+            : Colors.transparent,
+        border: Border.all(
+          color: highlighted
+              ? Theme.of(context).colorScheme.primary
+              : Colors.transparent,
+          width: 2,
+        ),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Semantics(
+        liveRegion: highlighted,
+        label: highlighted ? 'Campo pendiente resaltado: ${item.label}' : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${item.label}${item.required ? ' *' : ''}',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            if (item.helpText != null)
+              Text(
+                item.helpText!,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            const SizedBox(height: 8),
+            _field(context, answer, readOnly),
+            if (showNotApplicableForChecklistItem(item))
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: answer?.notApplicable ?? false,
+                onChanged: readOnly
+                    ? null
+                    : (value) => unawaited(
+                        controller.answer(
+                          section,
+                          item,
+                          value: answer?.value,
+                          selected: answer?.selectedOptions ?? const [],
+                          notApplicable: value ?? false,
+                          comment: answer?.comment ?? '',
+                        ),
+                      ),
+                title: const Text('No aplica'),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _field(BuildContext context, RvAnswer? answer, bool readOnly) {
     final catalogs = controller.catalogs;
+    if (item.code == 'filter_element') {
+      final selection = answer?.value == null
+          ? null
+          : FilterElementSelection.fromValue(answer!.value);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SegmentedButton<FilterElementState>(
+            segments: const [
+              ButtonSegment(
+                value: FilterElementState.present,
+                label: Text('Sí'),
+              ),
+              ButtonSegment(
+                value: FilterElementState.absent,
+                label: Text('No'),
+              ),
+              ButtonSegment(
+                value: FilterElementState.undetermined,
+                label: Text('Indefinido'),
+              ),
+            ],
+            selected: selection == null
+                ? <FilterElementState>{}
+                : {selection.state},
+            emptySelectionAllowed: true,
+            onSelectionChanged: readOnly
+                ? null
+                : (states) => unawaited(
+                    controller.answer(
+                      section,
+                      item,
+                      value: FilterElementSelection(states.first).toJson(),
+                    ),
+                  ),
+          ),
+          if (selection?.state == FilterElementState.undetermined)
+            TextFormField(
+              initialValue: selection?.undefinedReason,
+              enabled: !readOnly,
+              minLines: 2,
+              maxLines: 4,
+              maxLength: 500,
+              decoration: const InputDecoration(
+                labelText: 'Explica por qué no puede determinarse *',
+                helperText: 'Mínimo 10 caracteres',
+              ),
+              validator: (value) => (value?.trim().length ?? 0) < 10
+                  ? 'Escribe al menos 10 caracteres.'
+                  : null,
+              onChanged: (reason) => unawaited(
+                controller.answer(
+                  section,
+                  item,
+                  value: FilterElementSelection(
+                    FilterElementState.undetermined,
+                    undefinedReason: reason,
+                  ).toJson(),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
     if (catalogs != null && item.code.contains('brand')) {
       return _BrandField(
         repository: catalogs,
@@ -807,6 +1076,8 @@ class _Question extends StatelessWidget {
           section,
           item,
           value: {
+            'mode': 'readable',
+            'brandId': value.remoteId,
             'catalogId': value.remoteId,
             'localCatalogId': value.localId,
             'displayValue': value.name,
@@ -816,6 +1087,12 @@ class _Question extends StatelessWidget {
             'isPendingSync': value.status != CatalogSyncStatus.synced,
             'userCreated': value.userCreated,
           },
+        ),
+        onIllegible: (reason) =>
+            controller.answer(section, item, value: illegibleBrandMap(reason)),
+        onEvidence: () => controller.addPhoto(
+          'brand_illegible:${item.id}',
+          ImageSource.camera,
         ),
       );
     }
@@ -840,6 +1117,23 @@ class _Question extends StatelessWidget {
             'isPendingSync': value.status != CatalogSyncStatus.synced,
           },
         ),
+      );
+    }
+    const pressureRangeCodes = {
+      'sustaining_gauge_range',
+      'regulating_gauge_range',
+      'filter_gauge_before_range',
+      'filter_gauge_after_range',
+      'parcel_gauge_range',
+    };
+    if (catalogs != null && pressureRangeCodes.contains(item.code)) {
+      return PressureRangeSelector(
+        value: answer?.value is Map
+            ? Map<String, dynamic>.from(answer!.value! as Map)
+            : null,
+        enabled: !readOnly,
+        onChanged: (range) =>
+            unawaited(controller.answer(section, item, value: range)),
       );
     }
     return switch (item.type) {
@@ -947,6 +1241,8 @@ class _BrandField extends StatelessWidget {
     required this.answer,
     required this.readOnly,
     required this.onSelected,
+    this.onIllegible,
+    this.onEvidence,
     super.key,
   });
   final DynamicCatalogRepository repository;
@@ -954,6 +1250,8 @@ class _BrandField extends StatelessWidget {
   final RvAnswer? answer;
   final bool readOnly;
   final ValueChanged<BrandOption> onSelected;
+  final ValueChanged<String>? onIllegible;
+  final Future<void> Function()? onEvidence;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -963,9 +1261,51 @@ class _BrandField extends StatelessWidget {
       final selected = answer?.value is Map
           ? (answer!.value as Map)['localCatalogId']?.toString()
           : null;
+      final raw = answer?.value is Map
+          ? Map<String, dynamic>.from(answer!.value! as Map)
+          : const <String, dynamic>{};
+      final illegible = raw['mode'] == 'illegible';
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          ChoiceChip(
+            avatar: const Icon(Icons.visibility_off_outlined),
+            label: const Text('Ilegible · condición especial'),
+            selected: illegible,
+            onSelected: readOnly || onIllegible == null
+                ? null
+                : (_) => onIllegible!(raw['reason']?.toString() ?? ''),
+          ),
+          if (illegible) ...[
+            const SizedBox(height: 8),
+            TextFormField(
+              initialValue: raw['reason']?.toString(),
+              enabled: !readOnly,
+              minLines: 2,
+              maxLines: 4,
+              maxLength: 500,
+              decoration: const InputDecoration(
+                labelText: 'Explica por qué la marca es ilegible *',
+                helperText: 'Mínimo 10 caracteres',
+              ),
+              validator: (value) => (value?.trim().length ?? 0) < 10
+                  ? 'Escribe al menos 10 caracteres.'
+                  : null,
+              onChanged: onIllegible,
+            ),
+            Text(
+              raw['evidencePhotoId'] == null
+                  ? 'Evidencia: No agregada (opcional)'
+                  : 'Evidencia: 1 fotografía',
+            ),
+            if (!readOnly && onEvidence != null)
+              OutlinedButton.icon(
+                onPressed: onEvidence,
+                icon: const Icon(Icons.camera_alt_outlined),
+                label: const Text('Agregar fotografía de evidencia'),
+              ),
+          ],
+          const SizedBox(height: 8),
           if (options.length < 6)
             Wrap(
               spacing: 8,

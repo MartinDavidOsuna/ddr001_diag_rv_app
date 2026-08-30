@@ -42,6 +42,8 @@ class SyncQueueRepository {
     await box.put(id, jsonEncode(value));
   }
 
+  Future<void> delete(String id) => box.delete(id);
+
   List<SyncQueueItem> all() {
     final values = <SyncQueueItem>[];
     for (final raw in box.values) {

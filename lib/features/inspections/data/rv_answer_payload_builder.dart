@@ -39,13 +39,44 @@ class RvAnswerPayloadBuilder {
             : null;
         final value = notApplicable
             ? null
+            : item.code == 'filter_element' && catalog != null
+            ? catalog['state']
             : _serializedValue(item.type, item.id, answer, catalog);
         final row = <String, dynamic>{
           'itemId': item.id,
           if (!notApplicable) 'value': value,
           'notApplicable': notApplicable,
         };
+        if (!notApplicable &&
+            item.code == 'filter_element' &&
+            catalog != null) {
+          row['value'] = catalog['state'];
+          row['filterElement'] = {
+            'state': catalog['state'],
+            'reason': catalog['state'] == 'undefined'
+                ? catalog['reason']
+                : null,
+          };
+          payload.add(row);
+          continue;
+        }
         if (!notApplicable && catalog != null) {
+          if (item.code.contains('brand') && catalog['mode'] == 'illegible') {
+            final evidence = draft
+                .photosFor('brand_illegible:${item.id}')
+                .where((photo) => photo.serverPhotoId != null)
+                .firstOrNull;
+            row['brandSelection'] = {
+              'mode': 'illegible',
+              'brandId': null,
+              'displayName': 'Ilegible',
+              'reason': catalog['reason'],
+              'evidencePhotoId': evidence?.serverPhotoId,
+            };
+            row['catalogDisplayValue'] = 'Ilegible';
+            payload.add(row);
+            continue;
+          }
           final remoteId = catalog['catalogId']?.toString().trim() ?? '';
           if (remoteId.isEmpty) {
             throw RvPayloadException(
@@ -55,8 +86,24 @@ class RvAnswerPayloadBuilder {
                   'La revisión permanece guardada.',
             );
           }
-          if (item.code.contains('brand')) row['brandId'] = remoteId;
+          if (item.code.contains('brand')) {
+            row['brandId'] = remoteId;
+            row['brandSelection'] = {
+              'mode': 'readable',
+              'brandId': remoteId,
+              'displayName': catalog['displayValue'],
+              'reason': null,
+              'evidencePhotoId': null,
+            };
+          }
           if (item.code.contains('diameter')) row['diameterId'] = remoteId;
+          if (item.code.contains('gauge_range')) {
+            row['pressureRangeId'] = remoteId;
+            row['pressureRangeMinimum'] = catalog['minimum'];
+            row['pressureRangeMaximum'] = catalog['maximum'];
+            row['pressureRangeUnit'] = catalog['unit'];
+            row['pressureRangeDisplay'] = catalog['displayValue'];
+          }
           row['catalogDisplayValue'] = catalog['displayValue']?.toString();
         }
         payload.add(row);

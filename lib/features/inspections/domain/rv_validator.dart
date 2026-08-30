@@ -2,8 +2,10 @@ import '../../checklist/data/checklist_models.dart';
 import 'rv_draft.dart';
 import 'rv_sync_state.dart';
 
-class RvValidationIssue {
-  const RvValidationIssue({
+enum PendingIssueSeverity { warning, blocking }
+
+class RvPendingIssue {
+  const RvPendingIssue({
     required this.code,
     required this.message,
     this.sectionId,
@@ -11,10 +13,21 @@ class RvValidationIssue {
     this.subItemId,
     this.fieldId,
     this.slotCode,
+    this.stepIndex,
+    this.componentType,
+    this.instanceId,
+    this.instanceIndex,
+    this.focusKey,
+    this.severity = PendingIssueSeverity.blocking,
   });
   final String code, message;
   final String? sectionId, questionId, subItemId, fieldId, slotCode;
+  final int? stepIndex, instanceIndex;
+  final String? componentType, instanceId, focusKey;
+  final PendingIssueSeverity severity;
 }
+
+typedef RvValidationIssue = RvPendingIssue;
 
 class RvValidationResult {
   const RvValidationResult(this.issues);
@@ -54,6 +67,21 @@ class RvValidator {
 
   RvValidationResult validate(RvDraft draft, {bool requireSynced = false}) {
     final issues = <RvValidationIssue>[];
+    if (!draft.isInactive &&
+        (draft.inactiveClosureDraft != null ||
+            draft.photosFor(noHydrantAtLocationPhotoSlot).isNotEmpty)) {
+      issues.add(
+        const RvValidationIssue(
+          code: 'inactive_evidence_requires_closure',
+          message:
+              'Existe evidencia de que no hay hidrante en la ubicación. '
+              'Vuelve al paso 1 para continuar el reporte o descartarlo.',
+          slotCode: noHydrantAtLocationPhotoSlot,
+          stepIndex: 0,
+          focusKey: 'photo:no_hydrant_at_location',
+        ),
+      );
+    }
     final checklist = draft.checklist;
     for (final section in checklist.sections) {
       if (section.code == 'valvulas_parcelarias') {
@@ -61,21 +89,91 @@ class RvValidator {
         continue;
       }
       for (final item in section.items) {
-        if (!isVisible(item, checklist, draft.answers) ||
-            const {
-              'photo',
-              'coordinates',
-              'signal',
-              'readonly',
-            }.contains(item.type))
+        if (!isVisible(item, checklist, draft.answers)) continue;
+        if (item.type == 'photo') {
+          final slot = item.photoSlot ?? item.code;
+          final photos = draft.photosFor(slot);
+          if (item.required && photos.isEmpty) {
+            issues.add(
+              RvValidationIssue(
+                code: 'required_photo_missing',
+                message: 'Falta ${item.label}.',
+                sectionId: section.id,
+                questionId: item.id,
+                slotCode: slot,
+                focusKey: 'photo:$slot',
+              ),
+            );
+          } else if (item.required &&
+              requireSynced &&
+              !photos.any(
+                (photo) => photo.status == RvPhotoUploadStatus.verified,
+              )) {
+            issues.add(
+              RvValidationIssue(
+                code: 'photo_pending',
+                message: '${item.label} no está subida.',
+                sectionId: section.id,
+                questionId: item.id,
+                slotCode: slot,
+                focusKey: 'photo:$slot',
+              ),
+            );
+          }
+          continue;
+        }
+        if (const {'coordinates', 'signal', 'readonly'}.contains(item.type))
           continue;
         final answer = draft.answers[item.id];
-        if (item.required &&
-            (answer == null || (!answer.notApplicable && _empty(answer)))) {
+        if (answer?.value case final Map value
+            when item.code.contains('brand') &&
+                value['mode'] == 'illegible' &&
+                (value['reason']?.toString().trim().length ?? 0) < 10) {
           issues.add(
             RvValidationIssue(
-              code: 'required_answer_missing',
-              message: 'Falta responder ${item.label}.',
+              code: 'illegible_brand_reason_missing',
+              message:
+                  'Describe por qué la marca es ilegible (mínimo 10 caracteres).',
+              sectionId: section.id,
+              questionId: item.id,
+              focusKey: 'question:${item.id}',
+            ),
+          );
+          continue;
+        }
+        if (item.code == 'filter_element' &&
+            answer != null &&
+            !answer.notApplicable) {
+          final value = answer.value;
+          if (value is Map &&
+              value['state'] == 'undefined' &&
+              (value['reason']?.toString().trim().length ?? 0) < 10) {
+            issues.add(
+              RvValidationIssue(
+                code: 'filter_element_reason_missing',
+                message:
+                    'Explica por qué no puede determinarse si existe elemento filtrante.',
+                sectionId: section.id,
+                questionId: item.id,
+              ),
+            );
+            continue;
+          }
+          if (value is Map &&
+              const {'present', 'absent', 'undefined'}.contains(value['state']))
+            continue;
+        }
+        if (item.required &&
+            (answer == null ||
+                (!answer.notApplicable && _empty(item, answer)))) {
+          issues.add(
+            RvValidationIssue(
+              code: item.code.endsWith('_pilot_connected')
+                  ? 'pilot_connection_missing'
+                  : 'required_answer_missing',
+              message: item.code.endsWith('_pilot_connected')
+                  ? 'Falta indicar si el piloto está conectado.'
+                  : 'Falta responder ${item.label}.',
               sectionId: section.id,
               questionId: item.id,
             ),
@@ -101,6 +199,8 @@ class RvValidator {
         const RvValidationIssue(
           code: 'location_missing',
           message: 'Falta capturar la ubicación.',
+          stepIndex: 1,
+          focusKey: 'location',
         ),
       );
     if (draft.signal == null)
@@ -108,6 +208,8 @@ class RvValidator {
         const RvValidationIssue(
           code: 'signal_missing',
           message: 'Falta capturar la conectividad.',
+          stepIndex: 1,
+          focusKey: 'signal',
         ),
       );
     for (final slot in requiredRvPhotoSlots) {
@@ -118,6 +220,8 @@ class RvValidator {
             code: 'required_photo_missing',
             message: 'Falta ${rvPhotoSlotLabels[slot]}.',
             slotCode: slot,
+            stepIndex: 1,
+            focusKey: 'photo:$slot',
           ),
         );
       } else if (requireSynced &&
@@ -129,6 +233,8 @@ class RvValidator {
             code: 'photo_pending',
             message: '${rvPhotoSlotLabels[slot]} no está subida.',
             slotCode: slot,
+            stepIndex: 1,
+            focusKey: 'photo:$slot',
           ),
         );
       }
@@ -179,23 +285,14 @@ class RvValidator {
           message: 'Falta seleccionar la configuración de válvulas.',
           sectionId: section.id,
           fieldId: 'configuration',
+          componentType: 'parcel_valves',
+          focusKey: 'parcel:configuration',
         ),
       );
       return;
     }
-    if (configuration.type.name == 'other' &&
-        (configuration.customDescription?.trim().isEmpty ?? true)) {
-      issues.add(
-        RvValidationIssue(
-          code: 'parcel_custom_description_missing',
-          message: 'Falta especificar la configuración de válvulas.',
-          sectionId: section.id,
-          fieldId: 'customDescription',
-        ),
-      );
-    }
     if (configuration.valveCount < 1 ||
-        configuration.valveCount > 3 ||
+        configuration.valveCount > 5 ||
         configuration.valves.length != configuration.valveCount) {
       issues.add(
         RvValidationIssue(
@@ -203,6 +300,8 @@ class RvValidator {
           message: 'La cantidad de válvulas no coincide con la configuración.',
           sectionId: section.id,
           fieldId: 'valveCount',
+          componentType: 'parcel_valves',
+          focusKey: 'parcel:valveCount',
         ),
       );
       return;
@@ -216,6 +315,9 @@ class RvValidator {
           sectionId: section.id,
           subItemId: subItem,
           fieldId: field,
+          componentType: 'parcel_valve',
+          instanceIndex: valve.index,
+          focusKey: 'parcel:$subItem:$field',
         ),
       );
       if (!_catalogSelectionValid(valve.valveBrand)) {
@@ -230,6 +332,21 @@ class RvValidator {
       if (valve.hasPilot && !_catalogSelectionValid(valve.pilotBrand)) {
         missing('pilotBrand', 'marca del piloto');
       }
+      if (valve.hasPilot && valve.pilotConnected == null) {
+        issues.add(
+          RvValidationIssue(
+            code: 'pilot_connection_missing',
+            message:
+                'Falta indicar si el piloto de la válvula ${valve.index} está conectado.',
+            sectionId: section.id,
+            subItemId: subItem,
+            fieldId: 'pilotConnected',
+            componentType: 'parcel_valve',
+            instanceIndex: valve.index,
+            focusKey: 'parcel:$subItem:pilotConnected',
+          ),
+        );
+      }
       if (valve.hasPressureGauge &&
           !_catalogSelectionValid(valve.pressureGaugeBrand)) {
         missing('pressureGaugeBrand', 'marca del manómetro');
@@ -242,6 +359,10 @@ class RvValidator {
     bool diameter = false,
   }) {
     if (value == null) return false;
+    if (!diameter && value['mode'] == 'illegible') {
+      return value['brandId'] == null &&
+          (value['reason']?.toString().trim().length ?? 0) >= 10;
+    }
     final display = value['displayValue']?.toString().trim() ?? '';
     final remote = value['catalogId']?.toString().trim() ?? '';
     final local = value['localCatalogId']?.toString().trim() ?? '';
@@ -251,9 +372,12 @@ class RvValidator {
     return numeric is num && numeric > 0 && value['unit'] == 'in';
   }
 
-  bool _empty(RvAnswer answer) {
+  bool _empty(ChecklistItemDefinition item, RvAnswer answer) {
     final value = answer.value;
     if (value is Map) {
+      if (item.code.contains('brand') && value['mode'] == 'illegible') {
+        return (value['reason']?.toString().trim().length ?? 0) < 10;
+      }
       final display = value['displayValue']?.toString().trim() ?? '';
       final remote = value['catalogId']?.toString().trim() ?? '';
       final local = value['localCatalogId']?.toString().trim() ?? '';
@@ -264,7 +388,28 @@ class RvValidator {
 
   bool _validType(ChecklistItemDefinition item, RvAnswer answer) {
     final value = answer.value;
+    if (value is Map && _isPressureGaugeRange(item.code)) {
+      final display = value['displayValue']?.toString().trim() ?? '';
+      final remote = value['catalogId']?.toString().trim() ?? '';
+      final local = value['localCatalogId']?.toString().trim() ?? '';
+      final minimum = value['minimum'];
+      final maximum = value['maximum'];
+      final unit = value['unit']?.toString().trim().toLowerCase();
+      return display.isNotEmpty &&
+          (remote.isNotEmpty || local.isNotEmpty) &&
+          minimum is num &&
+          maximum is num &&
+          minimum.isFinite &&
+          maximum.isFinite &&
+          minimum >= 0 &&
+          maximum > minimum &&
+          const {'psi', 'bar'}.contains(unit);
+    }
     if (value is Map && item.code.contains('brand')) {
+      if (value['mode'] == 'illegible') {
+        return value['brandId'] == null &&
+            (value['reason']?.toString().trim().length ?? 0) >= 10;
+      }
       final display = value['displayValue']?.toString().trim() ?? '';
       final remote = value['catalogId']?.toString().trim() ?? '';
       final local = value['localCatalogId']?.toString().trim() ?? '';
@@ -297,6 +442,13 @@ class RvValidator {
   }
 
   bool _compare(Object? actual, String operator, Object? expected) {
+    if (actual is Map && actual['state'] != null) {
+      actual = actual['state'] == 'present'
+          ? true
+          : actual['state'] == 'absent'
+          ? false
+          : null;
+    }
     if (operator == 'in') {
       final list = expected is List ? expected : [expected];
       return actual is List ? actual.any(list.contains) : list.contains(actual);
@@ -313,6 +465,14 @@ class RvValidator {
       _ => false,
     };
   }
+
+  bool _isPressureGaugeRange(String code) => const {
+    'sustaining_gauge_range',
+    'regulating_gauge_range',
+    'filter_gauge_before_range',
+    'filter_gauge_after_range',
+    'parcel_gauge_range',
+  }.contains(code);
 }
 
 extension _FirstOrNull<T> on Iterable<T> {

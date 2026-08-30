@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -15,11 +13,7 @@ import '../core/network/api_client.dart';
 import '../core/network/connectivity_monitor.dart';
 import '../data/local/visual_inspection_repository.dart';
 import '../data/local/functional_repositories.dart';
-import '../data/local/integrity_audit_service.dart';
-import '../data/local/operation_journal_repository.dart';
-import '../data/local/quarantine_repository.dart';
-import '../data/local/recovery_coordinator.dart';
-import '../data/local/media_reconciliation_service.dart';
+import '../data/local/sync_queue_repository.dart';
 import '../features/auth/data/field_session_repository.dart';
 import '../features/auth/data/session_secure_storage.dart';
 import '../features/hydrants/data/hydrant_repository.dart';
@@ -27,11 +21,19 @@ import '../features/checklist/data/checklist_repository.dart';
 import '../features/inspections/data/inspection_remote_repository.dart';
 import '../features/inspections/data/inspection_sync_coordinator.dart';
 import '../features/inspections/data/rv_draft_repository.dart';
+import '../features/inspections/data/sync_receipt_repository.dart';
 import '../features/catalogs/dynamic_catalog_repository.dart';
+import '../features/visual_reports/data/visual_report_repository.dart';
+import '../features/diagnostics/rv_diagnostic_export_service.dart';
+import '../features/diagnostics/upgrade_certification_evidence.dart';
+import 'local_recovery_pipeline.dart';
 
 typedef BootstrapStatusCallback = void Function(String status);
 
-Future<AppState> bootstrap({BootstrapStatusCallback? onStatus}) async {
+Future<AppState> bootstrap({
+  BootstrapStatusCallback? onStatus,
+  bool startRemoteServices = true,
+}) async {
   final total = Stopwatch()..start();
   var stage = Stopwatch()..start();
   onStatus?.call('Preparando la aplicación');
@@ -44,18 +46,29 @@ Future<AppState> bootstrap({BootstrapStatusCallback? onStatus}) async {
   final syncBox = await Hive.openBox<String>('sync_queue');
   final mediaBox = await Hive.openBox<String>('media_sync_queue');
   final syncedTraceBox = await Hive.openBox<String>('synced_trace_ids');
+  final syncDiagnosticsBox = await Hive.openBox<String>(
+    'rv_sync_diagnostics_v1',
+  );
+  final syncReceiptsBox = await Hive.openBox<String>('rv_sync_receipts_v1');
+  final rvRecoveryBox = await Hive.openBox<String>('rv_recovery_v1');
+  final rvRecoverySnapshotBox = await Hive.openBox<String>(
+    'rv_recovery_snapshots_v1',
+  );
   final inspectionBox = await Hive.openBox<String>('visual_inspections_v1');
   final inspectionIndexBox = await Hive.openBox<String>(
     'active_inspection_index_v1',
   );
   await Hive.openBox<String>('damage_records_v1');
-  await Hive.openBox<String>('inspection_photos_v1');
+  final photoBox = await Hive.openBox<String>('inspection_photos_v1');
   await Hive.openBox<String>('hydrant_configurations_v1');
   await Hive.openBox<String>('local_hydrants_v1');
   final hydrantBox = Hive.box<String>('local_hydrants_v1');
   final checklistBox = await Hive.openBox<String>('rv_checklist_cache_v1');
   final dynamicCatalogBox = await Hive.openBox<String>(
     'rv_dynamic_catalogs_v1',
+  );
+  final visualReportCache = await Hive.openBox<String>(
+    'visual_report_cache_v1',
   );
   await Hive.openBox<String>('media_work_queue_v1');
   final functionalEligibilityBox = await Hive.openBox<String>(
@@ -86,20 +99,47 @@ Future<AppState> bootstrap({BootstrapStatusCallback? onStatus}) async {
     'integrity_audit_reports_v1',
   );
   await Hive.openBox<String>('gallery_ui_state_v1');
-  final recovery = await RecoveryCoordinator(
-    auditService: const IntegrityAuditService(),
-    journal: OperationJournalRepository(operationJournalBox),
-    quarantine: QuarantineRepository(quarantineBox),
-  ).runLightweight();
-  debugPrint('[PERF] local_storage_recovery_ms=${stage.elapsedMilliseconds}');
-  await integrityReportBox.put(
-    recovery.audit.id,
-    jsonEncode(recovery.audit.toJson()),
-  );
-  await MediaReconciliationService().reconcile();
-  onStatus?.call('Recuperando sesión y datos guardados');
-  final preferences = await SharedPreferences.getInstance();
   final packageInfo = await PackageInfo.fromPlatform();
+  final preferences = await SharedPreferences.getInstance();
+  final certificationMarker =
+      'upgrade_certification_evidence_${packageInfo.version}_${packageInfo.buildNumber}';
+  final captureCertificationEvidence =
+      preferences.getBool(certificationMarker) != true;
+  if (captureCertificationEvidence) {
+    await const UpgradeCertificationEvidence().capturePreRecovery(
+      packageInfo: packageInfo,
+    );
+  }
+  final visualRepository = VisualInspectionRepository(
+    documents: inspectionBox,
+    index: inspectionIndexBox,
+  );
+  final rvDraftRepository = RvDraftRepository(visualRepository);
+  onStatus?.call('Verificando revisiones guardadas…');
+  final localRecovery = await LocalRecoveryPipeline(
+    visualRepository: visualRepository,
+    drafts: rvDraftRepository,
+    operationJournalBox: operationJournalBox,
+    quarantineBox: quarantineBox,
+    recoveryBox: rvRecoveryBox,
+    snapshotBox: rvRecoverySnapshotBox,
+    indexBox: inspectionIndexBox,
+    syncQueueBox: syncBox,
+    photoBox: photoBox,
+    mediaQueueBox: mediaBox,
+    integrityReportBox: integrityReportBox,
+  ).run();
+  debugPrint('[PERF] local_storage_recovery_ms=${stage.elapsedMilliseconds}');
+  if (localRecovery.recoveredPhotoReferences > 0) {
+    onStatus?.call('Se recuperó evidencia fotográfica pendiente…');
+  }
+  if (localRecovery.rvRecovery.supersededEmptyDrafts > 0 ||
+      localRecovery.rvRecovery.retryStormsStopped > 0) {
+    onStatus?.call(
+      'Se encontraron revisiones guardadas y se están preparando para sincronización.',
+    );
+  }
+  onStatus?.call('Recuperando sesión y datos guardados');
   final config = AppConfig.fromEnvironment();
   final sessionStorage = SessionSecureStorage();
   final apiClient = ApiClient(config: config, sessionStorage: sessionStorage);
@@ -113,18 +153,55 @@ Future<AppState> bootstrap({BootstrapStatusCallback? onStatus}) async {
     storage: sessionStorage,
     packageInfo: packageInfo,
   );
-  final visualRepository = VisualInspectionRepository(
-    documents: inspectionBox,
-    index: inspectionIndexBox,
+  final hydrantRepository = HydrantRepository(
+    client: apiClient,
+    box: hydrantBox,
   );
-  final rvDraftRepository = RvDraftRepository(visualRepository);
   final inspectionSyncCoordinator = InspectionSyncCoordinator(
     drafts: rvDraftRepository,
     remote: InspectionRemoteRepository(apiClient),
-    photoBox: Hive.box<String>('inspection_photos_v1'),
+    photoBox: photoBox,
     mediaQueue: mediaBox,
+    mediaWorkQueue: Hive.box<String>('media_work_queue_v1'),
+    diagnosticsBox: syncDiagnosticsBox,
+    receipts: SyncReceiptRepository(syncReceiptsBox),
+    appVersion: packageInfo.version,
+    appBuild: packageInfo.buildNumber,
+    gitSha: const String.fromEnvironment(
+      'GIT_SHA',
+      defaultValue: 'development-build-without-release-metadata',
+    ),
+    buildDateUtc: const String.fromEnvironment(
+      'BUILD_DATE_UTC',
+      defaultValue: 'development-build-without-release-metadata',
+    ),
     catalogs: dynamicCatalogRepository,
+    onHydrantResolved: hydrantRepository.linkServerHydrantId,
   );
+  final diagnosticExportService = RvDiagnosticExportService(
+    config: config,
+    packageInfo: packageInfo,
+    sessionStorage: sessionStorage,
+    visualRepository: visualRepository,
+    drafts: rvDraftRepository,
+    syncQueue: SyncQueueRepository(syncBox),
+    hydrantBox: hydrantBox,
+    activeIndexBox: inspectionIndexBox,
+    photoBox: Hive.box<String>('inspection_photos_v1'),
+    mediaSyncBox: mediaBox,
+    mediaWorkBox: Hive.box<String>('media_work_queue_v1'),
+    diagnosticsBox: syncDiagnosticsBox,
+    receiptsBox: syncReceiptsBox,
+  );
+  if (captureCertificationEvidence) {
+    await diagnosticExportService.export(
+      screenSummary: const {},
+      hydrants: const [],
+      queryRemote: false,
+      evidenceType: 'POST_RECOVERY_OFFLINE',
+    );
+    await preferences.setBool(certificationMarker, true);
+  }
   final state = AppState(
     preferences: preferences,
     traceBox: traceBox,
@@ -141,17 +218,22 @@ Future<AppState> bootstrap({BootstrapStatusCallback? onStatus}) async {
       index: functionalInspectionIndexBox,
     ),
     sessionRepository: sessionRepository,
-    hydrantRepository: HydrantRepository(client: apiClient, box: hydrantBox),
+    hydrantRepository: hydrantRepository,
     checklistRepository: ChecklistRepository(
       client: apiClient,
       box: checklistBox,
     ),
     rvDraftRepository: rvDraftRepository,
     inspectionSyncCoordinator: inspectionSyncCoordinator,
+    diagnosticExportService: diagnosticExportService,
+    visualReportRepository: VisualReportRepository(
+      client: apiClient,
+      cache: visualReportCache,
+    ),
     dynamicCatalogRepository: dynamicCatalogRepository,
     connectivityMonitor: ConnectivityMonitor(apiClient.dio),
   );
-  await state.initialize();
+  await state.initialize(startRemoteServices: startRemoteServices);
   debugPrint('[PERF] bootstrap_total_ms=${total.elapsedMilliseconds}');
   return state;
 }
@@ -192,9 +274,13 @@ class _AppBootstrapShellState extends State<AppBootstrapShell> {
       final state =
           await (widget.bootstrapLoader?.call(report) ??
                   bootstrap(onStatus: report))
-              .timeout(const Duration(seconds: 30));
+              .timeout(const Duration(minutes: 3));
       if (mounted) setState(() => _state = state);
-    } on Object catch (error) {
+    } on Object catch (error, stackTrace) {
+      debugPrint(
+        '[BOOTSTRAP] failure runtimeType=${error.runtimeType} error=$error\n'
+        '$stackTrace',
+      );
       if (mounted) setState(() => _error = error);
     } finally {
       if (mounted) setState(() => _running = false);

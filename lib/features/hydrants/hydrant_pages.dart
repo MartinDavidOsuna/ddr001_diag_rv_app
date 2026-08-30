@@ -13,6 +13,8 @@ import '../../domain/filters/hydrant_filter_request.dart';
 import '../../domain/models/app_models.dart';
 import '../../domain/filters/hydrant_query_projection.dart';
 import '../../domain/functional/functional_models.dart';
+import '../home/rv_work_dashboard.dart';
+import '../inspections/domain/rv_visual_document_classification.dart';
 import '../../domain/inspections/visual_inspection.dart';
 import 'widgets/auto_visible_filter_bar.dart';
 
@@ -34,7 +36,8 @@ String syncLabel(SyncStatus s) => switch (s) {
 };
 
 class HydrantsPage extends StatefulWidget {
-  const HydrantsPage({super.key});
+  const HydrantsPage({this.workGroup, super.key});
+  final String? workGroup;
   @override
   State<HydrantsPage> createState() => _HydrantsPageState();
 }
@@ -42,12 +45,85 @@ class HydrantsPage extends StatefulWidget {
 class _HydrantsPageState extends State<HydrantsPage> {
   String query = '';
   final searchController = TextEditingController();
+  final searchFocusNode = FocusNode();
   OverlayEntry? assignmentNotice;
   String? preparedHomeRequestId;
+  AppState? _state;
+  RvWorkGroup? _dashboardGroup;
+  List<_SearchableHydrant> _searchableHydrants = const [];
+  int _pendingCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    searchFocusNode.addListener(_onSearchFocusChanged);
+  }
+
+  void _onSearchFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final state = context.read<AppState>();
+    if (identical(_state, state)) return;
+    _state?.removeListener(_onAppStateChanged);
+    _state = state;
+    state.addListener(_onAppStateChanged);
+    _prepareProjection(state);
+  }
+
+  void _onAppStateChanged() {
+    final state = _state;
+    if (!mounted || state == null) return;
+    _prepareProjection(state);
+    setState(() {});
+  }
+
+  @override
+  void didUpdateWidget(covariant HydrantsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.workGroup != widget.workGroup && _state != null) {
+      _prepareProjection(_state!);
+    }
+  }
+
+  void _prepareProjection(AppState state) {
+    final request = state.hydrantFilterRequest;
+    if (request?.source == HydrantFilterRequestSource.home &&
+        request?.id != preparedHomeRequestId) {
+      preparedHomeRequestId = request?.id;
+      query = '';
+      searchController.clear();
+    }
+    _dashboardGroup = RvWorkGroup.values
+        .where((group) => group.name == widget.workGroup)
+        .firstOrNull;
+    final dashboardIds = _dashboardGroup == null
+        ? null
+        : RvWorkDashboardProjection.byHydrant(
+            drafts: state.rvDraftRepository.all(),
+            hydrants: state.hydrants,
+          )[_dashboardGroup]!;
+    final hydrants = dashboardIds == null
+        ? state.hydrantsForFilter(state.hydrantListFilter)
+        : state.hydrants
+              .where((hydrant) => dashboardIds.contains(hydrant.id))
+              .toList(growable: false);
+    _searchableHydrants = [
+      for (final hydrant in hydrants)
+        _SearchableHydrant(hydrant, hydrant.code.toLowerCase()),
+    ];
+    _pendingCount = state.pendingCount;
+  }
 
   @override
   void dispose() {
     assignmentNotice?.remove();
+    _state?.removeListener(_onAppStateChanged);
+    searchFocusNode.removeListener(_onSearchFocusChanged);
+    searchFocusNode.dispose();
     searchController.dispose();
     super.dispose();
   }
@@ -101,28 +177,21 @@ class _HydrantsPageState extends State<HydrantsPage> {
     });
   }
 
-  bool matchesSearch(Hydrant h) => '${h.code} ${h.locality} ${h.parcel}'
-      .toLowerCase()
-      .contains(query.toLowerCase());
-
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
-    final request = state.hydrantFilterRequest;
-    if (request?.source == HydrantFilterRequestSource.home &&
-        request?.id != preparedHomeRequestId) {
-      preparedHomeRequestId = request?.id;
-      query = '';
-      searchController.clear();
-    }
-    final items = state
-        .hydrantsForFilter(state.hydrantListFilter)
-        .where(matchesSearch)
-        .toList();
+    final state = _state ?? context.read<AppState>();
+    final normalizedQuery = query.trim().toLowerCase();
+    final items = normalizedQuery.isEmpty
+        ? _searchableHydrants
+        : _searchableHydrants
+              .where((entry) => entry.normalizedCode.contains(normalizedQuery))
+              .toList(growable: false);
     return Scaffold(
       appBar: AppPageHeader(
         title: 'Hidrantes',
-        subtitle: '${state.hydrants.length} asignados',
+        subtitle: _dashboardGroup == null
+            ? '${state.hydrants.length} asignados'
+            : _dashboardGroup!.label,
         actions: [
           IconButton(
             constraints: const BoxConstraints.tightFor(width: 48, height: 48),
@@ -145,31 +214,38 @@ class _HydrantsPageState extends State<HydrantsPage> {
             child: ConnectionBadge(
               online: state.online,
               state: state.connectivityState,
-              pending: state.pendingCount > 0,
+              transport: state.connectivityMonitor?.transport,
+              pending: _pendingCount > 0,
             ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: state.editingRestricted
-            ? null
-            : () {
-                state.trace('new_survey_open', 'Abrir nuevo levantamiento');
-                context.push('/hydrants/new');
-              },
-        icon: const Icon(Icons.add_location_alt_outlined),
-        label: const Text('NUEVO LEVANTAMIENTO'),
-      ),
+      floatingActionButton: searchFocusNode.hasFocus
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: state.editingRestricted
+                  ? null
+                  : () {
+                      state.trace(
+                        'new_survey_open',
+                        'Abrir nuevo levantamiento',
+                      );
+                      context.push('/hydrants/new');
+                    },
+              icon: const Icon(Icons.add_location_alt_outlined),
+              label: const Text('NUEVO LEVANTAMIENTO'),
+            ),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
             child: TextField(
               controller: searchController,
+              focusNode: searchFocusNode,
               onChanged: (v) => setState(() => query = v),
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.search),
-                hintText: 'Buscar código, localidad, parcela...',
+                hintText: 'Buscar número de cuenta...',
               ),
             ),
           ),
@@ -238,14 +314,14 @@ class _HydrantsPageState extends State<HydrantsPage> {
                     itemCount: items.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 9),
                     itemBuilder: (_, i) => HydrantCard(
-                      hydrant: items[i],
+                      hydrant: items[i].hydrant,
                       onTap: () {
                         state.trace(
                           'hydrant_open',
                           'Abrir ficha de hidrante',
-                          hydrantId: items[i].id,
+                          hydrantId: items[i].hydrant.id,
                         );
-                        context.push('/hydrants/${items[i].id}');
+                        context.push('/hydrants/${items[i].hydrant.id}');
                       },
                     ),
                   ),
@@ -295,17 +371,26 @@ class _HydrantsPageState extends State<HydrantsPage> {
   };
 }
 
+class _SearchableHydrant {
+  const _SearchableHydrant(this.hydrant, this.normalizedCode);
+
+  final Hydrant hydrant;
+  final String normalizedCode;
+}
+
 class HydrantCard extends StatelessWidget {
   const HydrantCard({required this.hydrant, required this.onTap, super.key});
   final Hydrant hydrant;
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
-    final functional = state.functionalSummary(hydrant.id);
+    final state = context.read<AppState>();
+    final functional = AppConfig.rvOnly
+        ? null
+        : state.functionalSummary(hydrant.id);
     final isB =
-        !AppConfig.rvOnly && functional.status != InspectionStatus.notRequired;
-    final summary = isB ? functional : hydrant.f02a;
+        functional != null && functional.status != InspectionStatus.notRequired;
+    final InspectionSummary summary = isB ? functional : hydrant.f02a;
     final compactStatus = isB
         ? state.functionalStateLabel(hydrant.id)
         : statusLabel(summary.status);
@@ -338,11 +423,6 @@ class HydrantCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 3),
-              Text(
-                '${hydrant.locality} · ${hydrant.parcel}',
-                style: const TextStyle(color: AppColors.muted, fontSize: 12),
-              ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 6,
@@ -355,14 +435,6 @@ class HydrantCard extends StatelessWidget {
                     color: color,
                   ),
                   StatusBadge(compactStatus, color: color),
-                  StatusBadge(
-                    hydrant.priority == PriorityLevel.high
-                        ? 'Alta'
-                        : hydrant.priority == PriorityLevel.medium
-                        ? 'Media'
-                        : 'Baja',
-                    color: AppColors.orange,
-                  ),
                   if (reviewRemoval)
                     const StatusBadge(
                       'Retirada · revisar',
@@ -436,13 +508,19 @@ class HydrantDetailPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final h = state.hydrant(id);
-    final functionalSummary = state.functionalSummary(id);
+    final functionalSummary = AppConfig.rvOnly
+        ? h.f02b
+        : state.functionalSummary(id);
     final visualHistory = state.visualInspectionRepository.forHydrant(id);
-    final functionalHistory = state.functionalInspectionRepository.forHydrant(
-      id,
-    );
+    final activeDraft = state.rvDraftRepository.activeFor(id);
+    final canDeleteLocalDraft =
+        activeDraft != null &&
+        state.canDeleteUnsyncedLocalDraft(activeDraft.clientInspectionId);
+    final functionalHistory = AppConfig.rvOnly
+        ? const <FunctionalInspection>[]
+        : state.functionalInspectionRepository.forHydrant(id);
     return Scaffold(
-      appBar: AppPageHeader(title: h.code, subtitle: h.locality),
+      appBar: AppPageHeader(title: h.code, subtitle: 'Reporte técnico'),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -488,19 +566,43 @@ class HydrantDetailPage extends StatelessWidget {
                   ],
                 ),
                 Text(
-                  '${h.locality} · ${h.parcel} · Hidrante inteligente',
+                  h.lastStatusChangedAt == null
+                      ? 'Hidrante inteligente'
+                      : 'Último cambio: ${h.lastStatusChangedAt!.toLocal()}',
                   style: const TextStyle(color: AppColors.muted),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 16),
+          if (!h.availableForRv)
+            FilledButton.icon(
+              onPressed: () =>
+                  context.push('/visual-report/${Uri.encodeComponent(h.code)}'),
+              icon: const Icon(Icons.description_outlined),
+              label: const Text('Ver reporte RV vigente'),
+            ),
+          if (!h.availableForRv) const SizedBox(height: 12),
           DiagnosticCard(
             type: ReportTypeLabels.visualFull,
             summary: h.f02a,
             color: AppColors.teal,
             onPressed: () => _openInspection(context, state, h.f02a, 'a'),
           ),
+          if (canDeleteLocalDraft) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              key: const ValueKey('archive-local-rv'),
+              style: OutlinedButton.styleFrom(foregroundColor: AppColors.red),
+              onPressed: () => _deleteLocalDraft(
+                context,
+                state,
+                activeDraft.clientInspectionId,
+              ),
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Archivar revisión local'),
+            ),
+          ],
           const SizedBox(height: 13),
           if (!AppConfig.rvOnly)
             DiagnosticCard(
@@ -549,13 +651,32 @@ class HydrantDetailPage extends StatelessWidget {
                 title: const Text('Original y revisiones'),
                 children: [
                   for (final report in visualHistory)
-                    ListTile(
-                      title: Text(
-                        'RV · ${report.revisionNumber == 0 ? 'Original' : 'Revisión ${report.revisionNumber}'}',
-                      ),
-                      subtitle: Text(
-                        '${report.revisionReason.isEmpty ? 'Sin motivo de revisión' : report.revisionReason}\n${report.updatedAt.toLocal()}${report.activeRevision ? ' · Vigente' : ''}',
-                      ),
+                    Builder(
+                      builder: (context) {
+                        final inactive = isInactiveRvDocument(report);
+                        return ListTile(
+                          onTap: () => inactive
+                              ? context.push(
+                                  '/hydrants/${report.hydrantId}/inspection/a/'
+                                  'summary/${report.id}',
+                                )
+                              : context.push(
+                                  '/visual-report/${Uri.encodeComponent(h.code)}',
+                                ),
+                          title: Text(
+                            inactive
+                                ? 'RV · Inactivo'
+                                : 'RV · ${report.revisionNumber == 0 ? 'Original' : 'Revisión ${report.revisionNumber}'}',
+                          ),
+                          subtitle: Text(
+                            '${inactive
+                                ? 'No hay hidrante en la ubicación capturada'
+                                : report.revisionReason.isEmpty
+                                ? 'Sin motivo de revisión'
+                                : report.revisionReason}\n${report.updatedAt.toLocal()}${report.activeRevision ? ' · Vigente' : ''}',
+                          ),
+                        );
+                      },
                     ),
                   if (!AppConfig.rvOnly)
                     for (final report in functionalHistory)
@@ -572,9 +693,7 @@ class HydrantDetailPage extends StatelessWidget {
             ),
           ],
           if (state.user.role.toLowerCase().contains('supervisor') &&
-              (visualHistory.any(
-                    (report) => report.status == InspectionStatus.completed,
-                  ) ||
+              (visualHistory.any(isNormalCompletedRvDocument) ||
                   (!AppConfig.rvOnly &&
                       functionalHistory.any(
                         (report) =>
@@ -598,16 +717,50 @@ class HydrantDetailPage extends StatelessWidget {
     );
   }
 
+  Future<void> _deleteLocalDraft(
+    BuildContext context,
+    AppState state,
+    String clientInspectionId,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Archivar revisión local'),
+        content: const Text(
+          'La revisión dejará de mostrarse como activa. El documento, sus '
+          'fotografías y evidencias se conservarán para recuperación y auditoría.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Archivar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await state.deleteUnsyncedLocalDraft(clientInspectionId);
+      if (context.mounted) context.go('/home');
+    } on StateError catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message.toString())));
+    }
+  }
+
   Future<void> _createRevision(
     BuildContext context,
     AppState state, {
     required List<VisualInspection> visualHistory,
     required List<FunctionalInspection> functionalHistory,
   }) async {
-    String type =
-        visualHistory.any(
-          (report) => report.status == InspectionStatus.completed,
-        )
+    String type = visualHistory.any(isNormalCompletedRvDocument)
         ? 'visual'
         : 'functional';
     final reasonController = TextEditingController();
@@ -622,9 +775,7 @@ class HydrantDetailPage extends StatelessWidget {
               DropdownButtonFormField<String>(
                 initialValue: type,
                 items: [
-                  if (visualHistory.any(
-                    (report) => report.status == InspectionStatus.completed,
-                  ))
+                  if (visualHistory.any(isNormalCompletedRvDocument))
                     const DropdownMenuItem(
                       value: 'visual',
                       child: Text('REPORTE VISUAL'),
@@ -666,9 +817,7 @@ class HydrantDetailPage extends StatelessWidget {
     reasonController.dispose();
     if (accepted != true || reason.isEmpty) return;
     if (type == 'visual') {
-      final original = visualHistory.firstWhere(
-        (report) => report.status == InspectionStatus.completed,
-      );
+      final original = visualHistory.firstWhere(isNormalCompletedRvDocument);
       await state.visualInspectionRepository.createRevision(
         original,
         state.user,
@@ -705,6 +854,13 @@ class HydrantDetailPage extends StatelessWidget {
     InspectionSummary summary,
     String type,
   ) {
+    if (type == 'a' &&
+        (summary.status == InspectionStatus.completed ||
+            summary.status == InspectionStatus.validated)) {
+      final account = state.hydrant(id).code;
+      context.push('/visual-report/${Uri.encodeComponent(account)}');
+      return;
+    }
     if (state.editingRestricted &&
         summary.status != InspectionStatus.completed &&
         summary.status != InspectionStatus.inProgress &&

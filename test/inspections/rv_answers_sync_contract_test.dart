@@ -181,6 +181,7 @@ void main() {
     expect(exception.kind, ApiErrorKind.validation);
     expect(exception.requestId, 'request-fixture');
     expect(exception.field, 'answers.1.value');
-    expect(exception.message, contains('Expected number'));
+    expect(exception.message, contains('datos no son válidos'));
+    expect(exception.message, isNot(contains('Expected number')));
   });
 }

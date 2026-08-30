@@ -317,6 +317,16 @@ abstract final class VisualComponentRules {
         ),
       );
     }
+    if (value.componentType == VisualComponentType.pilotValve &&
+        value.presenceAnswer == PresenceAnswer.installed &&
+        value.specificData.pilotConnected == null) {
+      issues.add(
+        const VisualComponentValidationIssue(
+          'pilotConnected',
+          'Indica si el piloto está conectado.',
+        ),
+      );
+    }
     if (!value.explicitlyConfirmed) {
       issues.add(
         const VisualComponentValidationIssue(

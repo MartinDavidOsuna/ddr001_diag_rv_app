@@ -6,6 +6,7 @@ import '../../app/theme/app_theme.dart';
 import '../../core/services/app_state.dart';
 import '../../core/widgets/common_widgets.dart';
 import '../../domain/enums/app_enums.dart';
+import 'rv_work_dashboard.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -13,13 +14,15 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final drafts = state.rvDraftRepository.pending();
-    final submitted = state.hydrants
-        .where((item) => item.f02a.status == InspectionStatus.completed)
-        .length;
-    final inProgress = state.hydrants
-        .where((item) => item.f02a.status == InspectionStatus.inProgress)
-        .length;
+    final drafts = state.rvDraftRepository.all();
+    final grouped = RvWorkDashboardProjection.byHydrant(
+      drafts: drafts,
+      hydrants: state.hydrants,
+    );
+    final recent = RvWorkDashboardProjection.recent(
+      drafts: drafts,
+      hydrants: state.hydrants,
+    );
     return Scaffold(
       appBar: AppPageHeader(
         title: 'DIAGNOSTICO HIDRANTES',
@@ -27,7 +30,11 @@ class HomePage extends StatelessWidget {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: ConnectionBadge(online: state.online),
+            child: ConnectionBadge(
+              online: state.online,
+              state: state.connectivityState,
+              transport: state.connectivityMonitor?.transport,
+            ),
           ),
         ],
       ),
@@ -67,26 +74,20 @@ class HomePage extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _Count(
-                label: 'Borradores',
-                value: drafts.length,
-                color: AppColors.blue,
-              ),
-              _Count(
-                label: 'En proceso',
-                value: inProgress,
-                color: AppColors.teal,
-              ),
-              _Count(
-                label: 'Enviadas',
-                value: submitted,
-                color: AppColors.green,
-              ),
-              _Count(
-                label: 'Con error',
-                value: state.syncErrors,
-                color: AppColors.red,
-              ),
+              for (final group in RvWorkGroup.values)
+                _Count(
+                  label: group.label,
+                  value: grouped[group]!.length,
+                  color: switch (group) {
+                    RvWorkGroup.inProgress => AppColors.blue,
+                    RvWorkGroup.pendingSync => AppColors.orange,
+                    RvWorkGroup.submitted => AppColors.teal,
+                    RvWorkGroup.validated => AppColors.green,
+                    RvWorkGroup.returned ||
+                    RvWorkGroup.conflicts => AppColors.red,
+                  },
+                  onTap: () => context.go('/hydrants?workGroup=${group.name}'),
+                ),
             ],
           ),
           const SizedBox(height: 18),
@@ -110,6 +111,11 @@ class HomePage extends StatelessWidget {
             ],
           ),
           OutlinedButton.icon(
+            onPressed: () => context.push('/reviews'),
+            icon: const Icon(Icons.history),
+            label: const Text('Todas mis revisiones'),
+          ),
+          OutlinedButton.icon(
             onPressed: () => context.push('/sync'),
             icon: const Icon(Icons.sync),
             label: const Text('Sincronización'),
@@ -119,17 +125,17 @@ class HomePage extends StatelessWidget {
             'REVISIONES RECIENTES',
             style: TextStyle(fontWeight: FontWeight.w800),
           ),
-          if (state.hydrants.isEmpty)
+          if (recent.isEmpty)
             const SectionCard(
               child: Text('Todavía no has creado revisiones visuales.'),
             ),
-          for (final hydrant in state.hydrants.take(5))
+          for (final hydrant in recent)
             Card(
               child: ListTile(
                 leading: const Icon(Icons.assignment_outlined),
                 title: Text('Cuenta ${hydrant.code}'),
                 subtitle: Text(
-                  '${hydrant.locality} · ${_status(hydrant.f02a.status)}',
+                  '${_status(hydrant.f02a.status)} · ${hydrant.lastStatusChangedAt?.toLocal().toString().substring(0, 16) ?? 'Sin fecha remota'}',
                 ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => context.push('/hydrants/${hydrant.id}'),
@@ -148,31 +154,42 @@ class HomePage extends StatelessWidget {
 }
 
 class _Count extends StatelessWidget {
-  const _Count({required this.label, required this.value, required this.color});
+  const _Count({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.onTap,
+  });
   final String label;
   final int value;
   final Color color;
+  final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => Container(
-    width: 150,
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: .1),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '$value',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w900,
-            color: color,
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(12),
+    child: Container(
+      width: 150,
+      height: 92,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$value',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              color: color,
+            ),
           ),
-        ),
-        Text(label),
-      ],
+          Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
+        ],
+      ),
     ),
   );
 }

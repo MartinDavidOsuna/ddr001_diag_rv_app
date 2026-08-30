@@ -3,6 +3,8 @@
 *.log
 *.pyc
 *.swp
+*.apk
+*.aab
 .DS_Store
 .atom/
 .build/
@@ -32,6 +34,15 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/dist/
+/node_modules/
+
+# Local diagnostic and device-export artifacts
+.audit-*.xml
+**/logcat-*.txt
+**/*-logcat.txt
+**/device-exports/
+**/diagnostic-exports/
 
 # Symbolication related
 app.*.symbols

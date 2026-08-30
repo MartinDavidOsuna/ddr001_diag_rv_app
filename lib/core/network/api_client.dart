@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../features/auth/data/field_session_models.dart';
@@ -10,6 +11,9 @@ import '../config/app_config.dart';
 import 'api_exception.dart';
 
 class ApiClient {
+  static const _diagnostics = MethodChannel(
+    'com.aquafim.ddr001diag/api_diagnostics',
+  );
   ApiClient({
     required AppConfig config,
     required SessionStorage sessionStorage,
@@ -23,7 +27,7 @@ class ApiClient {
                  RegExp(r'/$'),
                  '',
                ),
-               connectTimeout: const Duration(seconds: 10),
+               connectTimeout: const Duration(seconds: 30),
                receiveTimeout: const Duration(seconds: 30),
                sendTimeout: const Duration(seconds: 30),
                headers: const {'Accept': 'application/json'},
@@ -176,6 +180,33 @@ class ApiClient {
   ) async {
     final request = error.requestOptions;
     _releaseRequest(request);
+    final responseData = error.response?.data;
+    final problem = responseData is Map ? responseData : const {};
+    final issues = (problem['errors'] as List? ?? const [])
+        .whereType<Map>()
+        .map(
+          (issue) =>
+              '${issue['code'] ?? '-'}:${issue['path'] is List ? (issue['path'] as List).join('.') : '-'}',
+        )
+        .take(8)
+        .join(',');
+    final safePath = request.path.replaceAll(
+      RegExp(
+        r'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',
+        caseSensitive: false,
+      ),
+      ':id',
+    );
+    final safeDiagnostic =
+        'method=${request.method} path=$safePath '
+        'status=${error.response?.statusCode ?? '-'} type=${error.type.name} '
+        'title=${problem['title'] ?? '-'} '
+        'code=${problem['code'] ?? '-'} requestId='
+        '${problem['requestId'] ?? error.response?.headers.value('x-request-id') ?? '-'} '
+        'issues=[$issues]';
+    unawaited(
+      _diagnostics.invokeMethod<void>('log', safeDiagnostic).catchError((_) {}),
+    );
     if (error.response?.statusCode != 401 ||
         request.extra['skipAuth'] == true ||
         request.extra['retriedAfterRefresh'] == true ||
@@ -278,7 +309,16 @@ class ApiClient {
   }
 
   static bool _isDefinitiveRefreshRejection(DioException error) =>
-      error.response?.statusCode == 401 || error.response?.statusCode == 403;
+      const {
+        'SESSION_REVOKED',
+        'USER_INACTIVE',
+        'DEVICE_BLOCKED',
+        'DEVICE_BINDING_REVOKED',
+      }.contains(
+        error.response?.data is Map
+            ? (error.response!.data as Map)['code']?.toString()
+            : null,
+      );
 
   Never rethrowAsApi(Object error) {
     if (error is ApiException) throw error;

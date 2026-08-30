@@ -4,12 +4,19 @@ import 'package:ddr001diag/core/network/api_client.dart';
 import 'package:ddr001diag/data/local/functional_repositories.dart';
 import 'package:ddr001diag/data/local/visual_inspection_repository.dart';
 import 'package:ddr001diag/domain/enums/hydrant_list_filter.dart';
+import 'package:ddr001diag/domain/enums/app_enums.dart';
+import 'package:ddr001diag/domain/inspections/visual_inspection.dart';
+import 'package:ddr001diag/domain/models/app_models.dart';
+import 'package:ddr001diag/features/checklist/data/checklist_models.dart';
 import 'package:ddr001diag/features/auth/data/field_session_repository.dart';
 import 'package:ddr001diag/features/hydrants/data/hydrant_repository.dart';
+import 'package:ddr001diag/features/hydrants/hydrant_pages.dart';
+import 'package:ddr001diag/features/hydrants/new_survey_page.dart';
 import 'package:ddr001diag/features/checklist/data/checklist_repository.dart';
 import 'package:ddr001diag/features/inspections/data/inspection_remote_repository.dart';
 import 'package:ddr001diag/features/inspections/data/inspection_sync_coordinator.dart';
 import 'package:ddr001diag/features/inspections/data/rv_draft_repository.dart';
+import 'package:ddr001diag/features/inspections/domain/rv_sync_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_ce/hive.dart';
@@ -25,6 +32,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late HiveTestEnvironment environment;
   late AppState state;
+  late _CountingVisualRepository visualRepository;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({'demo_session': true});
@@ -38,7 +46,7 @@ void main() {
       ),
       sessionStorage: storage,
     );
-    final visualRepository = VisualInspectionRepository(
+    visualRepository = _CountingVisualRepository(
       documents: Hive.box<String>('visual_inspections_v1'),
       index: Hive.box<String>('active_inspection_index_v1'),
     );
@@ -95,6 +103,104 @@ void main() {
     await environment.close();
   });
 
+  testWidgets('Nueva revisión siempre muestra INGRESAR MANUALMENTE', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: NewSurveyPage()),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('INGRESAR MANUALMENTE'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('register-manual-hydrant')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'búsqueda sobre 1190 hidrantes reutiliza la proyección y oculta el FAB',
+    (tester) async {
+      state.hydrants.addAll(List.generate(1190, _hydrant));
+
+      final projection = Stopwatch()..start();
+      expect(state.hydrantsForFilter(HydrantListFilter.all), hasLength(1190));
+      projection.stop();
+      debugPrint(
+        '[PERF][HYDRANTS] synthetic_1190_projection_ms='
+        '${projection.elapsedMilliseconds}',
+      );
+      expect(visualRepository.accessibleCalls, 0);
+
+      final initialRender = Stopwatch()..start();
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppState>.value(
+          value: state,
+          child: const MaterialApp(home: HydrantsPage()),
+        ),
+      );
+      await tester.pump();
+      initialRender.stop();
+      debugPrint(
+        '[PERF][HYDRANTS] synthetic_1190_initial_ms='
+        '${initialRender.elapsedMilliseconds}',
+      );
+
+      expect(find.text('1190 resultados'), findsOneWidget);
+      expect(find.text('NUEVO LEVANTAMIENTO'), findsOneWidget);
+      final archiveScansBeforeSearch = visualRepository.accessibleCalls;
+
+      await tester.tap(find.byType(TextField));
+      final searchRender = Stopwatch()..start();
+      await tester.enterText(find.byType(TextField), '1189');
+      await tester.pumpAndSettle();
+      searchRender.stop();
+      debugPrint(
+        '[PERF][HYDRANTS] synthetic_1190_search_ms='
+        '${searchRender.elapsedMilliseconds}',
+      );
+
+      expect(find.text('1 resultados'), findsOneWidget);
+      expect(
+        find.descendant(of: find.byType(Card), matching: find.text('1189')),
+        findsOneWidget,
+      );
+      expect(find.text('NUEVO LEVANTAMIENTO'), findsNothing);
+      expect(
+        visualRepository.accessibleCalls,
+        archiveScansBeforeSearch,
+        reason: 'escribir no debe volver a materializar revisiones',
+      );
+
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(find.text('NUEVO LEVANTAMIENTO'), findsOneWidget);
+    },
+  );
+
+  testWidgets('una notificación funcional refresca tarjetas sin observarlas', (
+    tester,
+  ) async {
+    state.hydrants.add(_hydrant(0));
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: HydrantsPage()),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('1'), findsWidgets);
+
+    state.hydrants[0] = _hydrant(1);
+    state.setHydrantListFilter(HydrantListFilter.all);
+    await tester.pump();
+
+    expect(find.text('2'), findsWidgets);
+  });
+
   test(
     'Inicio publica un request único que conserva filtro hasta consumirse',
     () {
@@ -128,6 +234,16 @@ void main() {
     },
   );
 
+  test('registrar una traza no reconstruye toda la interfaz', () async {
+    var notifications = 0;
+    state.addListener(() => notifications++);
+
+    await state.trace('synthetic-navigation', 'Navegación de prueba');
+
+    expect(notifications, 0);
+    expect(state.traceBox.length, 1);
+  });
+
   test('conteo y lista consultan la misma proyección central', () {
     for (final filter in const [
       HydrantListFilter.all,
@@ -142,6 +258,76 @@ void main() {
     }
   });
 
+  test(
+    'una revisión local adicional no se omite por una revisión oficial previa',
+    () async {
+      const official = Hydrant(
+        id: 'hydrant-1497',
+        code: '1497',
+        locality: '',
+        parcel: '',
+        priority: PriorityLevel.medium,
+        access: AccessType.vehicle,
+        syncStatus: SyncStatus.synced,
+        f02a: InspectionSummary(
+          type: InspectionType.f02A,
+          status: InspectionStatus.completed,
+          progress: 1,
+        ),
+        f02b: InspectionSummary(
+          type: InspectionType.f02B,
+          status: InspectionStatus.notRequired,
+          progress: 0,
+        ),
+        latitude: 0,
+        longitude: 0,
+        rvStatus: 'submitted',
+        officialInspectionId: 'official-report',
+        availableForRv: false,
+      );
+      state.hydrants.add(official);
+      final additional = await state.rvDraftRepository.openOrCreate(
+        hydrant: official.copyWith(
+          f02a: const InspectionSummary(
+            type: InspectionType.f02A,
+            status: InspectionStatus.pending,
+            progress: 0,
+          ),
+        ),
+        user: state.user,
+        checklist: DynamicChecklist(
+          id: 'rv',
+          code: 'rv',
+          version: 1,
+          title: 'RV',
+          etag: 'etag',
+          cachedAt: DateTime.now().toUtc(),
+          sections: const [],
+        ),
+      );
+      await state.trace('legacy_event', 'Traza previa', hydrantId: official.id);
+
+      expect(state.pendingDiagnostics, 1);
+      expect(state.hydrantsForFilter(HydrantListFilter.inProgress), [official]);
+      expect(state.profileTodayStats.pending, 0);
+      expect(state.profileTodayStats.unsynced, 1);
+      expect(state.profileTodayStats.submitted, 0);
+
+      await state.rvDraftRepository.save(
+        additional.copyWith(
+          localStatus: RvLocalStatus.submitted,
+          remoteStatus: 'submitted',
+          officialInspectionId: 'additional-official-report',
+        ),
+      );
+      expect(
+        state.pendingDiagnostics,
+        0,
+        reason: 'la misma revisión ya confirmada no debe reingresar a la cola',
+      );
+    },
+  );
+
   testWidgets('Perfil no expone simulación ni actualizaciones', (tester) async {
     await tester.pumpWidget(
       ChangeNotifierProvider<AppState>.value(
@@ -149,7 +335,7 @@ void main() {
         child: const MaterialApp(home: ProfilePage()),
       ),
     );
-    expect(find.text('ESTADÍSTICAS DE HOY'), findsOneWidget);
+    expect(find.text('ESTADÍSTICAS ACTUALES'), findsOneWidget);
     expect(find.text('Enviados'), findsOneWidget);
     expect(find.text('Simular conexión'), findsNothing);
     expect(find.text('Revisar actualización'), findsNothing);
@@ -175,4 +361,38 @@ void main() {
     expect(content.toLowerCase(), isNot(contains('demo')));
     expect(find.textContaining('demo', findRichText: true), findsNothing);
   });
+}
+
+Hydrant _hydrant(int index) => Hydrant(
+  id: 'hydrant-${index + 1}',
+  code: '${index + 1}',
+  locality: '',
+  parcel: '',
+  priority: PriorityLevel.medium,
+  access: AccessType.vehicle,
+  syncStatus: SyncStatus.synced,
+  f02a: const InspectionSummary(
+    type: InspectionType.f02A,
+    status: InspectionStatus.pending,
+    progress: 0,
+  ),
+  f02b: const InspectionSummary(
+    type: InspectionType.f02B,
+    status: InspectionStatus.notRequired,
+    progress: 0,
+  ),
+  latitude: 0,
+  longitude: 0,
+);
+
+class _CountingVisualRepository extends VisualInspectionRepository {
+  _CountingVisualRepository({required super.documents, required super.index});
+
+  int accessibleCalls = 0;
+
+  @override
+  List<VisualInspection> accessible() {
+    accessibleCalls++;
+    return super.accessible();
+  }
 }

@@ -15,7 +15,12 @@ void main() {
     if (directory.existsSync()) directory.deleteSync(recursive: true);
   });
 
-  InspectionPhoto photo(String id, String path, {DateTime? deletedAt}) {
+  InspectionPhoto photo(
+    String id,
+    String path, {
+    DateTime? deletedAt,
+    MediaSyncStatus syncStatus = MediaSyncStatus.pendingUpload,
+  }) {
     final now = DateTime.utc(2026, 7, 15);
     return InspectionPhoto(
       id: id,
@@ -37,7 +42,7 @@ void main() {
       capturedByName: 'Inspector',
       brigadeId: 'brigade',
       deviceId: 'device',
-      syncStatus: MediaSyncStatus.pendingUpload,
+      syncStatus: syncStatus,
       createdAt: now,
       updatedAt: now,
       deletedAt: deletedAt,
@@ -56,7 +61,11 @@ void main() {
           body: SectionPhotoCounter(
             photos: [
               photo('valid', validFile.path),
-              photo('missing', '${directory.path}/missing.jpg'),
+              photo(
+                'missing',
+                '${directory.path}/missing.jpg',
+                syncStatus: MediaSyncStatus.missingLocal,
+              ),
               photo('deleted', validFile.path, deletedAt: DateTime.utc(2026)),
             ],
             requiredEvidence: true,

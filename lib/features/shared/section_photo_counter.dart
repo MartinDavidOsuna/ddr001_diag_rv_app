@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
@@ -20,7 +18,6 @@ class SectionPhotoCounter extends StatelessWidget {
 
   bool _valid(InspectionPhoto photo) =>
       !photo.isDeleted &&
-      File(photo.localPath).existsSync() &&
       photo.fileSize > 0 &&
       photo.sha256.isNotEmpty &&
       !const {

@@ -2,6 +2,7 @@ import '../../core/persistence/versioned_json_codec.dart';
 import '../../domain/enums/app_enums.dart';
 import '../../domain/inspections/visual_inspection.dart';
 import '../../domain/models/app_models.dart';
+import '../../features/inspections/domain/rv_visual_document_classification.dart';
 import 'visual_inspection_repository.dart';
 
 enum CompletedVisualResolutionSource { document, legacyProjection, none }
@@ -33,7 +34,7 @@ class CompletedVisualReportResolver {
           VersionedJsonCodec.decode(raw).payload,
         );
         if (_sameCanonicalId(report.hydrantId, hydrant.id) &&
-            report.status == InspectionStatus.completed) {
+            isNormalCompletedRvDocument(report)) {
           candidates.add(report);
         }
       } on Object {

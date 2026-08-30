@@ -1,5 +1,10 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:hive_ce/hive.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/location/location_service.dart';
 import '../../../core/media/reliable_photo_service.dart';
@@ -41,7 +46,10 @@ class RvInspectionController extends ChangeNotifier {
   final validator = const RvValidator();
   RvDraft? draft;
   bool busy = false;
+  bool processingPhoto = false;
   String? message;
+  String? highlightedFocusKey;
+  Timer? _highlightTimer;
 
   Future<void> initialize() async {
     draft = await drafts.openOrCreate(
@@ -49,7 +57,83 @@ class RvInspectionController extends ChangeNotifier {
       user: user,
       checklist: checklist,
     );
+    await _recoverDurableCameraCaptures();
+    final target = draft?.navigationQuestionId ?? draft?.navigationFieldId;
+    if (target != null) _startHighlight(target);
     notifyListeners();
+  }
+
+  Future<void> _recoverDurableCameraCaptures() async {
+    final current = draft;
+    if (current == null || current.isReadOnly) return;
+    try {
+      await photoService.cleanupCommittedCaptureSources();
+      final recovered = await photoService.recoverPendingForInspection(
+        inspectionId: current.clientInspectionId,
+        userId: user.id,
+        userName: user.fullName,
+        brigadeId: user.brigadeId,
+        deviceId: user.deviceId,
+        localScopeNamespace: drafts.visualRepository.accessScopeNamespace,
+      );
+      if (recovered.isEmpty) return;
+      var next = current;
+      var changed = false;
+      final recoveredIds = <String>[];
+      for (final photo in recovered) {
+        if (photo.inspectionId.toLowerCase() !=
+                current.clientInspectionId.toLowerCase() ||
+            photo.hydrantId.toLowerCase() != current.hydrantId.toLowerCase() ||
+            photo.capturedByUserId.toLowerCase() != user.id.toLowerCase() ||
+            photo.deviceId.toLowerCase() != user.deviceId.toLowerCase()) {
+          throw StateError('La captura recuperada no pertenece a la revisión.');
+        }
+        final alreadyLinked = next.photos.values
+            .expand((values) => values)
+            .any((reference) => reference.photoId == photo.id);
+        if (!alreadyLinked) {
+          next = next.copyWith(
+            photos: {
+              ...next.photos,
+              photo.category: [
+                ...next.photosFor(photo.category),
+                RvPhotoReference(
+                  photoId: photo.id,
+                  slotCode: photo.category,
+                  status: RvPhotoUploadStatus.pending,
+                ),
+              ],
+            },
+            photosStatus: RvPartStatus.pending,
+            localStatus: RvLocalStatus.pendingPhotos,
+          );
+          changed = true;
+        }
+        recoveredIds.add(photo.id);
+      }
+      if (changed) {
+        draft = next;
+        await drafts.save(next);
+        message = 'Se recuperó una fotografía pendiente de la cámara.';
+      }
+      for (final photoId in recoveredIds) {
+        await photoService.markDraftLinkedAndCommitted(photoId);
+      }
+    } on Object catch (error) {
+      message = 'Existe una captura pendiente que requiere recuperación.';
+      if (kDebugMode) {
+        debugPrint('[RV][PHOTO_RECOVERY] ${error.runtimeType}');
+      }
+    }
+  }
+
+  void _startHighlight(String key) {
+    _highlightTimer?.cancel();
+    highlightedFocusKey = key;
+    _highlightTimer = Timer(const Duration(seconds: 3), () {
+      highlightedFocusKey = null;
+      notifyListeners();
+    });
   }
 
   Future<void> answer(
@@ -87,7 +171,7 @@ class RvInspectionController extends ChangeNotifier {
   Future<void> setActiveFormStep(int value) async {
     final current = draft;
     if (current == null) return;
-    final next = value.clamp(0, current.checklist.sections.length - 1);
+    final next = value.clamp(0, current.checklist.sections.length);
     if (next == current.activeFormStep) return;
     draft = current.copyWith(activeFormStep: next);
     await drafts.save(draft!);
@@ -97,7 +181,7 @@ class RvInspectionController extends ChangeNotifier {
   Future<bool> goToNextStep() async {
     final current = draft;
     if (current == null || busy || current.isReadOnly) return false;
-    final last = current.checklist.sections.length - 1;
+    final last = current.checklist.sections.length;
     if (current.activeFormStep >= last) return true;
     await setActiveFormStep(current.activeFormStep + 1);
     return false;
@@ -131,6 +215,7 @@ class RvInspectionController extends ChangeNotifier {
     String? questionId,
     String? subItemId,
     String? fieldId,
+    String? focusKey,
   }) async {
     final current = draft;
     if (current == null) return;
@@ -142,7 +227,25 @@ class RvInspectionController extends ChangeNotifier {
       returnToSummary: true,
     );
     await drafts.save(draft!);
+    _startHighlight(focusKey ?? questionId ?? fieldId ?? 'pending');
     notifyListeners();
+  }
+
+  Future<void> navigateToPending(RvPendingIssue issue) async {
+    final current = draft;
+    if (current == null) return;
+    final inferred = issue.sectionId == null
+        ? (issue.stepIndex ?? 0)
+        : current.checklist.sections.indexWhere(
+            (section) => section.id == issue.sectionId,
+          );
+    await navigateToIssue(
+      step: inferred < 0 ? (issue.stepIndex ?? 0) : inferred,
+      questionId: issue.questionId,
+      subItemId: issue.subItemId,
+      fieldId: issue.fieldId,
+      focusKey: issue.focusKey,
+    );
   }
 
   Future<void> clearNavigationTarget() async {
@@ -203,20 +306,18 @@ class RvInspectionController extends ChangeNotifier {
     required double longitude,
     double? altitude,
   }) => _run(() async {
-    if (latitude < -90 || latitude > 90) {
-      throw const FormatException('Latitud fuera de rango.');
-    }
-    if (longitude < -180 || longitude > 180) {
-      throw const FormatException('Longitud fuera de rango.');
+    final location = RvLocationSample(
+      latitude: latitude,
+      longitude: longitude,
+      altitude: altitude,
+      source: 'manual',
+      capturedAt: DateTime.now().toUtc(),
+    );
+    if (!location.isValid) {
+      throw const FormatException('La coordenada no es válida.');
     }
     draft = draft!.copyWith(
-      location: RvLocationSample(
-        latitude: latitude,
-        longitude: longitude,
-        altitude: altitude,
-        source: 'manual',
-        capturedAt: DateTime.now().toUtc(),
-      ),
+      location: location,
       locationStatus: RvPartStatus.pending,
       localStatus: RvLocalStatus.pendingLocation,
     );
@@ -224,43 +325,295 @@ class RvInspectionController extends ChangeNotifier {
     message = 'Ubicación manual guardada.';
   });
 
-  Future<void> addPhoto(String slot, ImageSource source) => _run(() async {
-    final stepBefore = draft!.activeFormStep;
-    final photo = await photoService.acquire(
-      pickerSource: source,
-      hydrantId: hydrant.id,
-      inspectionId: draft!.clientInspectionId,
-      category: slot,
-      evidenceRequirementId: slot,
-      userId: user.id,
-      userName: user.fullName,
-      brigadeId: user.brigadeId,
-      deviceId: user.deviceId,
-    );
-    if (photo == null) {
+  Future<void> addPhoto(String slot, ImageSource source) async {
+    final current = draft;
+    if (current == null || current.isReadOnly || processingPhoto) return;
+    final totalWatch = Stopwatch()..start();
+    final stepBefore = current.activeFormStep;
+    processingPhoto = true;
+    message = 'Procesando fotografía...';
+    notifyListeners();
+    try {
+      final photo = await photoService.acquire(
+        pickerSource: source,
+        hydrantId: hydrant.id,
+        inspectionId: draft!.clientInspectionId,
+        category: slot,
+        evidenceRequirementId: slot,
+        userId: user.id,
+        userName: user.fullName,
+        brigadeId: user.brigadeId,
+        deviceId: user.deviceId,
+        localScopeNamespace: drafts.visualRepository.accessScopeNamespace,
+      );
+      if (photo == null) {
+        _externalActionLog(stepBefore, slot);
+        return;
+      }
+      final photos = <String, List<RvPhotoReference>>{
+        ...draft!.photos,
+        slot: [
+          ...draft!.photosFor(slot),
+          RvPhotoReference(
+            photoId: photo.id,
+            slotCode: slot,
+            status: RvPhotoUploadStatus.pending,
+          ),
+        ],
+      };
+      draft = draft!.copyWith(
+        photos: photos,
+        photosStatus: RvPartStatus.pending,
+        localStatus: RvLocalStatus.pendingPhotos,
+      );
+      final draftWatch = Stopwatch()..start();
+      await drafts.save(draft!);
+      await photoService.markDraftLinkedAndCommitted(photo.id);
+      if (kDebugMode || kProfileMode) {
+        debugPrint(
+          '[PERF][PHOTO] draft_save_ms=${draftWatch.elapsedMilliseconds}',
+        );
+      }
       _externalActionLog(stepBefore, slot);
+      message = 'Fotografía capturada y guardada localmente.';
+    } on Object catch (error) {
+      message = 'No fue posible guardar la fotografía. Intenta nuevamente.';
+      if (kDebugMode) debugPrint('[RV][PHOTO] ${error.runtimeType}');
+    } finally {
+      processingPhoto = false;
+      if (kDebugMode || kProfileMode) {
+        debugPrint(
+          '[PERF][PHOTO] controller_total_ms=${totalWatch.elapsedMilliseconds}',
+        );
+      }
+      notifyListeners();
+    }
+  }
+
+  Future<void> addGeneralPhoto(ImageSource source) async {
+    final current = draft;
+    if (current == null ||
+        current.generalPhotos.length >= 5 ||
+        !current.canAddComplements) {
+      return;
+    }
+    final photoId = const Uuid().v4();
+    await addPhoto('general:$photoId', source);
+    final updated = draft;
+    if (updated == null) return;
+    var order = 0;
+    final photos = <String, List<RvPhotoReference>>{};
+    for (final entry in updated.photos.entries) {
+      photos[entry.key] = entry.value.map((photo) {
+        if (!photo.isGeneral) return photo;
+        order++;
+        return photo.copyWith(order: order);
+      }).toList();
+    }
+    draft = updated.copyWith(photos: photos);
+    await drafts.save(draft!);
+    notifyListeners();
+  }
+
+  Future<void> addInactiveEvidencePhoto(
+    ImageSource source, {
+    required String comment,
+  }) async {
+    final hadDraft = draft?.inactiveClosureDraft != null;
+    final before =
+        draft
+            ?.photosFor(noHydrantAtLocationPhotoSlot)
+            .map((photo) => photo.photoId)
+            .toSet() ??
+        const <String>{};
+    if (!await saveInactiveClosureDraft(comment, allowEmpty: true)) {
+      return;
+    }
+    await addPhoto(noHydrantAtLocationPhotoSlot, source);
+    final current = draft;
+    if (current == null ||
+        !current
+            .photosFor(noHydrantAtLocationPhotoSlot)
+            .any((photo) => !before.contains(photo.photoId))) {
+      if (!hadDraft && before.isEmpty && comment.trim().isEmpty) {
+        final priorMessage = message;
+        await discardInactiveClosureDraft();
+        message = priorMessage;
+        notifyListeners();
+      }
+      return;
+    }
+    await saveInactiveClosureDraft(comment);
+  }
+
+  Future<bool> saveInactiveClosureDraft(
+    String comment, {
+    bool allowEmpty = false,
+  }) async {
+    final current = draft;
+    if (current == null || busy || processingPhoto || current.isReadOnly) {
+      return false;
+    }
+    busy = true;
+    message = null;
+    notifyListeners();
+    try {
+      draft = await drafts.saveInactiveClosureDraft(
+        clientInspectionId: current.clientInspectionId,
+        user: user,
+        comment: comment,
+        allowEmpty: allowEmpty,
+      );
+      message = 'Reporte pendiente guardado localmente.';
+      return true;
+    } on StateError catch (error) {
+      message = '$error'.replaceFirst('Bad state: ', '');
+      return false;
+    } on Object catch (error) {
+      message = 'No fue posible guardar el reporte pendiente.';
+      if (kDebugMode) debugPrint('[RV][INACTIVE_DRAFT] ${error.runtimeType}');
+      return false;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> discardInactiveClosureDraft() async {
+    final current = draft;
+    if (current == null || busy || processingPhoto || current.isReadOnly) {
+      return false;
+    }
+    busy = true;
+    message = null;
+    notifyListeners();
+    try {
+      draft = await drafts.discardInactiveClosureDraft(
+        clientInspectionId: current.clientInspectionId,
+        user: user,
+      );
+      message = 'El reporte pendiente se descartó sin cambiar la revisión.';
+      return true;
+    } on StateError catch (error) {
+      message = '$error'.replaceFirst('Bad state: ', '');
+      return false;
+    } on Object catch (error) {
+      message = 'No fue posible descartar el reporte de forma segura.';
+      if (kDebugMode) debugPrint('[RV][INACTIVE_DISCARD] ${error.runtimeType}');
+      return false;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> closeAsInactive(String comment) async {
+    final current = draft;
+    if (current == null || busy || processingPhoto || current.isReadOnly) {
+      return false;
+    }
+    busy = true;
+    message = null;
+    notifyListeners();
+    try {
+      draft = await drafts.saveInactiveClosureDraft(
+        clientInspectionId: current.clientInspectionId,
+        user: user,
+        comment: comment,
+      );
+      draft = await drafts.closeAsInactive(
+        clientInspectionId: current.clientInspectionId,
+        user: user,
+        comment: comment,
+      );
+      message = 'Revisión cerrada como Inactiva y conservada localmente.';
+      return true;
+    } on StateError catch (error) {
+      message = '$error'.replaceFirst('Bad state: ', '');
+      return false;
+    } on Object catch (error) {
+      message = 'No fue posible confirmar el cierre local.';
+      if (kDebugMode) debugPrint('[RV][INACTIVE] ${error.runtimeType}');
+      return false;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateGeneralPhotoDescription(
+    String photoId,
+    String value,
+  ) async {
+    final current = draft;
+    if (current == null || value.length > 300) {
       return;
     }
     final photos = <String, List<RvPhotoReference>>{
-      ...draft!.photos,
-      slot: [
-        ...draft!.photosFor(slot),
-        RvPhotoReference(
-          photoId: photo.id,
-          slotCode: slot,
-          status: RvPhotoUploadStatus.pending,
-        ),
-      ],
+      for (final entry in current.photos.entries)
+        entry.key: entry.value
+            .map(
+              (photo) => photo.photoId == photoId
+                  ? photo.copyWith(
+                      description: value.trim(),
+                      clearDescription: value.trim().isEmpty,
+                    )
+                  : photo,
+            )
+            .toList(),
     };
-    draft = draft!.copyWith(
-      photos: photos,
-      photosStatus: RvPartStatus.pending,
-      localStatus: RvLocalStatus.pendingPhotos,
+    draft = current.copyWith(photos: photos, hasPendingChanges: true);
+    await drafts.save(draft!);
+    notifyListeners();
+  }
+
+  Future<void> saveGeneralObservations(String value) async {
+    final current = draft;
+    if (current == null || value.length > 2000 || !current.canAddComplements) {
+      return;
+    }
+    draft = current.copyWith(
+      generalObservations: value.trim().isEmpty ? null : value,
+      clearGeneralObservations: value.trim().isEmpty,
+      hasPendingChanges: true,
     );
     await drafts.save(draft!);
-    _externalActionLog(stepBefore, slot);
-    message = 'Fotografía capturada y guardada localmente.';
-  });
+    notifyListeners();
+  }
+
+  Future<void> removeGeneralPhoto(RvPhotoReference photo) async {
+    if (draft?.editingMode == RvEditingMode.validatedComplements &&
+        photo.status == RvPhotoUploadStatus.verified) {
+      return;
+    }
+    final current = draft;
+    if (current == null) return;
+    final photos = <String, List<RvPhotoReference>>{...current.photos}
+      ..remove(photo.slotCode);
+    var order = 0;
+    for (final entry in photos.entries.toList()) {
+      photos[entry.key] = entry.value.map((item) {
+        if (!item.isGeneral) return item;
+        order++;
+        return item.copyWith(order: order);
+      }).toList();
+    }
+    // A confirmed file is deliberately retained: only the next immutable
+    // version drops its association, so historical versions remain viewable.
+    draft = current.copyWith(
+      photos: photos,
+      photosStatus: RvPartStatus.pending,
+      hasPendingChanges: true,
+    );
+    await drafts.save(draft!);
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _highlightTimer?.cancel();
+    super.dispose();
+  }
 
   void _externalActionLog(int stepBefore, String slot) {
     if (!kDebugMode) return;
@@ -281,15 +634,17 @@ class RvInspectionController extends ChangeNotifier {
         .where((photo) => photo.photoId == photoId)
         .firstOrNull;
     if (reference == null) return;
-    if (reference.status == RvPhotoUploadStatus.verified) {
-      final serverInspectionId = draft!.serverInspectionId;
-      if (serverInspectionId == null) {
-        throw StateError('La inspección remota no está disponible.');
+    final photoBox = Hive.box<String>('inspection_photos_v1');
+    final rawPhoto = photoBox.get(photoId);
+    if (rawPhoto != null) {
+      try {
+        final json = Map<String, dynamic>.from(jsonDecode(rawPhoto) as Map);
+        json['deletedAt'] = DateTime.now().toUtc().toIso8601String();
+        json['lastError'] = 'archivedByTechnician';
+        await photoBox.put(photoId, jsonEncode(json));
+      } on Object {
+        // Preserve unreadable evidence unchanged; startup quarantine exposes it.
       }
-      await coordinator.remote.deletePhoto(
-        serverInspectionId,
-        reference.serverPhotoId ?? reference.photoId,
-      );
     }
     final photos = <String, List<RvPhotoReference>>{...draft!.photos};
     final remaining = draft!
@@ -303,6 +658,12 @@ class RvInspectionController extends ChangeNotifier {
   }
 
   Future<void> synchronize({bool submit = false}) => _run(() async {
+    if (draft!.inactiveClosureDraft != null ||
+        draft!.photosFor(noHydrantAtLocationPhotoSlot).isNotEmpty) {
+      message =
+          'Continúa o descarta el reporte “No hay hidrante” desde el paso 1.';
+      return;
+    }
     await catalogs?.synchronizePending();
     await _reconcileCatalogAnswers();
     draft = await coordinator.synchronize(draft!, submit: submit);
@@ -372,11 +733,6 @@ class RvInspectionController extends ChangeNotifier {
     );
     await drafts.save(draft!);
   }
-
-  Future<void> cancel(String reason) => _run(() async {
-    draft = await coordinator.cancel(draft!, reason);
-    message = 'Inspección cancelada.';
-  });
 
   Future<void> _run(
     Future<void> Function() action, {

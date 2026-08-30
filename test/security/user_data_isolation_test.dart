@@ -1,9 +1,16 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:ddr001diag/core/security/local_data_scope.dart';
 import 'package:ddr001diag/data/local/sync_queue_repository.dart';
 import 'package:ddr001diag/data/local/visual_inspection_repository.dart';
 import 'package:ddr001diag/domain/enums/app_enums.dart';
 import 'package:ddr001diag/domain/models/app_models.dart';
+import 'package:ddr001diag/domain/media/inspection_photo.dart';
 import 'package:ddr001diag/domain/sync/sync_queue_item.dart';
+import 'package:ddr001diag/features/checklist/data/checklist_models.dart';
+import 'package:ddr001diag/features/inspections/data/rv_draft_repository.dart';
+import 'package:ddr001diag/features/inspections/domain/rv_sync_state.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -13,6 +20,7 @@ void main() {
   late HiveTestEnvironment hive;
   late VisualInspectionRepository inspections;
   late SyncQueueRepository queue;
+  late RvDraftRepository rvDrafts;
 
   const userA = AppUser(
     id: 'user-a',
@@ -62,6 +70,7 @@ void main() {
       index: Hive.box<String>('active_inspection_index_v1'),
     );
     queue = SyncQueueRepository(Hive.box<String>('sync_queue'));
+    rvDrafts = RvDraftRepository(inspections);
   });
 
   tearDown(() => hive.close());
@@ -91,6 +100,200 @@ void main() {
         'active_inspection_index_v1',
       ).keys.where((key) => '$key'.contains('staging')).isEmpty,
       isTrue,
+    );
+  });
+
+  test(
+    'una revisión terminada conserva historial y permite una nueva',
+    () async {
+      inspections.setAccessScope(scope('user-a', 'crew-a'));
+      final first = await inspections.openOrCreate(hydrant, userA);
+      await inspections.save(
+        first.copyWith(
+          status: InspectionStatus.completed,
+          completedAt: DateTime.utc(2026, 8, 13),
+        ),
+      );
+
+      final second = await inspections.openOrCreate(hydrant, userA);
+
+      expect(second.id, isNot(first.id));
+      expect(
+        inspections.findById(first.id)?.status,
+        InspectionStatus.completed,
+      );
+      expect(inspections.forHydrant(hydrant.id), hasLength(2));
+      expect(inspections.hasLocalInspection(hydrant.id), isTrue);
+    },
+  );
+
+  test('sólo el creador puede archivar su borrador sin borrarlo', () async {
+    inspections.setAccessScope(scope('user-a', 'crew-a'));
+    final draft = await inspections.openOrCreate(hydrant, userA);
+
+    await expectLater(
+      inspections.deleteLocalDraft(draft.id, creatorId: 'user-b'),
+      throwsStateError,
+    );
+    expect(inspections.findById(draft.id), isNotNull);
+
+    await inspections.deleteLocalDraft(draft.id, creatorId: 'user-a');
+    expect(inspections.findById(draft.id), isNotNull);
+    expect(
+      inspections.findById(draft.id)?.unknownFields['archiveState'],
+      'archived',
+    );
+    expect(inspections.hasLocalInspection(hydrant.id), isFalse);
+  });
+
+  test('la revisión nunca sincronizada se archiva sin pérdida', () async {
+    inspections.setAccessScope(scope('user-a', 'crew-a'));
+    final now = DateTime.utc(2026, 8, 8);
+    final draft = await rvDrafts.openOrCreate(
+      hydrant: hydrant,
+      user: userA,
+      checklist: DynamicChecklist(
+        id: 'rv',
+        code: 'rv',
+        version: 1,
+        title: 'RV',
+        etag: 'etag',
+        cachedAt: now,
+        sections: const [],
+      ),
+    );
+
+    expect(
+      rvDrafts.canDeleteUnsyncedLocal(
+        clientInspectionId: draft.clientInspectionId,
+        creatorId: 'user-a',
+      ),
+      isTrue,
+    );
+    expect(
+      rvDrafts.canDeleteUnsyncedLocal(
+        clientInspectionId: draft.clientInspectionId,
+        creatorId: 'user-b',
+      ),
+      isFalse,
+    );
+
+    final partiallySynchronized = draft.copyWith(
+      serverInspectionId: 'remote-partial-draft',
+    );
+    await rvDrafts.save(partiallySynchronized);
+    expect(
+      rvDrafts.canDeleteUnsyncedLocal(
+        clientInspectionId: draft.clientInspectionId,
+        creatorId: 'user-a',
+      ),
+      isTrue,
+      reason: 'crear parcialmente en API no equivale a enviar el reporte',
+    );
+
+    await rvDrafts.deleteUnsyncedLocal(
+      clientInspectionId: draft.clientInspectionId,
+      creatorId: 'user-a',
+    );
+    expect(rvDrafts.find(draft.clientInspectionId), isNotNull);
+    expect(
+      rvDrafts.find(draft.clientInspectionId)?.localStatus,
+      RvLocalStatus.cancelled,
+    );
+    expect(inspections.hasLocalInspection(hydrant.id), isFalse);
+  });
+
+  test(
+    'upgrade recupera foto física no referenciada de forma idempotente',
+    () async {
+      inspections.setAccessScope(scope('user-a', 'crew-a'));
+      final draft = await rvDrafts.openOrCreate(
+        hydrant: hydrant,
+        user: userA,
+        checklist: DynamicChecklist(
+          id: 'rv-upgrade',
+          code: 'rv',
+          version: 1,
+          title: 'RV',
+          etag: 'legacy-100',
+          cachedAt: DateTime.utc(2026, 8, 8),
+          sections: const [],
+        ),
+      );
+      final original = File('${hive.directory.path}/field-995.jpg')
+        ..writeAsBytesSync([1, 2, 3, 4]);
+      final thumb = File('${hive.directory.path}/field-995-thumb.jpg')
+        ..writeAsBytesSync([1]);
+      final now = DateTime.utc(2026, 8, 8);
+      final photo = InspectionPhoto(
+        id: 'photo-field-995',
+        hydrantId: hydrant.id,
+        inspectionId: draft.clientInspectionId,
+        category: 'front_closed',
+        source: PhotoSource.camera,
+        originalFilename: 'field-995.jpg',
+        normalizedFilename: 'field-995.jpg',
+        localPath: original.path,
+        thumbnailPath: thumb.path,
+        mimeType: 'image/jpeg',
+        fileSize: 4,
+        width: 1000,
+        height: 1000,
+        sha256: 'anonymous-field-sha',
+        capturedAt: now,
+        capturedByUserId: userA.id,
+        capturedByName: userA.fullName,
+        brigadeId: userA.brigadeId,
+        deviceId: userA.deviceId,
+        createdAt: now,
+        updatedAt: now,
+      );
+      await Hive.box<String>(
+        'inspection_photos_v1',
+      ).put(photo.id, jsonEncode(photo.toJson()));
+
+      expect(await rvDrafts.reconcileOrphanedPhotoReferences(), 1);
+      expect(await rvDrafts.reconcileOrphanedPhotoReferences(), 0);
+      final recovered = rvDrafts.find(draft.clientInspectionId)!;
+      expect(recovered.photosFor('front_closed'), hasLength(1));
+      expect(recovered.photosFor('front_closed').single.photoId, photo.id);
+      expect(original.existsSync(), isTrue);
+      expect(
+        Hive.box<String>('media_work_queue_v1').get(photo.id),
+        contains('"schemaVersion":2'),
+      );
+    },
+  );
+
+  test('a completed local document cannot be deleted as a draft', () async {
+    inspections.setAccessScope(scope('user-a', 'crew-a'));
+    final draft = await rvDrafts.openOrCreate(
+      hydrant: hydrant,
+      user: userA,
+      checklist: DynamicChecklist(
+        id: 'rv-final',
+        code: 'rv',
+        version: 1,
+        title: 'RV',
+        etag: 'etag-final',
+        cachedAt: DateTime.utc(2026, 8, 8),
+        sections: const [],
+      ),
+    );
+    final document = inspections.findById(draft.clientInspectionId)!;
+    await inspections.save(
+      document.copyWith(
+        status: InspectionStatus.completed,
+        completedAt: DateTime.utc(2026, 8, 8, 20),
+      ),
+    );
+
+    expect(
+      rvDrafts.canDeleteUnsyncedLocal(
+        clientInspectionId: draft.clientInspectionId,
+        creatorId: 'user-a',
+      ),
+      isFalse,
     );
   });
 
