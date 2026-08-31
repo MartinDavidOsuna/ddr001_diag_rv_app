@@ -18,6 +18,14 @@ No se encontró una APK `0.2.39+61`. Sí se encontraron APKs Git históricas
 `0.2.25+38` y `0.2.26+39`, diagnósticos v60 y APKs certificadas `1.0.0` a
 `1.0.16`; no se usa una APK inexistente como evidencia.
 
+En el worktree local de release se recuperaron tres APK productivas
+`1.0.16+116`. Las dos generadas a las 20:30/20:38 todavía tenían el label
+`DIAGNOSTICO HIDRANTES`; la más tardía,
+`dist/apk/DDR001_RV_1.0.16+116.apk` (21:03), tiene package productivo, label
+`AQ DV DDR001` y certificado AQUAFIM
+`d1d9ec17be22dff0320afed5c2e3031e013738beaee35c7303fd8ac18485af2c`.
+Por fecha y empaquetado final, ésta es la evidencia APK Android autoritativa.
+
 ## Matriz semántica
 
 | Cambio/intención | Fuente | Presente en main | Ausente en main | Debe recuperarse | Cubierto por hardening actual |
@@ -96,6 +104,13 @@ Los raster `ic_launcher`/`ic_launcher_round`, adaptive icons y monochrome de
 referenciando `@string/app_name` y `@mipmap/ic_launcher`; se añadirá
 `android:roundIcon="@mipmap/ic_launcher_round"` para declarar explícitamente el
 recurso redondo ya existente.
+
+La inspección de strings AOT de la APK productiva final `1.0.16+116` confirma
+`Pendientes`, `Todas mis revisiones`, `Todo sincronizado` e
+`INGRESAR MANUALMENTE`, y confirma la ausencia de `Pendientes de sincronizar` y
+`Mis hidrantes`. `Mapa general` permanece en el binario porque su ruta se
+conserva; su presencia no demuestra un botón de Home. La APK actual reconstruida
+presenta el mismo conjunto de strings relevante.
 
 ## Límites de recuperación
 
