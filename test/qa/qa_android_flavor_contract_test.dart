@@ -28,6 +28,49 @@ void main() {
     );
   });
 
+  test('producción conserva label, launcher adaptive y round aprobados', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    final strings = File(
+      'android/app/src/main/res/values/strings.xml',
+    ).readAsStringSync();
+    final foreground = File(
+      'android/app/src/main/res/drawable/launcher_icon_foreground.xml',
+    ).readAsStringSync();
+    final adaptive = File(
+      'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml',
+    ).readAsStringSync();
+    final round = File(
+      'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml',
+    ).readAsStringSync();
+
+    expect(manifest, contains('android:label="@string/app_name"'));
+    expect(manifest, contains('android:icon="@mipmap/ic_launcher"'));
+    expect(manifest, contains('android:roundIcon="@mipmap/ic_launcher_round"'));
+    expect(strings, contains('<string name="app_name">AQ DV DDR001</string>'));
+    expect(foreground, contains('android:inset="18%"'));
+    for (final icon in [adaptive, round]) {
+      expect(icon, contains('@color/launcher_icon_background'));
+      expect(icon, contains('@drawable/launcher_icon_foreground'));
+      expect(icon, contains('<monochrome'));
+    }
+    for (final density in ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']) {
+      expect(
+        File(
+          'android/app/src/main/res/mipmap-$density/ic_launcher.png',
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(
+          'android/app/src/main/res/mipmap-$density/ic_launcher_round.png',
+        ).existsSync(),
+        isTrue,
+      );
+    }
+  });
+
   test('FileProvider productivo no expone reportes QA', () {
     final productionPaths = File(
       'android/app/src/main/res/xml/diagnostic_file_paths.xml',

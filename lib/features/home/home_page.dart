@@ -84,6 +84,7 @@ class HomePage extends StatelessWidget {
             itemBuilder: (context, index) {
               final group = RvWorkGroup.values[index];
               return _Count(
+                key: ValueKey('dashboard-${group.name}'),
                 label: group.label,
                 value: grouped[group]!.length,
                 color: group.color,
@@ -137,6 +138,7 @@ class HomePage extends StatelessWidget {
 
 class _Count extends StatelessWidget {
   const _Count({
+    super.key,
     required this.label,
     required this.value,
     required this.color,

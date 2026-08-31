@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:ddr001diag/features/home/rv_work_dashboard.dart';
+import 'package:ddr001diag/features/home/rv_work_group_presentation.dart';
+import 'package:ddr001diag/app/theme/app_theme.dart';
 import 'package:ddr001diag/features/inspections/domain/rv_validator.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -14,6 +16,30 @@ void main() {
       'Devueltos',
       'Conflictos',
     ]);
+  });
+
+  test('dashboard uses the exact historically demonstrated colors', () {
+    expect(RvWorkGroup.inProgress.color, AppColors.blue);
+    expect(RvWorkGroup.pendingSync.color, AppColors.orange);
+    expect(RvWorkGroup.submitted.color, AppColors.teal);
+    expect(RvWorkGroup.validated.color, AppColors.green);
+    expect(RvWorkGroup.returned.color, AppColors.red);
+    expect(RvWorkGroup.conflicts.color, AppColors.red);
+  });
+
+  test('final operational texts remain present and technical copy absent', () {
+    final sync = File('lib/features/sync/sync_page.dart').readAsStringSync();
+    final profile = File(
+      'lib/features/profile/profile_pages.dart',
+    ).readAsStringSync();
+    final newSurvey = File(
+      'lib/features/hydrants/new_survey_page.dart',
+    ).readAsStringSync();
+
+    expect(sync, contains("'Todo sincronizado'"));
+    expect(profile, contains("title: 'Exportar diagnóstico'"));
+    expect(newSurvey, contains("'INGRESAR MANUALMENTE'"));
+    expect(profile, isNot(contains('Genera un archivo técnico')));
   });
 
   test(

@@ -12,6 +12,8 @@ import 'package:ddr001diag/features/auth/data/field_session_repository.dart';
 import 'package:ddr001diag/features/hydrants/data/hydrant_repository.dart';
 import 'package:ddr001diag/features/hydrants/hydrant_pages.dart';
 import 'package:ddr001diag/features/hydrants/new_survey_page.dart';
+import 'package:ddr001diag/features/home/home_page.dart';
+import 'package:ddr001diag/features/home/rv_work_dashboard.dart';
 import 'package:ddr001diag/features/checklist/data/checklist_repository.dart';
 import 'package:ddr001diag/features/inspections/data/inspection_remote_repository.dart';
 import 'package:ddr001diag/features/inspections/data/inspection_sync_coordinator.dart';
@@ -119,6 +121,59 @@ void main() {
       find.byKey(const ValueKey('register-manual-hydrant')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('Inicio muestra el estado intencional 3x2 en portrait', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.625;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final semantics = tester.ensureSemantics();
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: HomePage()),
+      ),
+    );
+    await tester.pump();
+
+    const labels = [
+      'En proceso',
+      'Pendientes',
+      'Enviados',
+      'Validados',
+      'Devueltos',
+      'Conflictos',
+    ];
+    for (final label in labels) {
+      expect(find.text(label), findsOneWidget);
+    }
+    final pendingSemantics = tester.getSemantics(find.text('Pendientes')).label;
+    expect(pendingSemantics, contains('Pendientes'));
+    expect(pendingSemantics, isNot(contains('Pendientes de sincronizar')));
+    expect(find.text('Pendientes de sincronizar'), findsNothing);
+
+    final centers = RvWorkGroup.values.map(
+      (group) =>
+          tester.getCenter(find.byKey(ValueKey('dashboard-${group.name}'))),
+    );
+    final xPositions = centers.map((point) => point.dx.round()).toSet();
+    final yPositions = centers.map((point) => point.dy.round()).toSet();
+    expect(xPositions, hasLength(3));
+    expect(yPositions, hasLength(2));
+
+    expect(find.text('Nueva revisión visual'), findsOneWidget);
+    expect(find.text('Todas mis revisiones'), findsOneWidget);
+    expect(find.text('Sincronización'), findsOneWidget);
+    expect(find.text('Mis hidrantes'), findsNothing);
+    expect(find.text('Mapa general'), findsNothing);
+    expect(find.text('Prioridad'), findsNothing);
+    expect(find.byType(OutlinedButton), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
   });
 
   testWidgets(
