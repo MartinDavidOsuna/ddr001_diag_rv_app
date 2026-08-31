@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:ddr001diag/features/map/basemap/basemap_config.dart';
 import 'package:ddr001diag/features/map/basemap/basemap_layer.dart';
 import 'package:ddr001diag/features/map/basemap/basemap_provider.dart';
@@ -9,6 +11,19 @@ import 'package:flutter_map_vector_tiles/flutter_map_vector_tiles.dart'
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('production Dart sources cannot reintroduce CARTO', () {
+    final productionSources = Directory('lib')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((file) => file.path.endsWith('.dart'))
+        .map((file) => file.readAsStringSync().toLowerCase())
+        .join('\n');
+
+    expect(productionSources, isNot(contains('basemaps.cartocdn.com')));
+    expect(productionSources, isNot(contains('carto.com')));
+    expect(productionSources, isNot(contains('© carto')));
+  });
+
   group('OpenFreeMap basemap configuration', () {
     const provider = OpenFreeMapBasemap();
 

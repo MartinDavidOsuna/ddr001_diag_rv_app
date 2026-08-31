@@ -415,6 +415,7 @@ void main() {
     tester,
   ) async {
     final basemap = _OfflineBasemapProvider();
+    state.catalogHydrants.add(_hydrant(0, latitude: 22, longitude: -102));
     tester.view.physicalSize = const Size(430, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -434,7 +435,14 @@ void main() {
     expect(find.byKey(const ValueKey('map-refresh-region')), findsOneWidget);
     expect(find.byKey(const ValueKey('map-my-location')), findsOneWidget);
     expect(find.byKey(const ValueKey('map-show-all')), findsOneWidget);
+    expect(find.bySemanticsLabel('Cuenta 1, RV pendiente'), findsOneWidget);
     expect(basemap.loadCount, 1);
+
+    await tester.tap(find.bySemanticsLabel('Cuenta 1, RV pendiente'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cuenta 1'), findsOneWidget);
+    expect(find.text('Iniciar nueva revisión'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('map-filter-reviewed')));
     await tester.pump();
@@ -478,27 +486,28 @@ class _OfflineBasemapProvider implements BasemapProvider {
   }
 }
 
-Hydrant _hydrant(int index) => Hydrant(
-  id: 'hydrant-${index + 1}',
-  code: '${index + 1}',
-  locality: '',
-  parcel: '',
-  priority: PriorityLevel.medium,
-  access: AccessType.vehicle,
-  syncStatus: SyncStatus.synced,
-  f02a: const InspectionSummary(
-    type: InspectionType.f02A,
-    status: InspectionStatus.pending,
-    progress: 0,
-  ),
-  f02b: const InspectionSummary(
-    type: InspectionType.f02B,
-    status: InspectionStatus.notRequired,
-    progress: 0,
-  ),
-  latitude: 0,
-  longitude: 0,
-);
+Hydrant _hydrant(int index, {double latitude = 0, double longitude = 0}) =>
+    Hydrant(
+      id: 'hydrant-${index + 1}',
+      code: '${index + 1}',
+      locality: '',
+      parcel: '',
+      priority: PriorityLevel.medium,
+      access: AccessType.vehicle,
+      syncStatus: SyncStatus.synced,
+      f02a: const InspectionSummary(
+        type: InspectionType.f02A,
+        status: InspectionStatus.pending,
+        progress: 0,
+      ),
+      f02b: const InspectionSummary(
+        type: InspectionType.f02B,
+        status: InspectionStatus.notRequired,
+        progress: 0,
+      ),
+      latitude: latitude,
+      longitude: longitude,
+    );
 
 class _CountingVisualRepository extends VisualInspectionRepository {
   _CountingVisualRepository({required super.documents, required super.index});
