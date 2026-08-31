@@ -2,6 +2,13 @@
 
 Todos los cambios notables de **DIAGNOSTICO HIDRANTES** se documentan aquí.
 
+## [1.0.17+117] - 2026-08-31
+
+- Restaura la presentación operativa aprobada de RV, incluido el dashboard de seis estados en disposición 3 × 2, sus textos, colores y acciones de Inicio.
+- Restaura la identidad Android aprobada `AQ DV DDR001` y sus iconos launcher, adaptive y round.
+- Sustituye el mapa base CARTO por la solución histórica OpenFreeMap Positron, sin API key comercial y con atribución de OpenFreeMap, OpenMapTiles y OpenStreetMap.
+- Conserva el hardening zero-loss, múltiples revisiones, recuperación durable, integridad fotográfica y sincronización de `1.0.16+116`.
+
 ## [1.0.0+100] - 2026-08-24
 
 - Permite registrar y sincronizar N revisiones independientes del mismo hidrante.

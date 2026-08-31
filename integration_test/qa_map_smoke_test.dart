@@ -187,8 +187,8 @@ Future<AppState> _createState() async {
     packageInfo: PackageInfo(
       appName: 'DDR001 RV QA',
       packageName: 'com.aquafim.ddr001diag.qa',
-      version: '1.0.16-qa',
-      buildNumber: '116',
+      version: '1.0.17-qa',
+      buildNumber: '117',
     ),
     visualInspectionRepository: visual,
     functionalEligibilityRepository: FunctionalEligibilityRepository(
@@ -204,8 +204,8 @@ Future<AppState> _createState() async {
       packageInfo: PackageInfo(
         appName: 'DDR001 RV QA',
         packageName: 'com.aquafim.ddr001diag.qa',
-        version: '1.0.16-qa',
-        buildNumber: '116',
+        version: '1.0.17-qa',
+        buildNumber: '117',
       ),
     ),
     hydrantRepository: HydrantRepository(
