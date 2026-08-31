@@ -28,8 +28,25 @@ if [ ! -x "$apksigner" ] || [ ! -x "$aapt" ]; then
   exit 2
 fi
 
+if ! command -v java >/dev/null 2>&1 && [ -z "${JAVA_HOME:-}" ]; then
+  for java_home_candidate in \
+    /opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home \
+    "/Applications/Android Studio.app/Contents/jbr/Contents/Home"; do
+    if [ -x "$java_home_candidate/bin/java" ]; then
+      JAVA_HOME=$java_home_candidate
+      export JAVA_HOME
+      break
+    fi
+  done
+fi
+
+if ! cert_output=$("$apksigner" verify --print-certs "$apk" 2>&1); then
+  echo "ERROR: apksigner could not inspect the APK; check the configured JDK." >&2
+  exit 2
+fi
+
 actual_cert=$(
-  "$apksigner" verify --print-certs "$apk" |
+  printf '%s\n' "$cert_output" |
     sed -n 's/^Signer #1 certificate SHA-256 digest: //p' |
     head -1 |
     tr '[:upper:]' '[:lower:]'
