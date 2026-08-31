@@ -28,7 +28,7 @@ if [ ! -x "$apksigner" ] || [ ! -x "$aapt" ]; then
   exit 2
 fi
 
-if ! command -v java >/dev/null 2>&1 && [ -z "${JAVA_HOME:-}" ]; then
+if ! java -version >/dev/null 2>&1; then
   for java_home_candidate in \
     /opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home \
     "/Applications/Android Studio.app/Contents/jbr/Contents/Home"; do
