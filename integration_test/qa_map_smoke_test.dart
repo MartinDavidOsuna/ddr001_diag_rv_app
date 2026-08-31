@@ -8,6 +8,9 @@ import 'package:ddr001diag/domain/models/app_models.dart';
 import 'package:ddr001diag/features/auth/data/field_session_repository.dart';
 import 'package:ddr001diag/features/checklist/data/checklist_repository.dart';
 import 'package:ddr001diag/features/hydrants/data/hydrant_repository.dart';
+import 'package:ddr001diag/features/hydrants/hydrant_pages.dart';
+import 'package:ddr001diag/features/home/home_page.dart';
+import 'package:ddr001diag/features/home/rv_work_dashboard.dart';
 import 'package:ddr001diag/features/inspections/data/inspection_remote_repository.dart';
 import 'package:ddr001diag/features/inspections/data/inspection_sync_coordinator.dart';
 import 'package:ddr001diag/features/inspections/data/rv_draft_repository.dart';
@@ -43,27 +46,31 @@ void main() {
     await environment.open();
     state = await _createState();
     stateReady = true;
+    final hydrants = [
+      _hydrant(
+        id: 'qa-map-pending',
+        code: 'QA-MAP-001',
+        latitude: 22.0000,
+        longitude: -102.3000,
+      ),
+      _hydrant(
+        id: 'qa-map-reviewed',
+        code: 'QA-MAP-002',
+        latitude: 22.0060,
+        longitude: -102.2940,
+        completed: true,
+      ),
+    ];
     state
       ..online = false
-      ..catalogHydrants.addAll([
-        _hydrant(
-          id: 'qa-map-pending',
-          code: 'QA-MAP-001',
-          latitude: 22.0000,
-          longitude: -102.3000,
-        ),
-        _hydrant(
-          id: 'qa-map-reviewed',
-          code: 'QA-MAP-002',
-          latitude: 22.0060,
-          longitude: -102.2940,
-          completed: true,
-        ),
-      ]);
+      ..hydrants.addAll(hydrants)
+      ..catalogHydrants.addAll(hydrants);
     router = GoRouter(
       routes: [
+        GoRoute(path: '/', builder: (_, _) => const HomePage()),
+        GoRoute(path: '/hydrants', builder: (_, _) => const HydrantsPage()),
         GoRoute(
-          path: '/',
+          path: '/map',
           builder: (_, _) =>
               const MapPage(locationProvider: _FixedLocationProvider()),
         ),
@@ -99,6 +106,40 @@ void main() {
         child: MaterialApp.router(routerConfig: router),
       ),
     );
+    await tester.pump(const Duration(milliseconds: 500));
+
+    const dashboardLabels = [
+      'En proceso',
+      'Pendientes',
+      'Enviados',
+      'Validados',
+      'Devueltos',
+      'Conflictos',
+    ];
+    for (final label in dashboardLabels) {
+      expect(find.text(label), findsOneWidget);
+    }
+    final dashboardCenters = RvWorkGroup.values.map(
+      (group) =>
+          tester.getCenter(find.byKey(ValueKey('dashboard-${group.name}'))),
+    );
+    expect(
+      dashboardCenters.map((point) => point.dx.round()).toSet(),
+      hasLength(3),
+    );
+    expect(
+      dashboardCenters.map((point) => point.dy.round()).toSet(),
+      hasLength(2),
+    );
+    expect(find.text('Pendientes de sincronizar'), findsNothing);
+
+    router.go('/hydrants');
+    await tester.pumpAndSettle();
+    expect(find.byType(HydrantsPage), findsOneWidget);
+    expect(find.text('QA-MAP-001'), findsOneWidget);
+    expect(find.text('QA-MAP-002'), findsOneWidget);
+
+    router.go('/map');
 
     for (var attempt = 0; attempt < 30; attempt++) {
       await tester.pump(const Duration(milliseconds: 500));
