@@ -55,7 +55,7 @@ No se encontró una APK `0.2.39+61`. Sí se encontraron APKs Git históricas
 | Filtros Home/lista semánticamente alineados | `b1caf61` | No | Sí | Sí | Complementa hardening |
 | OpenFreeMap | `719cefa` | No | Sí | No: cambio de proveedor, fuera de restauración UX | Mapa actual manda |
 | Símbolo de marca en AppBars | `1c317c6` | Parcial | Generalización reusable | Sí | No aplica |
-| QA aislada del package productivo | `49c3fee`, `2f40996` | Parcial | Guard local posterior | Sí | Sí |
+| QA aislada del package productivo y de producción | `49c3fee`, `2f40996`, `ca43b34` | Sí | No | No | Sí |
 | Inset launcher aprobado del 18% | `bc15ee1` + worktree local | No | Sí | Sí | No aplica |
 | Nombre Android `AQ DV DDR001` | worktree local, 2026-08-29 21:02 -0600 | No | Sí | Sí | No aplica |
 
