@@ -141,6 +141,10 @@ Future<AppState> bootstrap({
   }
   onStatus?.call('Recuperando sesión y datos guardados');
   final config = AppConfig.fromEnvironment();
+  config.validateRuntimePackage(packageInfo.packageName);
+  debugPrint(
+    '[CONFIG] APP_ENV=${config.environment} API_HOST=${config.apiBaseUrl.host}',
+  );
   final sessionStorage = SessionSecureStorage();
   final apiClient = ApiClient(config: config, sessionStorage: sessionStorage);
   final dynamicCatalogRepository = DynamicCatalogRepository(

@@ -14,6 +14,8 @@ void main() {
     expect(gradle, contains('versionNameSuffix = "-qa"'));
     expect(gradle, contains('signingConfigs.getByName("debug")'));
     expect(gradle, contains('isDebuggable = false'));
+    expect(gradle, contains('requiresProductionReleaseSigning'));
+    expect(gradle, contains('keystorePropertiesFile.exists()'));
   });
 
   test('FileProvider usa authority derivada del applicationId', () {
@@ -87,7 +89,7 @@ void main() {
     expect(qaPaths, contains('qa-diagnostic-reports/'));
   });
 
-  test('manifest QA desactiva backup, cleartext y distingue nombre/icono', () {
+  test('manifest QA aísla package y usa seguridad de red propia', () {
     final manifest = File(
       'android/app/src/qa/AndroidManifest.xml',
     ).readAsStringSync();
@@ -98,26 +100,41 @@ void main() {
     expect(manifest, contains('android:allowBackup="false"'));
     expect(manifest, contains('android:fullBackupContent="false"'));
     expect(manifest, contains('android:usesCleartextTraffic="false"'));
-    expect(manifest, contains('android:name="android.permission.INTERNET"'));
+    expect(
+      manifest,
+      isNot(contains('android:name="android.permission.INTERNET"')),
+    );
     expect(
       manifest,
       contains('android:name="android.permission.CHANGE_NETWORK_STATE"'),
     );
     expect(manifest, contains('tools:node="remove"'));
+    expect(manifest, contains('@xml/network_security_config'));
     expect(manifest, contains('@drawable/qa_launcher_icon'));
     expect(manifest, contains('tools:replace='));
     expect(strings, contains('DDR001 RV QA'));
   });
 
-  test('qaDebug conserva la barrera de red del flavor QA', () {
+  test('qaDebug conserva cleartext global desactivado', () {
     final manifest = File(
       'android/app/src/qaDebug/AndroidManifest.xml',
     ).readAsStringSync();
 
     expect(manifest, contains('android:usesCleartextTraffic="false"'));
-    expect(manifest, contains('android:name="android.permission.INTERNET"'));
-    expect(manifest, contains('tools:node="remove"'));
+    expect(manifest, isNot(contains('android.permission.INTERNET')));
     expect(manifest, contains('tools:replace="android:usesCleartextTraffic"'));
+  });
+
+  test('network security QA permite cleartext sólo a loopback', () {
+    final network = File(
+      'android/app/src/qa/res/xml/network_security_config.xml',
+    ).readAsStringSync();
+
+    expect(network, contains('cleartextTrafficPermitted="false"'));
+    expect(network, contains('cleartextTrafficPermitted="true"'));
+    expect(network, contains('127.0.0.1'));
+    expect(network, contains('localhost'));
+    expect(network, isNot(contains('cifra.aquafim.com')));
   });
 
   test('entrypoint productivo no importa QA ni fixtures', () {

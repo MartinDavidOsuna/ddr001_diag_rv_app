@@ -80,6 +80,79 @@ void main() {
     expect(config.apiBaseUrl.host, 'example.invalid');
   });
 
+  group('política de ambiente y host', () {
+    test('S1 producción con URL productiva es válida', () {
+      final config = AppConfig.fromEnvironment(
+        environmentOverride: 'production',
+        apiBaseUrlOverride: AppConfig.productionBaseUrl,
+        debugMode: false,
+      );
+      expect(config.apiBaseUrl.host, 'cifra.aquafim.com');
+    });
+
+    test('S2 QA con API TEST loopback es válida', () {
+      final config = AppConfig.fromEnvironment(
+        environmentOverride: 'qa',
+        apiBaseUrlOverride: 'http://127.0.0.1:3003/api/v1',
+      );
+      config.validateRuntimePackage(AppConfig.qaPackageName);
+      expect(config.apiBaseUrl.port, 3003);
+    });
+
+    test('S3 QA con producción es rechazada', () {
+      expect(
+        () => AppConfig.fromEnvironment(
+          environmentOverride: 'qa',
+          apiBaseUrlOverride: AppConfig.productionBaseUrl,
+        ),
+        throwsStateError,
+      );
+    });
+
+    test('S4 QA con URL vacía es rechazada', () {
+      expect(
+        () => AppConfig.fromEnvironment(
+          environmentOverride: 'qa',
+          apiBaseUrlOverride: '',
+        ),
+        throwsStateError,
+      );
+    });
+
+    test('S5 QA con host desconocido es rechazada', () {
+      expect(
+        () => AppConfig.fromEnvironment(
+          environmentOverride: 'qa',
+          apiBaseUrlOverride: 'https://example.test/api/v1',
+        ),
+        throwsStateError,
+      );
+    });
+
+    test('S6 producción con URL local es rechazada', () {
+      expect(
+        () => AppConfig.fromEnvironment(
+          environmentOverride: 'production',
+          apiBaseUrlOverride: 'http://127.0.0.1:3003/api/v1',
+          debugMode: false,
+        ),
+        throwsStateError,
+      );
+    });
+
+    test('package QA no puede arrancar como producción', () {
+      final config = AppConfig.fromEnvironment(
+        environmentOverride: 'production',
+        apiBaseUrlOverride: AppConfig.productionBaseUrl,
+        debugMode: false,
+      );
+      expect(
+        () => config.validateRuntimePackage(AppConfig.qaPackageName),
+        throwsStateError,
+      );
+    });
+  });
+
   test('AppConfig permite únicamente el endpoint HTTP de producción', () {
     final config = AppConfig.fromEnvironment(
       environmentOverride: 'production',

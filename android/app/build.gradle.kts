@@ -12,6 +12,15 @@ val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
+val requiresProductionReleaseSigning = gradle.startParameter.taskNames.any {
+    it.contains("Production", ignoreCase = true) &&
+        it.contains("Release", ignoreCase = true)
+}
+if (requiresProductionReleaseSigning) {
+    check(keystorePropertiesFile.exists()) {
+        "Falta android/key.properties para firmar la aplicación de producción."
+    }
+}
 
 android {
     namespace = "com.aquafim.ddr001diag"
@@ -38,13 +47,12 @@ android {
 
     signingConfigs {
         create("release") {
-            check(keystorePropertiesFile.exists()) {
-                "Falta android/key.properties para firmar la aplicación de producción."
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
             }
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = file(keystoreProperties["storeFile"] as String)
-            storePassword = keystoreProperties["storePassword"] as String
         }
     }
 
