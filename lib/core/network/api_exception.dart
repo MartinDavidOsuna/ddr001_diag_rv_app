@@ -207,6 +207,7 @@ class ApiException implements Exception {
         problemType: problem['type']?.toString(),
         problemTitle: problem['title']?.toString(),
         field: field,
+        domainCode: domainCode,
         errors: problemErrors,
       );
     }

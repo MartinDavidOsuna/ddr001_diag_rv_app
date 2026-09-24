@@ -66,6 +66,7 @@ class RvValidator {
   }
 
   RvValidationResult validate(RvDraft draft, {bool requireSynced = false}) {
+    if (draft.isInactive) return const RvValidationResult([]);
     final issues = <RvValidationIssue>[];
     if (!draft.isInactive &&
         (draft.inactiveClosureDraft != null ||

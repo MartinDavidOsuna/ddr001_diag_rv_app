@@ -154,6 +154,7 @@ abstract final class RvWorkDashboardProjection {
     final result = {for (final group in RvWorkGroup.values) group: <String>{}};
     final byHydrant = <String, List<RvDraft>>{};
     for (final draft in drafts) {
+      if (draft.isInactive) continue;
       byHydrant.putIfAbsent(draft.hydrantId, () => []).add(draft);
     }
     for (final hydrant in hydrants) {

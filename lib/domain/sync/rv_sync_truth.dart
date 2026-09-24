@@ -4,6 +4,7 @@ import 'package:hive_ce/hive.dart';
 
 import '../../data/local/media_work_item_codec.dart';
 import '../../features/inspections/domain/rv_draft.dart';
+import '../../features/inspections/domain/rv_inactive_contract.dart';
 import '../../features/inspections/domain/rv_sync_state.dart';
 import '../integrity/operation_journal.dart';
 import '../media/inspection_photo.dart';
@@ -21,11 +22,14 @@ abstract final class RvSyncTruthService {
     final photoBox = Hive.box<String>('inspection_photos_v1');
     final work = Hive.box<String>('media_work_queue_v1');
     final sync = Hive.box<String>('media_sync_queue');
-    final references = draft.photos.values.expand((items) => items).toList();
+    final references =
+        (draft.isInactive
+                ? draft.photosFor(noHydrantAtLocationPhotoSlot)
+                : draft.photos.values.expand((items) => items))
+            .toList();
     final ids = references.map((item) => item.photoId).toSet();
     if (draft.isInactive) {
-      if (draft.inactiveClosure?.syncStatus !=
-          RvInactiveClosureSyncStatus.remoteVerified) {
+      if (!isInactiveRemoteVerified(draft)) {
         reasons.add('inactiveClosureContractPending');
       }
     } else if (!draft.hasAllPhotoSlots) {
@@ -66,7 +70,9 @@ abstract final class RvSyncTruthService {
         );
         if (!photo.isDeleted &&
             photo.inspectionId == draft.clientInspectionId &&
-            !ids.contains(photo.id)) {
+            !ids.contains(photo.id) &&
+            (!draft.isInactive ||
+                photo.category == noHydrantAtLocationPhotoSlot)) {
           reasons.add('orphanPhoto');
         }
       } on Object {

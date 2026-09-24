@@ -1,4 +1,4 @@
-# Cierre inactivo porque no hay hidrante en la ubicación
+# Cierre Ausente porque no hay hidrante en la ubicación
 
 ## Decisión de dominio
 
@@ -19,7 +19,7 @@ El cierre conserva una copia inmutable de:
 
 El estado inicial de sincronización es `pendingApiContract`. Mientras el
 servidor no implemente el contrato, la revisión permanece visible como
-“Inactivo · pendiente de sincronización”, no se envía por el flujo normal y no
+“Ausente · pendiente de sincronizar”, no se envía por el flujo normal y no
 se marca como confirmada remotamente.
 
 Los documentos legacy no contienen `inactiveClosure`; el campo es opcional y su
@@ -68,7 +68,7 @@ El cierre local es una operación journaled e idempotente:
 Las capturas nuevas guardan de forma aditiva `receivedSha256`, calculado en
 streaming sobre los bytes entregados por la cámara antes de normalizar, además
 del `sha256` ya existente del JPEG normalizado. Las fotografías legacy siguen
-siendo legibles cuando el campo no existe. El cierre inactivo exige ambos
+siendo legibles cuando el campo no existe. El cierre Ausente exige ambos
 hashes porque sólo puede usar evidencia creada por esta versión o una posterior.
 
 Cancelar antes de tomar una fotografía y sin comentario no produce cambios. Si
@@ -86,21 +86,142 @@ documento no se presenta como una revisión enviada/finalizada normal. El estado
 del contenedor no autoriza cambiar `rv.hydrants.is_active` ni
 `rv.hydrant_rv_status`.
 
-## Contrato API encontrado
+## Contrato API verificado (2026-09-24)
 
-La API actual permite crear inspecciones, guardar respuestas, coordenadas,
-señal, válvulas, contenido general, fotografías de slots conocidos y someter la
-inspección normal. También contiene un `inactive` global derivado del hidrante
-maestro. No existe un DTO, endpoint, slot ni estado de inspección para “no se
-encontró hidrante en la coordenada capturada”. La ruta administrativa de
-cancelación tampoco representa este resultado.
+Fuentes leídas en `MartinDavidOsuna/ddr001_api`, `main`, commit
+`ea73ad4e33394d43830a3f731c34c1f8050be416`:
 
-Por ello esta rama no cambia API, SQL ni contratos compartidos.
+- [Contrato](https://github.com/MartinDavidOsuna/ddr001_api/blob/ea73ad4e33394d43830a3f731c34c1f8050be416/docs/rv-inactive-closure.md)
+- [OpenAPI](https://github.com/MartinDavidOsuna/ddr001_api/blob/ea73ad4e33394d43830a3f731c34c1f8050be416/docs/openapi.yaml)
+- `src/modules/inspections/inactive.schema.ts` y `inactive.service.ts`.
 
-## Contrato remoto pendiente
+La ruta Windows suministrada no existe en este equipo macOS. Se leyó su contrato
+publicado en remoto; no se utilizó como autoridad la copia local antigua de la API.
+No se comprobó despliegue ni se modificó producción.
 
-No se propone ni implementa una ruta, DTO, código de dominio o cambio SQL en
-esta rama. El contrato canónico debe acordarse y verificarse en una fase de API
-separada, con pruebas de compatibilidad para Levantamientos y staging. Hasta
-entonces, la app conserva el cierre sólo offline, bloquea todo su pipeline de
-sincronización normal y nunca lo marca como confirmado remotamente.
+## Sincronización exclusiva
+
+La cola se reconstruye desde los documentos originales del usuario actual mediante
+`pendingInactiveClosures()`, incluyendo `pendingApiContract` históricos. Restaurar
+la sesión y recuperar conectividad ejecuta el coordinador unificado. Un observador
+de documentos activa los cierres nuevos y un temporizador respeta el próximo
+reintento de fallos transitorios; se detiene para conflictos/errores de contrato,
+sin sesión o al destruir AppState. Los cierres
+Ausente se procesan por una ruta independiente, sin checklist, respuestas, válvulas,
+señal, `/submit`, cambios al hidrante maestro o creación de otra revisión.
+
+1. Exigir usuario propietario en el scope actual, también después de cada llamada
+   remota. Un bloqueo compartido por UUID impide coordinadores concurrentes.
+2. Consultar `/version` y exigir el booleano `features.rvInactiveClosure == true`.
+   Ausencia de soporte mantiene `pendingApiContract`, mensaje y espera de reintento.
+3. Consultar por el mismo `clientInspectionId`; conservar el enlace remoto o crear
+   con ese UUID. Un recibo ya coincidente resuelve la respuesta perdida sin subir fotos.
+4. Consultar fotos del documento, verificar las existentes, subir las pendientes
+   con sus UUID, fecha y slot originales, y verificar recepción con `verify-batch`.
+5. Enviar exclusivamente `contractVersion`, `idempotencyKey`, `reasonCode`, `comment`,
+   `closedAt`, `location`, `photoIds` a `POST /inspections/{id}/inactive`.
+6. Validar recibo 200/201: UUID remoto, `inactive`, etiqueta, fecha de recepción,
+   clave, motivo, comentario, ubicación, fechas y conjunto de fotos. Persistir el
+   recibo completo y hacer `flush()` antes de marcar `remoteVerified`. Una escritura
+   final interrumpida puede completarse usando ese recibo guardado.
+
+Los nuevos estados de sincronización son aditivos; no se renombran valores antiguos.
+El estado final de revisión permanece `inactive` durante todos los reintentos.
+`remoteReceipt` también conserva el recibo discrepante para resolución explícita.
+Ninguna ruta borra originales o fotografías para resolver errores.
+
+## Errores y presentación
+
+- 401 y fallos transitorios: pendiente con espera creciente; conservar documentos y
+  reanudar con sesión válida del mismo propietario.
+- 404/422 y contrato local incompatible: `requiresReview` y mensaje visible. Sin bucle
+  automático permanente; reintento explícito desde el resumen tras revisar el problema.
+- 409: consultar de nuevo el recibo. Sólo coincidencia real confirma; de otro modo
+  `conflict`, conservando los dos contenidos. Nunca sobrescribir ni convertir en submit.
+- Falta de evidencia (`INACTIVE_EVIDENCE_REQUIRED/INVALID`) no se clasifica como conflicto
+  de identidad. Slot/UUID incompatible sí exige resolver identidad.
+
+Listas, resumen, accesibilidad y exportaciones muestran **Ausente · pendiente de
+sincronizar** o **Ausente · sincronizada**. El mapa ofrece un filtro de Ausente basado
+en revisiones y conserva separado el filtro administrativo **Hidrante inactivo**.
+Los seis grupos de checklist/envío normal excluyen este cierre; sigue visible en
+Todas mis revisiones y la cola global de sincronización mientras esté pendiente.
+
+## Diferencias detectadas respecto del modelo local anterior
+
+- API: 1–20 fotos, UUID válidos; el modelo anterior sólo exigía una o más fotos.
+  Se limita la captura/cierre nuevo a 20. Cierres históricos incompatibles se conservan
+  íntegros para revisión; no se truncan listas ni se regeneran UUID o claves.
+- Fuentes aceptadas: `gps`, `network`, `manual`, `rtk`. Valores históricos distintos
+  permanecen guardados y se informan como incompatibilidad de contrato.
+- Precisión vertical no negativa y clave de 16–120 caracteres. Validación antes del
+  comando; no se reparan originales silenciosamente.
+- La API normaliza fechas a milisegundos. La comparación usa esa precisión manteniendo
+  los timestamps locales originales, evitando un conflicto falso por microsegundos.
+- La ubicación permite UTM opcional; la app actual no lo guarda en `RvLocationSample`,
+  por lo que no inventa ni envía esos campos.
+
+## Verificación
+
+`test/inspections/rv_inactive_sync_test.dart` cubre contrato HTTP real con transporte
+simulado, cierre histórico, persistencia Hive/reapertura, respuesta perdida, evidencia
+pendiente/reutilizada, conflictos, sesiones, aislamiento, concurrencia, API sin soporte,
+normalización temporal y protección frente al flujo ordinario. Se conservan las pruebas
+existentes de captura offline, hashes, descarte seguro y recuperación de cámara.
+
+Ejecutar `flutter analyze --no-pub` y `flutter test --no-pub`. Estas pruebas son locales;
+no sustituyen una aceptación física ni una prueba con la API desplegada.
+
+### Revisión adicional contra la API local actualizada
+
+La copia local de `ddr001_api/main` quedó en el mismo commit de las fuentes citadas.
+Se revisaron además el endpoint multipart y la verificación de fotografías. Las pruebas
+validan UUID, slot, hash, fecha original y MIME del multipart real de Dio.
+
+`remoteVerified` sin recibo válido se recupera mediante la cola, no se acepta como
+confirmación. La recuperación de un recibo coincidente tampoco modifica fotografías
+locales que pertenezcan a otro usuario, revisión o slot: conserva el recibo y expone
+un conflicto de identidad. Un estado remoto `inactive` sin recibo local completo queda
+fuera del pipeline ordinario, incluso cuando se solicita reintentar.
+
+### Resultado de la ejecución local
+
+- `flutter analyze --no-pub`: sin incidencias.
+- `flutter test --no-pub --reporter compact`: **640 pruebas aprobadas**,
+  incluidas **35 nuevas** de sincronización/contrato de Ausente.
+- `git diff --check`: sin errores.
+- Se conserva `1.0.17+117`; no se desplegó API ni modificó producción.
+- Compilación QA debug aprobada: `flutter build apk --debug --flavor qa -t lib/main_qa.dart --no-pub`.
+  Package verificado con `aapt`: `com.aquafim.ddr001diag.qa`, `1.0.17-qa`, build 117.
+  Esta variante usa fixtures sin red; no es una distribución productiva.
+- No se ejecutó aceptación física ni integración contra servidor desplegado.
+
+### Archivos modificados en la app
+
+- `docs/inactive_no_hydrant_closure_contract.md`
+- `lib/core/network/api_exception.dart`
+- `lib/core/services/app_state.dart`
+- `lib/data/local/recovery_coordinator.dart`
+- `lib/data/local/visual_inspection_repository.dart`
+- `lib/domain/sync/rv_sync_truth.dart`
+- `lib/features/diagnostics/rv_diagnostic_export_service.dart`
+- `lib/features/home/all_reviews_page.dart`
+- `lib/features/home/rv_work_dashboard.dart`
+- `lib/features/hydrants/hydrant_pages.dart`
+- `lib/features/inspections/data/inactive_closure_sync.dart`
+- `lib/features/inspections/data/inspection_remote_repository.dart`
+- `lib/features/inspections/data/inspection_sync_coordinator.dart`
+- `lib/features/inspections/data/rv_draft_repository.dart`
+- `lib/features/inspections/domain/rv_draft.dart`
+- `lib/features/inspections/domain/rv_inactive_contract.dart`
+- `lib/features/inspections/domain/rv_validator.dart`
+- `lib/features/inspections/presentation/rv_inactive_closure_dialog.dart`
+- `lib/features/inspections/presentation/rv_inspection_controller.dart`
+- `lib/features/inspections/presentation/rv_summary_page.dart`
+- `lib/features/map/map_page.dart`
+- `lib/features/visual_reports/presentation/rv_visual_report_page.dart`
+- `lib/qa/qa_app.dart`
+- `test/inspections/rv_inactive_closure_test.dart`
+- `test/inspections/rv_inactive_sync_test.dart`
+- `test/operations/rv_operational_hardening_test.dart`
+- `test/widgets/all_reviews_page_test.dart`

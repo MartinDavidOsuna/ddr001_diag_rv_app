@@ -186,7 +186,7 @@ class _QaAppState extends State<QaApp> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       const Text(
-                        'PRUEBA FÍSICA DE CÁMARA Y CIERRE INACTIVO',
+                        'PRUEBA FÍSICA DE CÁMARA Y CIERRE AUSENTE',
                         style: TextStyle(fontWeight: FontWeight.w900),
                       ),
                       const SizedBox(height: 8),

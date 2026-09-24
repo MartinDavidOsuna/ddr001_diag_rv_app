@@ -253,7 +253,7 @@ class RecoveryCoordinator {
       await journal.save(
         entry.advance(
           JournalStatus.failed,
-          error: 'No se observó el documento del borrador inactivo.',
+          error: 'No se observó el documento del borrador de ausencia.',
         ),
       );
       return JournalRecoveryOutcome.safelyCompensated;
@@ -273,7 +273,7 @@ class RecoveryCoordinator {
       );
       return JournalRecoveryOutcome.safelyCompensated;
     } on Object catch (error) {
-      return _markManual(entry, 'Borrador inactivo ilegible: $error');
+      return _markManual(entry, 'Borrador de ausencia ilegible: $error');
     }
   }
 
@@ -285,7 +285,7 @@ class RecoveryCoordinator {
     final inspectionId = entry.entityIds.firstOrNull;
     final photoIds = entry.entityIds.skip(1).toSet();
     if (inspectionId == null) {
-      return _markManual(entry, 'Descarte inactivo sin identidad completa.');
+      return _markManual(entry, 'Descarte de ausencia sin identidad completa.');
     }
     final inspections = Hive.box<String>('visual_inspections_v1');
     final photos = Hive.box<String>('inspection_photos_v1');

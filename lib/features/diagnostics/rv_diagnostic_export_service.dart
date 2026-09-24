@@ -587,6 +587,7 @@ class RvDiagnosticExportService {
       'hasPendingChanges': d.hasPendingChanges,
       'isReadOnly': d.isReadOnly,
       'inactiveClosure': d.inactiveClosure?.toJson(),
+      if (d.isInactive) 'statusLabel': d.inactiveClosure!.statusLabel,
       'retryCount': d.retryCount,
       'nextRetryAt': d.nextRetryAt?.toIso8601String(),
       'lastAttemptAt': d.lastAttemptAt?.toIso8601String(),
@@ -972,7 +973,7 @@ class RvDiagnosticExportService {
           classification = 'REMOTE_CONFIRMATION_PENDING';
           actionRequired =
               'Conservar el cierre local sin enviarlo como revisión normal; '
-              'esperar el contrato exclusivo de cierre inactivo.';
+              'consultar soporte y sincronizar por el contrato exclusivo de Ausente.';
         } else if (captureIssues.isNotEmpty) {
           classification = 'CAPTURE_INCOMPLETE_REQUIRES_TECHNICIAN';
           actionRequired =

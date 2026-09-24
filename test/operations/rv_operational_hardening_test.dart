@@ -65,11 +65,11 @@ void main() {
     },
   );
 
-  test('map exposes six uniform filters in a three-column grid', () {
+  test('map exposes seven uniform filters in a three-column grid', () {
     final map = File('lib/features/map/map_page.dart').readAsStringSync();
     expect(map, contains('HydrantMapFilter.values'));
     expect(map, contains('crossAxisCount: 3'));
-    expect(map, contains('height: 86'));
+    expect(map, contains('height: 132'));
     expect(map, contains('mainAxisExtent: 40'));
     for (final label in [
       'Todo',
@@ -77,7 +77,8 @@ void main() {
       'Trabajo local',
       'Revisado',
       'Conflicto',
-      'Inactivo',
+      'Hidrante inactivo',
+      'Ausente',
     ]) {
       expect(map, contains("'$label'"));
     }
@@ -232,7 +233,7 @@ void main() {
     expect(apiClient, contains('sendTimeout: const Duration(seconds: 30)'));
   });
 
-  test('map filter labels document all six visible selections', () {
+  test('map distinguishes absence from administrative inactivity', () {
     final source = File('lib/features/map/map_page.dart').readAsStringSync();
     for (final label in [
       'Todo',
@@ -240,7 +241,8 @@ void main() {
       'Trabajo local',
       'Revisado',
       'Conflicto',
-      'Inactivo',
+      'Hidrante inactivo',
+      'Ausente',
     ]) {
       expect(source, contains(label));
     }

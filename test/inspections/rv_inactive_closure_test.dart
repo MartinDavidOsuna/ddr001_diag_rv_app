@@ -304,7 +304,7 @@ void main() {
 
     final result = await coordinator.synchronize(closed, submit: true);
 
-    expect(result, same(closed));
+    expect(result.toJson(), closed.toJson());
     expect(
       result.inactiveClosure?.syncStatus,
       RvInactiveClosureSyncStatus.pendingApiContract,

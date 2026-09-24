@@ -98,6 +98,7 @@ class _ReportBody extends StatelessWidget {
   const _ReportBody({required this.report});
   final VisualReport report;
   static String status(String value) => switch (value) {
+    'inactive' => 'Ausente',
     'validated' => 'Validado',
     'returned' => 'Devuelto para corrección',
     'conflict' => 'Conflicto',

@@ -167,7 +167,7 @@ void main() {
       );
 
       expect(
-        find.textContaining('Inactivo · pendiente de contrato'),
+        find.textContaining('Ausente · pendiente de sincronizar'),
         findsOneWidget,
       );
       expect(find.textContaining('Historial · solo lectura'), findsNothing);

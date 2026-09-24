@@ -25,7 +25,11 @@ class RemoteInspection {
     this.rvStatus,
     this.lastStatusChangedAt,
     this.evidence,
+    this.clientInspectionId,
+    this.inactiveClosure,
   });
+  final String? clientInspectionId;
+  final Map<String, dynamic>? inactiveClosure;
   final String id, status;
   final String? hydrantId, result, officialInspectionId, conflictId, rvStatus;
   final DateTime? lastStatusChangedAt;
@@ -278,6 +282,38 @@ class InspectionRemoteRepository {
         },
       );
       return _evidence(response);
+    } on DioException catch (error) {
+      throw ApiException.fromDio(error);
+    }
+  }
+
+  Future<bool> supportsInactiveClosure() async {
+    try {
+      final response = await client.dio.get<Map<String, dynamic>>('/version');
+      final features = response.data?['features'];
+      return features is Map && features['rvInactiveClosure'] == true;
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 404) return false;
+      throw ApiException.fromDio(error);
+    }
+  }
+
+  Future<Map<String, dynamic>> closeInactive(
+    String id,
+    Map<String, dynamic> command,
+  ) async {
+    try {
+      final response = await client.dio.post<Map<String, dynamic>>(
+        '/inspections/$id/inactive',
+        data: command,
+      );
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw const ApiException(
+          ApiErrorKind.invalidData,
+          'Recibo de ausencia inválido.',
+        );
+      }
+      return response.data ?? const {};
     } on DioException catch (error) {
       throw ApiException.fromDio(error);
     }
@@ -702,6 +738,12 @@ class InspectionRemoteRepository {
     return RemoteInspection(
       id: id,
       status: '${data['status'] ?? 'draft'}',
+      clientInspectionId:
+          (data['client_inspection_id'] ?? data['clientInspectionId'])
+              ?.toString(),
+      inactiveClosure: data['inactiveClosure'] is Map
+          ? Map<String, dynamic>.from(data['inactiveClosure'] as Map)
+          : null,
       hydrantId: (data['hydrant_id'] ?? data['hydrantId'])?.toString(),
       result: data['result']?.toString(),
       officialInspectionId: data['officialInspectionId']?.toString(),

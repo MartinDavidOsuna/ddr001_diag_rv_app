@@ -526,7 +526,7 @@ class RvInspectionController extends ChangeNotifier {
         user: user,
         comment: comment,
       );
-      message = 'Revisión cerrada como Inactiva y conservada localmente.';
+      message = 'Revisión cerrada como Ausente y conservada localmente.';
       return true;
     } on StateError catch (error) {
       message = '$error'.replaceFirst('Bad state: ', '');

@@ -16,6 +16,7 @@ import '../../../domain/media/inspection_photo.dart';
 import '../domain/rv_sync_state.dart';
 import '../domain/rv_validator.dart';
 import '../domain/rv_draft.dart';
+import '../data/inspection_sync_coordinator.dart';
 import 'inspection_photo_projection.dart';
 import 'rv_review_navigation.dart';
 
@@ -109,17 +110,23 @@ class _RvSummaryPageState extends State<RvSummaryPage>
                 _row('Hidrante', draft.accountNumber),
                 _row('Inspector', formatPersonName(state.user.fullName)),
                 _row('Cuadrilla', state.user.brigadeName),
-                _row(
-                  'Checklist',
-                  '${draft.checklist.title} v${draft.checklistVersion}',
-                ),
+                if (!draft.isInactive)
+                  _row(
+                    'Checklist',
+                    '${draft.checklist.title} v${draft.checklistVersion}',
+                  ),
                 _row('Inicio', '${draft.createdAt.toLocal()}'),
-                _row(
-                  'Progreso',
-                  '${draft.answers.length}/$totalQuestions respuestas',
-                ),
+                if (!draft.isInactive)
+                  _row(
+                    'Progreso',
+                    '${draft.answers.length}/$totalQuestions respuestas',
+                  ),
                 _row('GPS', draft.location == null ? 'Pendiente' : 'Capturado'),
-                _row('Señal', draft.signal == null ? 'Pendiente' : 'Capturada'),
+                if (!draft.isInactive)
+                  _row(
+                    'Señal',
+                    draft.signal == null ? 'Pendiente' : 'Capturada',
+                  ),
                 _row('Fotografías', '${draft.photoCount} capturadas'),
                 _row('Fotografías generales', '${draft.generalPhotos.length}'),
                 _row(
@@ -163,6 +170,32 @@ class _RvSummaryPageState extends State<RvSummaryPage>
           if (draft.inactiveClosure case final closure?) ...[
             const SizedBox(height: 14),
             RvInactiveClosureSummary(closure: closure),
+            if (draft.lastSyncError != null) Text(draft.lastSyncError!),
+            if (closure.syncStatus !=
+                    RvInactiveClosureSyncStatus.remoteVerified &&
+                closure.closedByUserId.toLowerCase() ==
+                    state.user.id.toLowerCase())
+              OutlinedButton.icon(
+                onPressed: busy || !state.online
+                    ? null
+                    : () async {
+                        _setBusy(true);
+                        try {
+                          final result = await state.inspectionSyncCoordinator
+                              .synchronizeInactive(draft, forceRetry: true);
+                          if (mounted)
+                            setState(
+                              () => message =
+                                  result.lastSyncError ??
+                                  result.inactiveClosure!.statusLabel,
+                            );
+                        } finally {
+                          if (mounted) _setBusy(false);
+                        }
+                      },
+                icon: const Icon(Icons.sync),
+                label: const Text('Reintentar sincronización de Ausente'),
+              ),
           ],
           if (!draft.isInactive && validation.issues.isNotEmpty) ...[
             const SizedBox(height: 14),
@@ -671,7 +704,7 @@ class _InactiveClosureSummaryState extends State<RvInactiveClosureSummary> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'INACTIVO · NO HAY HIDRANTE EN LA UBICACIÓN',
+          'AUSENTE · NO HAY HIDRANTE EN LA UBICACIÓN',
           key: ValueKey('inactive-summary-status'),
           style: TextStyle(
             fontWeight: FontWeight.w800,
@@ -697,11 +730,10 @@ class _InactiveClosureSummaryState extends State<RvInactiveClosureSummary> {
         Text('Técnico: ${widget.closure.closedByName}'),
         Text('Dispositivo: ${widget.closure.deviceId}'),
         const SizedBox(height: 8),
-        const Text(
-          'Pendiente de contrato de sincronización. No se enviará como una '
-          'revisión normal ni cambiará el hidrante maestro.',
-          key: ValueKey('inactive-summary-pending-contract'),
-          style: TextStyle(color: AppColors.muted),
+        Text(
+          widget.closure.statusLabel,
+          key: const ValueKey('inactive-summary-pending-contract'),
+          style: const TextStyle(color: AppColors.muted),
         ),
         const SizedBox(height: 12),
         Wrap(

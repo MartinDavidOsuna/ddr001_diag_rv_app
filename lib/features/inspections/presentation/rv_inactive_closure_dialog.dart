@@ -213,7 +213,7 @@ class _RvInactiveClosureDialogState extends State<RvInactiveClosureDialog> {
                     key: ValueKey('inactive-static-repaint-boundary'),
                     child: Text(
                       'Se conservarán la coordenada, el comentario y la '
-                      'fotografía. La revisión quedará cerrada como Inactiva '
+                      'fotografía. La revisión quedará cerrada como Ausente '
                       'y no se enviará como una revisión normal.',
                     ),
                   ),
@@ -249,7 +249,13 @@ class _RvInactiveClosureDialogState extends State<RvInactiveClosureDialog> {
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     key: const ValueKey('capture-inactive-photo'),
-                    onPressed: blocked || draft.isReadOnly
+                    onPressed:
+                        blocked ||
+                            draft.isReadOnly ||
+                            draft
+                                    .photosFor(noHydrantAtLocationPhotoSlot)
+                                    .length >=
+                                20
                         ? null
                         : () => widget.controller.addInactiveEvidencePhoto(
                             ImageSource.camera,
@@ -325,7 +331,7 @@ class _RvInactiveClosureDialogState extends State<RvInactiveClosureDialog> {
                 blocked || location?.isValid != true || references.isEmpty
                 ? null
                 : _closeReview,
-            child: const Text('Cerrar revisión como Inactiva'),
+            child: const Text('Cerrar revisión como Ausente'),
           ),
         ],
       ),

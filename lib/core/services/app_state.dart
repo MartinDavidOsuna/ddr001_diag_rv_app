@@ -152,6 +152,9 @@ class AppState extends ChangeNotifier {
   String? syncingReport;
   String? syncPauseMessage;
   Future<void>? _activeSync;
+  Timer? _inactiveRetryTimer;
+  StreamSubscription<BoxEvent>? _inactiveDocumentsSubscription;
+  bool _automaticInactiveSyncEnabled = false;
   DateTime? _lastAutomaticSyncAttempt;
   static const automaticSyncCooldown = Duration(minutes: 5);
   UpdateInfo? updateInfo;
@@ -212,6 +215,11 @@ class AppState extends ChangeNotifier {
     var verified = 0;
     var errors = 0;
     final photos = Hive.box<String>('inspection_photos_v1');
+    final absent = {
+      for (final d in rvDraftRepository.all())
+        if (d.isInactive)
+          d.clientInspectionId: d.inactiveClosure!.photoIds.toSet(),
+    };
     for (final raw in photos.values) {
       try {
         final photo = InspectionPhoto.fromJson(
@@ -219,6 +227,10 @@ class AppState extends ChangeNotifier {
         );
         if (photo.capturedByUserId != user.id) continue;
         accessible.add(photo.id);
+        if (absent.containsKey(photo.inspectionId) &&
+            !absent[photo.inspectionId]!.contains(photo.id)) {
+          continue;
+        }
         if (photo.isSynchronized) {
           verified++;
           continue;
@@ -428,6 +440,13 @@ class AppState extends ChangeNotifier {
     initialized = true;
     notifyListeners();
     if (startRemoteServices) {
+      _automaticInactiveSyncEnabled = true;
+      _inactiveDocumentsSubscription ??= visualInspectionRepository.documents
+          .watch()
+          .listen((_) {
+            _scheduleInactiveSynchronization();
+            notifyListeners();
+          });
       unawaited(_completePendingLogout());
       unawaited(_initializeRemoteServices());
     }
@@ -459,6 +478,7 @@ class AppState extends ChangeNotifier {
     if (connectivityMonitor?.apiAvailable ?? false) {
       unawaited(synchronizeAssignments());
       unawaited(refreshChecklist());
+      unawaited(synchronize());
     }
   }
 
@@ -594,6 +614,7 @@ class AppState extends ChangeNotifier {
   }
 
   void _resetActiveSessionState() {
+    _inactiveRetryTimer?.cancel();
     sessionRepository.cancelActiveRequests();
     _session = null;
     profileStatsLoading = false;
@@ -908,26 +929,28 @@ class AppState extends ChangeNotifier {
         .where((draft) => draft.localStatus == RvLocalStatus.submitted)
         .map((draft) => draft.hydrantId)
         .toSet();
-    return all
-        .where(
-          (draft) =>
-              (draft.supersededBy == null) &&
-              !RvWorkDashboardProjection.isEmptyLegacySyncShell(draft) &&
-              !(draft.remoteStatus == 'conflict' &&
-                  submittedHydrants.contains(draft.hydrantId)) &&
-              (!draft.isReadOnly ||
-                  (draft.localStatus == RvLocalStatus.conflict &&
-                      draft.serverInspectionId != null)) &&
-              !_isSupersededByOfficialState(draft) &&
-              (draft.localStatus != RvLocalStatus.conflict ||
-                  draft.serverInspectionId != null) &&
-              draft.localStatus != RvLocalStatus.versionConflict &&
-              draft.localStatus != RvLocalStatus.cancelled &&
-              (draft.localStatus != RvLocalStatus.submitted ||
-                  draft.hasPendingChanges ||
-                  _draftHasUnconfirmedEvidence(draft)),
-        )
-        .toList(growable: false);
+    final inactive = rvDraftRepository.pendingInactiveClosures();
+    return [
+      ...inactive,
+      ...all.where(
+        (draft) =>
+            (draft.supersededBy == null) &&
+            !RvWorkDashboardProjection.isEmptyLegacySyncShell(draft) &&
+            !(draft.remoteStatus == 'conflict' &&
+                submittedHydrants.contains(draft.hydrantId)) &&
+            (!draft.isReadOnly ||
+                (draft.localStatus == RvLocalStatus.conflict &&
+                    draft.serverInspectionId != null)) &&
+            !_isSupersededByOfficialState(draft) &&
+            (draft.localStatus != RvLocalStatus.conflict ||
+                draft.serverInspectionId != null) &&
+            draft.localStatus != RvLocalStatus.versionConflict &&
+            draft.localStatus != RvLocalStatus.cancelled &&
+            (draft.localStatus != RvLocalStatus.submitted ||
+                draft.hasPendingChanges ||
+                _draftHasUnconfirmedEvidence(draft)),
+      ),
+    ];
   }
 
   bool _draftHasUnconfirmedEvidence(RvDraft draft) {
@@ -1165,7 +1188,38 @@ class AppState extends ChangeNotifier {
     if (active != null) return active;
     final run = _runUnifiedSynchronization();
     _activeSync = run;
-    return run.whenComplete(() => _activeSync = null);
+    return run.whenComplete(() {
+      _activeSync = null;
+      _scheduleInactiveSynchronization();
+    });
+  }
+
+  void _scheduleInactiveSynchronization() {
+    _inactiveRetryTimer?.cancel();
+    if (!_automaticInactiveSyncEnabled ||
+        !authenticated ||
+        !online ||
+        _activeSync != null) {
+      return;
+    }
+    final retryable = rvDraftRepository.pendingInactiveClosures().where(
+      (draft) =>
+          draft.inactiveClosure!.syncStatus !=
+              RvInactiveClosureSyncStatus.conflict &&
+          draft.inactiveClosure!.syncStatus !=
+              RvInactiveClosureSyncStatus.requiresReview,
+    );
+    if (retryable.isEmpty) return;
+    final now = DateTime.now().toUtc();
+    final dates = retryable.map((draft) => draft.nextRetryAt ?? now).toList()
+      ..sort();
+    final delay = dates.first.difference(now);
+    _inactiveRetryTimer = Timer(
+      delay > const Duration(seconds: 1) ? delay : const Duration(seconds: 1),
+      () {
+        if (authenticated && online) unawaited(synchronize());
+      },
+    );
   }
 
   Future<void> _runUnifiedSynchronization() async {
@@ -1208,13 +1262,16 @@ class AppState extends ChangeNotifier {
       final drafts = _pendingDraftsForSync();
       final remoteStatePass = rvDraftRepository
           .all()
-          .where((draft) => draft.serverInspectionId != null)
+          .where(
+            (draft) => draft.serverInspectionId != null && !draft.isInactive,
+          )
           .toList(growable: false);
       final evidencePass = rvDraftRepository
           .all()
           .where(
             (draft) =>
                 draft.serverInspectionId != null &&
+                !draft.isInactive &&
                 _draftHasUnconfirmedEvidence(draft),
           )
           .toList(growable: false);
@@ -1292,14 +1349,16 @@ class AppState extends ChangeNotifier {
         try {
           final result = await inspectionSyncCoordinator.synchronize(
             drafts[index],
-            forceRetry: true,
+            forceRetry: !drafts[index].isInactive,
             submit:
                 drafts[index].localStatus == RvLocalStatus.submitPending ||
                 drafts[index].localStatus == RvLocalStatus.readyToSubmit ||
                 drafts[index].submitStatus == RvPartStatus.pending ||
                 drafts[index].submitStatus == RvPartStatus.syncing,
           );
-          if (result.localStatus == RvLocalStatus.conflict ||
+          if (result.inactiveClosure?.syncStatus ==
+                  RvInactiveClosureSyncStatus.conflict ||
+              result.localStatus == RvLocalStatus.conflict ||
               result.localStatus == RvLocalStatus.versionConflict) {
             syncConflicts++;
           } else if (result.lastSyncError != null) {
@@ -1464,6 +1523,9 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _automaticInactiveSyncEnabled = false;
+    _inactiveRetryTimer?.cancel();
+    unawaited(_inactiveDocumentsSubscription?.cancel());
     connectivityMonitor?.removeListener(_onConnectivityChanged);
     connectivityMonitor?.dispose();
     super.dispose();

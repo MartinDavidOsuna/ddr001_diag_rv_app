@@ -33,6 +33,8 @@ class VisualInspectionRepository {
     _scopeConfigured = true;
   }
 
+  String? get accessScopeUserId => _scope?.userId;
+
   bool get accessScopeConfigured => _scopeConfigured;
   String? get accessScopeNamespace => _scope?.namespace;
 

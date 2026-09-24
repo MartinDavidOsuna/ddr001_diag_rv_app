@@ -12,6 +12,7 @@ import '../../../domain/media/media_sync_status.dart';
 import '../../../domain/media/photo_integrity_status.dart';
 import '../../catalogs/dynamic_catalog_repository.dart';
 import '../domain/rv_draft.dart';
+import '../domain/rv_inactive_contract.dart';
 import '../domain/rv_sync_state.dart';
 import '../domain/rv_versioning.dart';
 import '../domain/rv_validator.dart';
@@ -21,6 +22,8 @@ import 'inspection_remote_repository.dart';
 import 'rv_answer_payload_builder.dart';
 import 'rv_draft_repository.dart';
 import 'sync_receipt_repository.dart';
+
+part 'inactive_closure_sync.dart';
 
 @visibleForTesting
 int matchingRemotePhotoIndex({
@@ -146,16 +149,19 @@ class InspectionSyncCoordinator {
   final SyncReceiptRepository? receipts;
   RvAnswerPayloadBuilder get _payloadBuilder =>
       RvAnswerPayloadBuilder(validator: validator);
-  final Set<String> _running = {};
+  static final Set<String> _running = {};
   final Map<String, Map<String, Object?>> failureDiagnostics = {};
 
-  bool isRunning(String id) => _running.contains(id);
+  bool isRunning(String id) => _running.contains(id.toLowerCase());
 
   Future<RvDraft> synchronize(
     RvDraft initial, {
     bool submit = false,
     bool forceRetry = false,
   }) async {
+    final latest = drafts.find(initial.clientInspectionId) ?? initial;
+    if (latest.isInactive)
+      return synchronizeInactive(latest, forceRetry: forceRetry);
     if (initial.localStatus == RvLocalStatus.inactive ||
         initial.inactiveClosureDraft != null ||
         initial.photosFor(noHydrantAtLocationPhotoSlot).isNotEmpty) {
@@ -171,6 +177,9 @@ class InspectionSyncCoordinator {
         candidate.photosFor(noHydrantAtLocationPhotoSlot).isNotEmpty) {
       return candidate;
     }
+    // A server-side absence with an incomplete local receipt is read-only.
+    // Only read reconciliation may repair it; never reuse the normal pipeline.
+    if (candidate.remoteStatus == 'inactive') return candidate;
     final humanGate = humanGatePolicy.evaluate(candidate);
     if (humanGate.blocksRemoteMutation) {
       final reason = humanGate.wireReason ?? 'human_action_required';
@@ -204,7 +213,7 @@ class InspectionSyncCoordinator {
       _debug(candidate, 'omitido', 'error determinista sin cambios');
       return candidate;
     }
-    if (!_running.add(candidate.clientInspectionId))
+    if (!_running.add(candidate.clientInspectionId.toLowerCase()))
       return drafts.find(candidate.clientInspectionId) ?? candidate;
     var draft = drafts.find(candidate.clientInspectionId) ?? candidate;
     final retryingLegacyConflict =
@@ -242,14 +251,15 @@ class InspectionSyncCoordinator {
       draft = await _synchronizeCatalogs(draft);
       if (draft.serverInspectionId != null) {
         final remoteInspection = await remote.get(draft.serverInspectionId!);
-        draft = (await reconcileInspectionEvidence(draft)).draft;
         draft = await _reconcileRemoteInspection(
           draft,
           remoteInspection: remoteInspection,
         );
         if (draft.isReadOnly) return draft;
+        draft = (await reconcileInspectionEvidence(draft)).draft;
       }
       draft = await _create(draft);
+      if (draft.isReadOnly) return draft;
       draft = await _photos(draft);
       draft = (await reconcileInspectionEvidence(draft)).draft;
       if (_generalPhotosReady(draft)) {
@@ -333,7 +343,7 @@ class InspectionSyncCoordinator {
         stackTrace: stackTrace,
       );
     } finally {
-      _running.remove(candidate.clientInspectionId);
+      _running.remove(candidate.clientInspectionId.toLowerCase());
     }
   }
 
@@ -343,6 +353,9 @@ class InspectionSyncCoordinator {
     bool allowConflictProjection = true,
   }) async {
     remoteInspection ??= await remote.get(draft.serverInspectionId!);
+    if (remoteInspection.status == 'inactive') {
+      return restoreRemoteInactive(draft, remoteInspection);
+    }
     final humanGate = humanGatePolicy.evaluate(draft);
     if (humanGate.blocksRemoteMutation) {
       await _recordReceipt(
@@ -441,6 +454,7 @@ class InspectionSyncCoordinator {
   /// truth locally and persist a receipt, but never invokes a mutating API.
   Future<RvDraft> reconcileInspectionStateReadOnly(RvDraft initial) async {
     final current = drafts.find(initial.clientInspectionId) ?? initial;
+    if (current.isInactive) return current;
     final serverId = current.serverInspectionId;
     if (serverId == null || serverId.isEmpty) return current;
     final remoteInspection = await remote.get(serverId);
@@ -615,6 +629,8 @@ class InspectionSyncCoordinator {
           );
           if (reconciled != null) {
             created = reconciled;
+            if (created.status == 'inactive')
+              return restoreRemoteInactive(draft, created);
             final saved = await _save(
               draft.copyWith(
                 serverInspectionId: created.id,
@@ -681,6 +697,8 @@ class InspectionSyncCoordinator {
       created = await remote.create(transformed);
       draft = transformed;
     }
+    if (created.status == 'inactive')
+      return restoreRemoteInactive(draft, created);
     final serverHydrantId = created.hydrantId;
     if (serverHydrantId != null && serverHydrantId.isNotEmpty) {
       await onHydrantResolved?.call(draft.hydrantId, serverHydrantId);
@@ -1045,7 +1063,7 @@ class InspectionSyncCoordinator {
   Future<EvidenceReconciliationSummary> reconcileInspectionEvidence(
     RvDraft draft,
   ) async {
-    final reconciled = await _reconcilePhotos(draft);
+    final reconciled = draft.isInactive ? draft : await _reconcilePhotos(draft);
     final photos = reconciled.photos.values
         .expand((items) => items)
         .map((reference) => _photo(reference.photoId))

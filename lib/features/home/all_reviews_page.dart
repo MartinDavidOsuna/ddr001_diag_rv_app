@@ -91,10 +91,7 @@ class AllReviewsList extends StatelessWidget {
 
   static String _statusLabel(RvDraft draft) {
     if (draft.isInactive) {
-      return draft.inactiveClosure?.syncStatus ==
-              RvInactiveClosureSyncStatus.remoteVerified
-          ? 'Inactivo · confirmado remotamente'
-          : 'Inactivo · pendiente de contrato de sincronización';
+      return '${draft.inactiveClosure!.statusLabel}${draft.lastSyncError == null ? '' : '\n${draft.lastSyncError}'}';
     }
     if (draft.lastSyncError != null) {
       return 'Requiere atención · evidencia local';

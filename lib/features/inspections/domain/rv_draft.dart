@@ -32,6 +32,8 @@ const inactiveClosureCommentMaxLength = 500;
 enum RvInactiveClosureSyncStatus {
   pendingApiContract,
   syncing,
+  pendingSync,
+  requiresReview,
   remoteVerified,
   conflict,
 }
@@ -222,6 +224,7 @@ class RvInactiveClosure {
     this.contractVersion = inactiveClosureContractVersion,
     this.remoteRequestId,
     this.remoteDomainCode,
+    this.remoteReceipt,
   });
 
   final String reasonCode;
@@ -240,6 +243,12 @@ class RvInactiveClosure {
   final int contractVersion;
   final String? remoteRequestId;
   final String? remoteDomainCode;
+  final Map<String, dynamic>? remoteReceipt;
+
+  String get statusLabel =>
+      syncStatus == RvInactiveClosureSyncStatus.remoteVerified
+      ? 'Ausente · sincronizada'
+      : 'Ausente · pendiente de sincronizar';
 
   Map<String, dynamic> toJson() => {
     'reasonCode': reasonCode,
@@ -258,6 +267,7 @@ class RvInactiveClosure {
     'contractVersion': contractVersion,
     'remoteRequestId': remoteRequestId,
     'remoteDomainCode': remoteDomainCode,
+    'remoteReceipt': remoteReceipt,
   };
 
   factory RvInactiveClosure.fromJson(Map<String, dynamic> json) =>
@@ -294,6 +304,9 @@ class RvInactiveClosure {
             json['contractVersion'] as int? ?? inactiveClosureContractVersion,
         remoteRequestId: json['remoteRequestId'] as String?,
         remoteDomainCode: json['remoteDomainCode'] as String?,
+        remoteReceipt: json['remoteReceipt'] is Map
+            ? Map<String, dynamic>.from(json['remoteReceipt'] as Map)
+            : null,
       );
 }
 

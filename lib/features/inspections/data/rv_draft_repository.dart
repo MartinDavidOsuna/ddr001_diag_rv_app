@@ -13,6 +13,7 @@ import '../../../domain/inspections/visual_inspection.dart';
 import '../../../domain/models/app_models.dart';
 import '../../checklist/data/checklist_models.dart';
 import '../domain/rv_draft.dart';
+import '../domain/rv_inactive_contract.dart';
 import '../domain/rv_visual_document_classification.dart';
 import '../domain/rv_sync_state.dart';
 import '../domain/rv_recovery_policy.dart';
@@ -125,6 +126,21 @@ class RvDraftRepository {
     return values;
   }
 
+  /// Durable queue reconstructed from the original documents, including legacy
+  /// pendingApiContract closures; never creates a revision or rewrites identity.
+  List<RvDraft> pendingInactiveClosures() {
+    final owner = visualRepository.accessScopeUserId?.toLowerCase();
+    if (owner == null) return const [];
+    return all()
+        .where(
+          (draft) =>
+              draft.isInactive &&
+              draft.inactiveClosure!.closedByUserId.toLowerCase() == owner &&
+              !isInactiveRemoteVerified(draft),
+        )
+        .toList();
+  }
+
   RvDraft? find(String clientInspectionId) {
     final value = visualRepository.findById(clientInspectionId);
     return value == null ? null : fromInspection(value);
@@ -164,6 +180,12 @@ class RvDraftRepository {
     final inspection = visualRepository.findById(draft.clientInspectionId);
     if (inspection == null)
       throw StateError('No existe el documento local de inspección.');
+    final previous = fromInspection(inspection);
+    if (previous?.isInactive == true && !draft.isInactive) {
+      throw StateError(
+        'Un cierre Ausente no puede convertirse en una revisión ordinaria.',
+      );
+    }
     final submitted =
         draft.localStatus == RvLocalStatus.submitted &&
         const {'submitted', 'validated'}.contains(draft.remoteStatus);
@@ -177,8 +199,12 @@ class RvDraftRepository {
     }
     await visualRepository.save(
       inspection.copyWith(
-        status: submitted ? InspectionStatus.completed : inspection.status,
-        completedAt: submitted
+        status: submitted || draft.isInactive
+            ? InspectionStatus.completed
+            : inspection.status,
+        completedAt: draft.isInactive
+            ? draft.inactiveClosure!.closedAt
+            : submitted
             ? (draft.lastStatusChangedAt ?? draft.updatedAt)
             : inspection.completedAt,
         updatedAt: draft.updatedAt,
@@ -281,7 +307,7 @@ class RvDraftRepository {
       final confirmed = find(draft.clientInspectionId);
       if (confirmed?.inactiveClosureDraft?.draftId !=
           draft.inactiveClosureDraft?.draftId) {
-        throw StateError('No fue posible confirmar el borrador inactivo.');
+        throw StateError('No fue posible confirmar el borrador de ausencia.');
       }
       operation = operation.advance(JournalStatus.documentsWritten);
       await journal.save(operation);
@@ -304,7 +330,7 @@ class RvDraftRepository {
       throw StateError('No existe la revisión local.');
     }
     if (current.isInactive || current.inactiveClosure != null) {
-      throw StateError('Un cierre inactivo confirmado no puede descartarse.');
+      throw StateError('Un cierre Ausente confirmado no puede descartarse.');
     }
     _validateInactiveDraftOwner(inspection, current, user);
     final references = current.photosFor(noHydrantAtLocationPhotoSlot);
@@ -436,9 +462,7 @@ class RvDraftRepository {
       throw StateError('La revisión ya no admite cambios.');
     }
     if (current.activeFormStep != 0) {
-      throw StateError(
-        'El reporte inactivo sólo está disponible en el paso 1.',
-      );
+      throw StateError('El reporte Ausente sólo está disponible en el paso 1.');
     }
     final owned =
         inspection.createdBy.toLowerCase() == user.id.toLowerCase() ||
@@ -618,6 +642,11 @@ class RvDraftRepository {
     if (references.isEmpty) {
       throw StateError('Captura al menos una fotografía del lugar.');
     }
+    if (references.length > 20) {
+      throw StateError(
+        'El cierre Ausente admite hasta 20 fotografías. Conserva el borrador para revisión.',
+      );
+    }
     final inactiveDraft = current.inactiveClosureDraft;
     if (inactiveDraft == null ||
         inactiveDraft.comment != normalizedComment ||
@@ -718,7 +747,7 @@ class RvDraftRepository {
     final active = visualRepository.activeForHydrant(current.hydrantId);
     if (confirmed?.isInactive != true ||
         active?.id.toLowerCase() == clientInspectionId.toLowerCase()) {
-      throw StateError('No fue posible confirmar el cierre inactivo local.');
+      throw StateError('No fue posible confirmar el cierre Ausente local.');
     }
     return confirmed!;
   }

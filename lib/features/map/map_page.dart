@@ -81,9 +81,23 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     _seedCachedItems(state);
+    final absenceLabels = <String, List<String>>{};
+    for (final draft in state.rvDraftRepository.all()) {
+      if (draft.isInactive) {
+        absenceLabels
+            .putIfAbsent(draft.hydrantId, () => [])
+            .add(draft.inactiveClosure!.statusLabel);
+      }
+    }
+    bool matches(Hydrant hydrant, HydrantMapFilter filter) =>
+        hydrantMatchesMapFilter(
+          hydrant,
+          filter,
+          hasAbsentReview: absenceLabels.containsKey(hydrant.id),
+        );
     final allItems = _visibleItems.values.toList(growable: false);
     final items = allItems
-        .where((item) => hydrantMatchesMapFilter(item.hydrant, _filter))
+        .where((item) => matches(item.hydrant, _filter))
         .toList(growable: false);
     final selected = _selection.selectedFrom(items);
     final withoutCoordinates = state.catalogHydrants.length - allItems.length;
@@ -119,7 +133,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
                       !allItems.any(
                         (item) =>
                             item.id == selectedId &&
-                            hydrantMatchesMapFilter(item.hydrant, filter),
+                            matches(item.hydrant, filter),
                       )) {
                     _selection.clear();
                   }
@@ -162,6 +176,8 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
                               width: 48,
                               height: 48,
                               child: _HydrantMarker(
+                                absenceLabel: absenceLabels[item.hydrant.id]
+                                    ?.join('; '),
                                 item: item,
                                 selected: item.id == selected?.id,
                                 onTap: () => _selectHydrant(item),
@@ -270,6 +286,8 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
                     right: 12,
                     bottom: 12,
                     child: _HydrantSheet(
+                      absenceLabels:
+                          absenceLabels[selected.hydrant.id] ?? const [],
                       hydrant: selected.hydrant,
                       hasMine: state.hydrants.any(
                         (item) => item.id == selected.id,
@@ -563,11 +581,13 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
 
 class _HydrantMarker extends StatelessWidget {
   const _HydrantMarker({
+    this.absenceLabel,
     required this.item,
     required this.selected,
     required this.onTap,
   });
 
+  final String? absenceLabel;
   final HydrantMapItem item;
   final bool selected;
   final VoidCallback onTap;
@@ -575,7 +595,7 @@ class _HydrantMarker extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Semantics(
     label:
-        'Cuenta ${item.hydrant.code}, '
+        'Cuenta ${item.hydrant.code}, ${absenceLabel == null ? '' : '$absenceLabel, '}'
         '${_MapPageState._completed(item.hydrant) ? 'RV terminada' : 'RV pendiente'}',
     button: true,
     selected: selected,
@@ -615,6 +635,7 @@ enum HydrantMapFilter {
   reviewed,
   conflict,
   inactive,
+  absent,
 }
 
 @visibleForTesting
@@ -656,9 +677,14 @@ HydrantMapCategory hydrantMapCategory(Hydrant hydrant) {
 }
 
 @visibleForTesting
-bool hydrantMatchesMapFilter(Hydrant hydrant, HydrantMapFilter filter) =>
-    filter == HydrantMapFilter.all ||
-    hydrantMapCategory(hydrant).name == filter.name;
+bool hydrantMatchesMapFilter(
+  Hydrant hydrant,
+  HydrantMapFilter filter, {
+  bool hasAbsentReview = false,
+}) => filter == HydrantMapFilter.absent
+    ? hasAbsentReview
+    : filter == HydrantMapFilter.all ||
+          hydrantMapCategory(hydrant).name == filter.name;
 
 class _CurrentLocationMarker extends StatelessWidget {
   const _CurrentLocationMarker();
@@ -758,7 +784,12 @@ class _MyLocationMapButton extends StatelessWidget {
 }
 
 class _HydrantSheet extends StatelessWidget {
-  const _HydrantSheet({required this.hydrant, required this.hasMine});
+  const _HydrantSheet({
+    required this.hydrant,
+    required this.hasMine,
+    this.absenceLabels = const [],
+  });
+  final List<String> absenceLabels;
   final Hydrant hydrant;
   final bool hasMine;
 
@@ -771,6 +802,7 @@ class _HydrantSheet extends StatelessWidget {
           'Cuenta ${hydrant.code}',
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
+        for (final label in absenceLabels) Text(label),
         if (hydrant.lastStatusChangedAt != null)
           Text(
             DateFormat(
@@ -821,10 +853,11 @@ class _MapFilterGrid extends StatelessWidget {
       HydrantMapFilter.localWork: 'Trabajo local',
       HydrantMapFilter.reviewed: 'Revisado',
       HydrantMapFilter.conflict: 'Conflicto',
-      HydrantMapFilter.inactive: 'Inactivo',
+      HydrantMapFilter.inactive: 'Hidrante inactivo',
+      HydrantMapFilter.absent: 'Ausente',
     };
     return SizedBox(
-      height: 86,
+      height: 132,
       child: GridView.count(
         physics: const NeverScrollableScrollPhysics(),
         crossAxisCount: 3,
@@ -882,6 +915,7 @@ class _MapFilterGrid extends StatelessWidget {
     HydrantMapFilter.reviewed => AppColors.green,
     HydrantMapFilter.conflict => AppColors.red,
     HydrantMapFilter.inactive => Colors.grey,
+    HydrantMapFilter.absent => AppColors.orange,
     HydrantMapFilter.all => Colors.transparent,
   };
 }

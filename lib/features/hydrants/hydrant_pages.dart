@@ -664,7 +664,7 @@ class HydrantDetailPage extends StatelessWidget {
                                 ),
                           title: Text(
                             inactive
-                                ? 'RV · Inactivo'
+                                ? 'RV · Ausente'
                                 : 'RV · ${report.revisionNumber == 0 ? 'Original' : 'Revisión ${report.revisionNumber}'}',
                           ),
                           subtitle: Text(
