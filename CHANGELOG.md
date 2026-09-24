@@ -2,6 +2,13 @@
 
 Todos los cambios notables de **DIAGNOSTICO HIDRANTES** se documentan aquí.
 
+## [1.0.18+118] - 2026-09-24
+
+- Incorpora la sincronización del cierre «Ausente» (`inactive`) con detección de soporte API, evidencia dedicada y recibos persistidos antes de confirmar.
+- Recupera cierres offline e históricos con la misma identidad; conserva coordenadas, fechas, comentarios, fotografías y hashes originales.
+- Aísla usuarios y sincronizadores concurrentes; distingue conflictos de identidad, errores de evidencia y fallos transitorios sin utilizar el envío ordinario.
+- Actualiza formularios, historial, resumen, mapa, accesibilidad y exportaciones con la etiqueta «Ausente», separada de la desactivación administrativa del hidrante.
+
 ## [1.0.17+117] - 2026-08-31
 
 - Restaura la presentación operativa aprobada de RV, incluido el dashboard de seis estados en disposición 3 × 2, sus textos, colores y acciones de Inicio.
